@@ -1,0 +1,162 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { FieldService } from '../src/service.js';
+import { createApp } from '../src/api.js';
+import { sceneSvg } from '../src/drawing.js';
+import { TaskRunner, type AgentDriver } from '../src/runner.js';
+import type { TaskSnapshot } from '../src/models.js';
+import { AppError } from '../src/models.js';
+
+const directories:string[]=[],services:FieldService[]=[];
+function setup(){const dir=mkdtempSync(join(tmpdir(),'field-test-'));directories.push(dir);const service=new FieldService(dir);services.push(service);return service;}
+afterEach(()=>{for(const service of services.splice(0))if(service.store.db.open)service.store.close();for(const dir of directories.splice(0))rmSync(dir,{recursive:true,force:true});});
+const token='integration-test-token-only';
+const json=(body:unknown,key?:string)=>({method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{})},body:JSON.stringify(body)});
+
+describe('durable deterministic workflow',()=>{
+  it.each(['.','..','../outside'])('rejects a task ID that could escape its Pi directory: %s',id=>{
+    const s=setup();expect(()=>s.createTask({id})).toThrow('IDの形式');
+  });
+  it('restarts with an open request; a repeated answer is idempotent; unknown becomes pass only after confirmed evidence',async()=>{
+    let s=setup();const t=s.createTask({id:'resume'});await s.replay(t.id,'missing');
+    expect(s.getTask(t.id).validation?.rule.status).toBe('unknown');
+    const req=s.requestEvidence(t.id,{kind:'capture',reason:'重力基準を含めて撮影',fields:['orientation','verticalReference']});
+    const dir=s.dataDir;s.store.close();s=new FieldService(dir);services.push(s);
+    expect(s.getTask(t.id).requests[0].status).toBe('open');
+    await s.replay(t.id,'normal');
+    const answer={id:'retry',requestId:req.id,observationIds:['normal-initial']};
+    const first=s.answer(t.id,answer);s.answer(t.id,answer);
+    expect(s.getTask(t.id).revision).toBe(first.revision);
+    expect(s.getTask(t.id).requests[0].status).toBe('answered');
+    const artifact=s.prepareArtifact(t.id);
+    expect(artifact.validation.rule.status).toBe('pass');expect(artifact.synthetic).toBe(true);
+    expect(artifact.validation.taskRevision).toBe(first.revision);
+    expect(artifact.adoptedRules).toHaveLength(1);
+  });
+  it('matching incorrect drawings still fail and final artifacts retain that failure',async()=>{
+    const s=setup(),t=s.createTask();await s.replay(t.id,'matching_wrong');
+    const artifact=s.prepareArtifact(t.id);
+    expect(artifact.validation.comparison.status).toBe('match');expect(artifact.validation.rule.status).toBe('fail');
+    expect(artifact.unresolved).toContain('TY3231取付方向の不適合は未解消');
+    expect(s.getTask(t.id).state).toBe('review_ready');
+  });
+  it('never reuses the artifact or result version after confirmation is removed',async()=>{
+    const s=setup(),t=s.createTask();await s.replay(t.id,'normal');const artifact=s.prepareArtifact(t.id);
+    const before=s.getTask(t.id);
+    const after=s.reviewFacts(t.id,{baseRevision:before.revision,facts:{orientation:{value:null,confirmed:false,evidenceIds:[],source:'manual'}}});
+    expect(after.artifact).toBeNull();expect(after.validation?.rule.status).toBe('unknown');
+    expect(after.validation?.taskRevision).toBeGreaterThan(artifact.taskRevision);
+    expect(()=>s.prepareArtifact(t.id)).toThrow('未確認項目');
+    expect(()=>s.reviewFacts(t.id,{baseRevision:before.revision,facts:{}})).toThrow('更新');
+  });
+  it('invalidates cached results from an older adopted rule on restart',async()=>{
+    let s=setup();const t=s.createTask();await s.replay(t.id,'normal');const artifact=s.prepareArtifact(t.id);
+    const old=s.getTask(t.id);old.validation!.rule.versions.ruleVersion='old-version';s.store.save(old);
+    const dir=s.dataDir;s.store.close();s=new FieldService(dir);services.push(s);
+    const current=s.getTask(t.id);expect(current.artifact).toBeNull();expect(current.revision).toBeGreaterThan(artifact.taskRevision);
+    expect(current.validation?.rule.versions.ruleVersion).toBe('1');expect(current.validation?.taskRevision).toBe(current.revision);
+  });
+  it('keeps unknown in a completed report when a missing input is explicitly unavailable',async()=>{
+    const s=setup(),t=s.createTask();await s.replay(t.id,'missing');
+    const req=s.requestEvidence(t.id,{kind:'capture',reason:'取付方向と重力の根拠',fields:['orientation','verticalReference']});
+    s.answer(t.id,{id:'no-access',requestId:req.id,observationIds:[],unavailableReason:'天井内にアクセスできない'});
+    const report=s.prepareArtifact(t.id);
+    expect(report.validation.rule.status).toBe('unknown');expect(report.unresolved).toContain('天井内にアクセスできない');
+  });
+  it('model candidates cannot confirm themselves or overwrite manual confirmation',async()=>{
+    const s=setup(),t=s.createTask();await s.replay(t.id,'missing');
+    s.proposeFacts(t.id,{id:'model-proposal',targetId:'H1',reason:'画面で下を向いているように見える',facts:{orientation:{value:'pendent',confirmed:true,source:'manual',evidenceIds:['missing-initial']}}});
+    let current=s.getTask(t.id);expect(current.facts.orientation.confirmed).toBe(false);expect(current.validation?.rule.status).toBe('unknown');
+    await s.replay(t.id,'nonconforming');
+    s.proposeFacts(t.id,{id:'second-proposal',targetId:'H1',reason:'カタログはpendent',facts:{orientation:{value:'pendent',confirmed:true,source:'fixture',evidenceIds:['nonconforming-initial']}}});
+    current=s.getTask(t.id);expect(current.facts.orientation.value).toBe('upright');expect(current.validation?.rule.status).toBe('fail');
+  });
+  it('rejects evidence from another target and measurements with malformed input',async()=>{
+    const s=setup(),t=s.createTask();await s.addObservation(t.id,{id:'another',targetId:'H2',capturedAt:new Date().toISOString(),source:'fixture',synthetic:true},Buffer.from(sceneSvg('pendent')));
+    expect(()=>s.reviewFacts(t.id,{baseRevision:s.getTask(t.id).revision,facts:{model:{value:'TY3231',confirmed:true,source:'manual',evidenceIds:['another']}}})).toThrow('同じ対象');
+    expect(()=>s.addMeasurement(t.id,{} as never)).toThrow('形式');
+  });
+  it('replay retransmission does not duplicate evidence or mutate versions',async()=>{
+    const s=setup(),t=s.createTask();await s.replay(t.id,'normal');const first=s.getTask(t.id);await s.replay(t.id,'normal');
+    expect(s.getTask(t.id).revision).toBe(first.revision);expect(s.getTask(t.id).observations).toHaveLength(1);
+  });
+  it('plan updates expire requests and regenerate comparison independently',async()=>{
+    const s=setup(),t=s.createTask();await s.replay(t.id,'normal');
+    const req=s.requestEvidence(t.id,{kind:'capture',reason:'確認',fields:['orientation']});
+    s.updatePlan(t.id,'upright',s.getTask(t.id).revision);
+    expect(s.getTask(t.id).requests[0].status).toBe('superseded');
+    expect(s.getTask(t.id).validation?.comparison.status).toBe('different');
+    expect(s.getTask(t.id).validation?.rule.status).toBe('pass');
+    expect(()=>s.answer(t.id,{id:'late',requestId:req.id,observationIds:['normal-initial']})).toThrow('古い図面');
+  });
+  it('bounds crops and separates unverified obstruction findings from rule compliance',async()=>{
+    const s=setup(),t=s.createTask();await s.replay(t.id,'obstacle');
+    await expect(s.cropImage(t.id,'obstacle-initial',{x:9999,y:0,width:1,height:1})).rejects.toThrow('画像外');
+    expect((await s.cropImage(t.id,'obstacle-initial',{x:0,y:0,width:10,height:10})).mimeType).toBe('image/jpeg');
+    s.recordFinding(t.id,{id:'obstruction',targetId:'H1',description:'下側に障害物候補。散水障害の判定は未実施。',evidenceIds:['obstacle-initial']});
+    const artifact=s.prepareArtifact(t.id);expect(artifact.validation.rule.status).toBe('pass');expect(artifact.findings[0].status).toBe('unverified');expect(artifact.unresolved[0]).toContain('障害物候補');
+  });
+  it('cancelled jobs reject late mutations',async()=>{
+    const s=setup(),t=s.createTask();s.cancel(t.id);
+    expect(()=>s.requestEvidence(t.id,{kind:'capture',reason:'late',fields:['orientation']})).toThrow('キャンセル');
+    expect(()=>s.validateTask(t.id)).toThrow('キャンセル');
+    await expect(s.replay(t.id,'normal')).rejects.toThrow('キャンセル');
+  });
+});
+
+describe('same API for web, replay, and camera',()=>{
+  it('saves an answer and its wakeup atomically',async()=>{
+    const s=setup(),t=s.createTask();await s.replay(t.id,'normal');s.setSessionPath(t.id,'test-session');
+    const request=s.requestEvidence(t.id,{kind:'capture',reason:'追加',fields:['orientation']});
+    const runner={enqueue(){throw new AppError(429,'queue full');}} as unknown as TaskRunner;
+    const app=createApp(s,{token,runner});
+    const response=await app.request(`/api/tasks/${t.id}/answers`,json({id:'atomic-answer',requestId:request.id,observationIds:['normal-initial']}));
+    expect(response.status).toBe(429);expect(s.getTask(t.id).requests[0].status).toBe('open');
+    expect(s.store.db.prepare('SELECT 1 FROM operations WHERE task_id=? AND id=?').get(t.id,'answer:atomic-answer')).toBeUndefined();
+  });
+  it('authenticates, handles multipart retries, serves images, and rejects changed duplicate payloads',async()=>{
+    const s=setup(),app=createApp(s,{token});
+    expect((await app.request('/api/tasks')).status).toBe(401);
+    const created=await app.request('/api/tasks',json({title:'HTTP replay'},'http-task'));
+    expect(created.status).toBe(201);const t=await created.json() as TaskSnapshot;
+    const make=()=>{const form=new FormData();form.set('metadata',JSON.stringify({id:'http-image',targetId:'H1',capturedAt:'2026-09-26T12:00:00Z',source:'fixture',synthetic:true}));form.set('image',new File([sceneSvg('pendent')],'scene.svg',{type:'image/svg+xml'}));return form;};
+    const send=()=>app.request(`/api/tasks/${t.id}/observations`,{method:'POST',headers:{Authorization:`Bearer ${token}`},body:make()});
+    const [first,retry]=await Promise.all([send(),send()]);expect(first.status).toBe(201);expect(retry.status).toBe(201);expect(s.getTask(t.id).observations).toHaveLength(1);
+    const asset=await app.request(`/api/tasks/${t.id}/assets/http-image.jpg`,{headers:{Authorization:`Bearer ${token}`}});
+    expect(asset.headers.get('content-type')).toBe('image/jpeg');expect((await asset.arrayBuffer()).byteLength).toBeGreaterThan(100);
+    expect((await app.request('/api/tasks',json({title:'different'},'http-task'))).status).toBe(409);
+    expect((await app.request(`/api/tasks/${t.id}/measurements`,json({}))).status).toBe(400);
+    expect((await app.request(`/api/tasks/${t.id}/artifact`,{headers:{Authorization:`Bearer ${token}`}})).status).toBe(409);
+  });
+});
+
+describe('serialized recoverable runner',()=>{
+  it('does not lose a job queued between draining and runner cleanup',async()=>{
+    const s=setup(),t=s.createTask();const started:string[]=[];
+    let release!:()=>void;const paused=new Promise<void>(resolve=>release=resolve);
+    let firstStarted!:()=>void;const ready=new Promise<void>(resolve=>firstStarted=resolve);
+    const runner=new TaskRunner(s,{async run(_id,message){started.push(message);if(message==='first'){firstStarted();await paused;}}});
+    runner.enqueue(t.id,'first','race-first');await ready;release();
+    queueMicrotask(()=>queueMicrotask(()=>runner.enqueue(t.id,'second','race-second')));
+    await runner.idle(t.id);expect(started).toEqual(['first','second']);await runner.close();
+  });
+  it('runs one turn at a time and deduplicates durable run IDs',async()=>{
+    const s=setup(),t=s.createTask();let running=0,max=0,calls=0;
+    const driver:AgentDriver={async run(){running++;calls++;max=Math.max(max,running);await new Promise(resolve=>setTimeout(resolve,10));running--;}};
+    const runner=new TaskRunner(s,driver);runner.enqueue(t.id,'first','job-one');runner.enqueue(t.id,'second','job-two');runner.enqueue(t.id,'first','job-one');
+    await runner.idle(t.id);expect(calls).toBe(2);expect(max).toBe(1);expect(s.getTask(t.id).run.status).toBe('idle');await runner.close();
+  });
+  it('recovers an interrupted persisted job after server restart',async()=>{
+    let s=setup();const t=s.createTask();s.store.db.prepare("INSERT INTO jobs(id,task_id,message,status,created_at) VALUES(?,?,?,'running',?)").run('interrupted',t.id,'resume',new Date().toISOString());
+    const dir=s.dataDir;s.store.close();s=new FieldService(dir);services.push(s);let resumed=false;
+    const runner=new TaskRunner(s,{async run(){resumed=true;}});runner.recover();await runner.idle(t.id);
+    expect(resumed).toBe(true);expect((s.store.db.prepare('SELECT status FROM jobs WHERE id=?').get('interrupted') as {status:string}).status).toBe('completed');await runner.close();
+  });
+  it('abort prevents late driver actions after cancel',async()=>{
+    const s=setup(),t=s.createTask();let started!:()=>void;const ready=new Promise<void>(r=>started=r);
+    const runner=new TaskRunner(s,{async run(_id,_message,signal){started();await new Promise<void>((_,reject)=>signal.addEventListener('abort',()=>reject(new Error('abort')),{once:true}));}});
+    runner.enqueue(t.id);await ready;runner.cancel(t.id);await runner.idle(t.id);expect(s.getTask(t.id).state).toBe('cancelled');expect(s.getTask(t.id).run.status).toBe('idle');await runner.close();
+  });
+});

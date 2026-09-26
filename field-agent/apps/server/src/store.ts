@@ -1,0 +1,66 @@
+import Database from 'better-sqlite3';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { AppError, type TaskSnapshot } from './models.js';
+
+export function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k,v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`;
+  return JSON.stringify(value) ?? 'null';
+}
+export const digest = (value: unknown) => createHash('sha256').update(canonical(value)).digest('hex');
+
+export class Store {
+  readonly db: Database.Database;
+  constructor(readonly dir: string) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    this.db = new Database(join(dir, 'field.sqlite'));
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('foreign_keys = ON');
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS operations (task_id TEXT NOT NULL, id TEXT NOT NULL, hash TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(task_id,id));
+      CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS assets (task_id TEXT NOT NULL, id TEXT NOT NULL, path TEXT NOT NULL, mime TEXT NOT NULL, PRIMARY KEY(task_id,id));
+      CREATE TABLE IF NOT EXISTS sessions (task_id TEXT PRIMARY KEY, path TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, message TEXT NOT NULL, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL);
+      PRAGMA user_version = 1;
+    `);
+    this.db.prepare("UPDATE jobs SET status = 'pending' WHERE status = 'running'").run();
+    for (const task of this.list()) {
+      if (task.run.status === 'running') { task.run = {status:'queued'}; this.save(task); }
+    }
+  }
+  get(id: string): TaskSnapshot {
+    const row = this.db.prepare('SELECT data FROM tasks WHERE id = ?').get(id) as {data:string} | undefined;
+    if (!row) throw new AppError(404, '仕事が見つかりません');
+    return JSON.parse(row.data);
+  }
+  list(): TaskSnapshot[] {
+    return (this.db.prepare('SELECT data FROM tasks ORDER BY rowid DESC').all() as {data:string}[]).map(r => JSON.parse(r.data));
+  }
+  save(task: TaskSnapshot) {
+    this.db.prepare('INSERT INTO tasks(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(task.id, JSON.stringify(task));
+  }
+  event(taskId: string, type: string, data: unknown) {
+    this.db.prepare('INSERT INTO events(task_id,type,data,created_at) VALUES(?,?,?,?)').run(taskId,type,JSON.stringify(data),new Date().toISOString());
+  }
+  events(taskId: string, after: number) {
+    return (this.db.prepare('SELECT * FROM events WHERE task_id=? AND id>? ORDER BY id LIMIT 100').all(taskId,after) as {id:number;type:string;data:string;created_at:string}[]).map(e=>({...e,data:JSON.parse(e.data)}));
+  }
+  operation<T>(taskId: string, id: string, input: unknown, execute: () => T): T {
+    return this.db.transaction(() => {
+      const hash=digest(input);
+      const prior=this.db.prepare('SELECT hash,result FROM operations WHERE task_id=? AND id=?').get(taskId,id) as {hash:string;result:string}|undefined;
+      if (prior) {
+        if(prior.hash!==hash) throw new AppError(409,'同じ操作IDに異なる内容が送られました');
+        return JSON.parse(prior.result) as T;
+      }
+      const result=execute();
+      this.db.prepare('INSERT INTO operations(task_id,id,hash,result) VALUES(?,?,?,?)').run(taskId,id,hash,JSON.stringify(result));
+      return result;
+    })();
+  }
+  close() { this.db.close(); }
+}

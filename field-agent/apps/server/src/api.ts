@@ -1,0 +1,128 @@
+import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { streamSSE } from 'hono/streaming';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { timingSafeEqual, randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import { RULE } from '@field-agent/core';
+import { AppError, type Observation } from './models.js';
+import { FieldService, safeId } from './service.js';
+import type { TaskRunner } from './runner.js';
+
+/** Serialize asynchronous upload/replay operations for each task, including retry races. */
+class TaskCommands {
+  private tails=new Map<string,Promise<unknown>>();
+  async run<T>(id:string,fn:()=>T|Promise<T>):Promise<T> {
+    const prior=this.tails.get(id)??Promise.resolve();
+    const next=prior.catch(()=>{}).then(fn);this.tails.set(id,next);
+    try {return await next;} finally {if(this.tails.get(id)===next)this.tails.delete(id);}
+  }
+}
+export function createApp(service:FieldService,options:{token:string;runner?:TaskRunner;webDir?:string}) {
+  if(options.token.length<16) throw new Error('Application token must contain at least 16 characters');
+  const app=new Hono(), commands=new TaskCommands();
+  app.use('*',async(c,next)=>{await next();c.header('X-Content-Type-Options','nosniff');c.header('Referrer-Policy','no-referrer');});
+  app.use('/api/*',async(c,next)=>{
+    const actual=Buffer.from(c.req.header('Authorization')??''),expected=Buffer.from(`Bearer ${options.token}`);
+    if(actual.length!==expected.length||!timingSafeEqual(actual,expected))return c.json({error:'接続トークンが必要です'},401);
+    c.header('Cache-Control','no-store');await next();
+  });
+  app.use('/api/*',bodyLimit({maxSize:21*1024*1024,onError:c=>c.json({error:'送信データが大きすぎます'},413)}));
+  const op=(header:string|undefined)=>safeId(header??randomUUID());
+  app.get('/api/health',c=>c.json({ok:true,piEnabled:!!options.runner,ruleId:RULE.id}));
+  app.get('/api/rules',c=>c.json([RULE]));
+  app.get('/api/tasks',c=>c.json(service.listTasks()));
+  app.post('/api/tasks',async c=>{
+    const body=await c.req.json();
+    if(!body||typeof body!=='object'||Array.isArray(body))throw new AppError(400,'仕事の形式が不正です');
+    const input={id:body.id??op(c.req.header('Idempotency-Key')),title:body.title,planOrientation:body.planOrientation};
+    return c.json(service.createTask(input),201);
+  });
+  app.get('/api/tasks/:id',c=>c.json(service.getTask(c.req.param('id'))));
+  app.post('/api/tasks/:id/plan',async c=>{
+    const input=await c.req.json(),id=c.req.param('id');
+    return c.json(await commands.run(id,()=>service.updatePlan(id,input.orientation,input.baseRevision,op(c.req.header('Idempotency-Key')))));
+  });
+  app.post('/api/tasks/:id/observations',async c=>{
+    const body=await c.req.parseBody(),id=c.req.param('id');
+    if(typeof body.metadata!=='string'||!body.image||typeof body.image==='string'||Array.isArray(body.image))throw new AppError(400,'metadataとimageが必要です');
+    const raw=JSON.parse(body.metadata);
+    if(!raw||typeof raw!=='object')throw new AppError(400,'metadataが不正です');
+    const metadata:Omit<Observation,'assetId'|'originalAssetId'|'digest'|'width'|'height'>={id:raw.id,targetId:raw.targetId,capturedAt:raw.capturedAt,source:raw.source,synthetic:raw.synthetic,...(raw.spatial?{spatial:raw.spatial}:{})};
+    const bytes=Buffer.from(await body.image.arrayBuffer());
+    return c.json(await commands.run(id,()=>service.addObservation(id,metadata,bytes)),201);
+  });
+  app.get('/api/tasks/:id/assets/:assetId',async c=>{
+    const a=await service.asset(c.req.param('id'),c.req.param('assetId'));
+    c.header('Content-Type',a.mimeType);
+    if(a.mimeType==='application/octet-stream')c.header('Content-Disposition','attachment');
+    return c.body(new Uint8Array(a.bytes));
+  });
+  app.post('/api/tasks/:id/facts',async c=>{
+    const input=await c.req.json(),id=c.req.param('id');
+    return c.json(await commands.run(id,()=>service.reviewFacts(id,input,op(c.req.header('Idempotency-Key')))));
+  });
+  app.post('/api/tasks/:id/measurements',async c=>{
+    const input=await c.req.json(),id=c.req.param('id');
+    return c.json(await commands.run(id,()=>service.addMeasurement(id,input)),201);
+  });
+  app.post('/api/tasks/:id/requests',async c=>{
+    const input=await c.req.json(),id=c.req.param('id');
+    return c.json(await commands.run(id,()=>service.requestEvidence(id,input,op(c.req.header('Idempotency-Key')))),201);
+  });
+  app.post('/api/tasks/:id/answers',async c=>{
+    const input=await c.req.json(),id=c.req.param('id');
+    const result=await commands.run(id,()=>service.store.db.transaction(()=>{
+      const answer=service.answer(id,input);
+      // Commit the answer and its next job together. A crash cannot lose the wakeup.
+      if(options.runner&&service.getSessionPath(id)) options.runner.enqueue(id,'追加要求への回答が届きました。現行の仕事を再読し、再検証してください。',`answer-${input.id}`);
+      return answer;
+    })());
+    return c.json(result);
+  });
+  app.post('/api/tasks/:id/validate',async c=>c.json(await commands.run(c.req.param('id'),()=>service.validateTask(c.req.param('id')))));
+  app.post('/api/tasks/:id/artifact',async c=>c.json(await commands.run(c.req.param('id'),()=>service.prepareArtifact(c.req.param('id'),op(c.req.header('Idempotency-Key'))))));
+  app.get('/api/tasks/:id/artifact',c=>{
+    const task=service.getTask(c.req.param('id'));
+    if(!task.artifact||task.artifact.taskRevision!==task.revision)throw new AppError(409,'現行版の資料はまだありません');
+    return c.json(task.artifact);
+  });
+  app.post('/api/tasks/:id/replay',async c=>{
+    const input=await c.req.json(),id=c.req.param('id');
+    const result=await commands.run(id,()=>service.replay(id,input.scenario,input.phase??'initial',()=>{
+      if(options.runner&&service.getSessionPath(id)) options.runner.enqueue(id,'合成の追加記録が届きました。現行版を検証してください。',`replay-${id}-${input.scenario}-answer`);
+    }));
+    return c.json(result);
+  });
+  app.post('/api/tasks/:id/run',async c=>{
+    if(!options.runner)throw new AppError(503,'Piはこのサーバーでは無効です');
+    const input=await c.req.json();return c.json(options.runner.enqueue(c.req.param('id'),input.message,op(c.req.header('Idempotency-Key'))),202);
+  });
+  app.post('/api/tasks/:id/cancel',c=>c.json(options.runner?options.runner.cancel(c.req.param('id')):service.cancel(c.req.param('id'))));
+  app.get('/api/tasks/:id/events',c=>{
+    const id=c.req.param('id');service.getTask(id);
+    let cursor=Number(c.req.header('Last-Event-ID')??c.req.query('after')??0);
+    if(!Number.isSafeInteger(cursor)||cursor<0)throw new AppError(400,'イベント番号が不正です');
+    return streamSSE(c,async stream=>{
+      while(!stream.aborted) {
+        const events=service.store.events(id,cursor);
+        for(const event of events) {await stream.writeSSE({id:String(event.id),event:event.type,data:JSON.stringify(event.data)});cursor=event.id;}
+        if(events.length===0)await stream.writeSSE({event:'heartbeat',data:'{}'});
+        await stream.sleep(1000);
+      }
+    });
+  });
+  app.all('/api/*',c=>c.json({error:'APIが見つかりません'},404));
+  app.onError((error,c)=>{
+    if(error instanceof AppError)return c.json({error:error.message},error.status as ContentfulStatusCode);
+    if(error instanceof SyntaxError||error instanceof TypeError)return c.json({error:'入力の形式を確認してください'},400);
+    return c.json({error:'処理できませんでした。保存済みの記録は取得し直せます。'},500);
+  });
+  if(options.webDir&&existsSync(join(options.webDir,'index.html'))) {
+    app.use('/*',serveStatic({root:options.webDir}));
+    app.get('*',serveStatic({path:join(options.webDir,'index.html')}));
+  }else app.get('/',c=>c.text('Field Agent API is running. Start the web client with pnpm dev or run pnpm build.'));
+  return app;
+}
