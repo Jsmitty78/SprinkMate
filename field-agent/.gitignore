@@ -4,9 +4,4 @@ dist/
 .env
 *.local
 .DS_Store
-ios/build/
-ios/DerivedData/
-ios/.build/
-ios/*.log
 evaluation/private/
-**/xcuserdata/

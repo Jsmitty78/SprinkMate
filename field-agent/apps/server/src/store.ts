@@ -11,6 +11,14 @@ export function canonical(value: unknown): string {
 }
 export const digest = (value: unknown) => createHash('sha256').update(canonical(value)).digest('hex');
 
+// Read old tasks without exposing the removed runtime's transient state.
+// Existing session/job records stay in the database; they are never resumed.
+function parseTask(data: string): TaskSnapshot {
+  const task = JSON.parse(data);
+  delete task.run;
+  return task;
+}
+
 export class Store {
   readonly db: Database.Database;
   constructor(readonly dir: string) {
@@ -23,22 +31,16 @@ export class Store {
       CREATE TABLE IF NOT EXISTS operations (task_id TEXT NOT NULL, id TEXT NOT NULL, hash TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(task_id,id));
       CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS assets (task_id TEXT NOT NULL, id TEXT NOT NULL, path TEXT NOT NULL, mime TEXT NOT NULL, PRIMARY KEY(task_id,id));
-      CREATE TABLE IF NOT EXISTS sessions (task_id TEXT PRIMARY KEY, path TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, message TEXT NOT NULL, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL);
       PRAGMA user_version = 1;
     `);
-    this.db.prepare("UPDATE jobs SET status = 'pending' WHERE status = 'running'").run();
-    for (const task of this.list()) {
-      if (task.run.status === 'running') { task.run = {status:'queued'}; this.save(task); }
-    }
   }
   get(id: string): TaskSnapshot {
     const row = this.db.prepare('SELECT data FROM tasks WHERE id = ?').get(id) as {data:string} | undefined;
     if (!row) throw new AppError(404, '仕事が見つかりません');
-    return JSON.parse(row.data);
+    return parseTask(row.data);
   }
   list(): TaskSnapshot[] {
-    return (this.db.prepare('SELECT data FROM tasks ORDER BY rowid DESC').all() as {data:string}[]).map(r => JSON.parse(r.data));
+    return (this.db.prepare('SELECT data FROM tasks ORDER BY rowid DESC').all() as {data:string}[]).map(r => parseTask(r.data));
   }
   save(task: TaskSnapshot) {
     this.db.prepare('INSERT INTO tasks(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(task.id, JSON.stringify(task));

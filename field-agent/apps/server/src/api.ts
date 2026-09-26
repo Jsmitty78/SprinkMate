@@ -9,7 +9,6 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { RULE } from '@field-agent/core';
 import { AppError, type Observation } from './models.js';
 import { FieldService, safeId } from './service.js';
-import type { TaskRunner } from './runner.js';
 
 /** Serialize asynchronous upload/replay operations for each task, including retry races. */
 class TaskCommands {
@@ -20,7 +19,7 @@ class TaskCommands {
     try {return await next;} finally {if(this.tails.get(id)===next)this.tails.delete(id);}
   }
 }
-export function createApp(service:FieldService,options:{token:string;runner?:TaskRunner;webDir?:string}) {
+export function createApp(service:FieldService,options:{token:string;webDir?:string}) {
   if(options.token.length<16) throw new Error('Application token must contain at least 16 characters');
   const app=new Hono(), commands=new TaskCommands();
   app.use('*',async(c,next)=>{await next();c.header('X-Content-Type-Options','nosniff');c.header('Referrer-Policy','no-referrer');});
@@ -31,7 +30,7 @@ export function createApp(service:FieldService,options:{token:string;runner?:Tas
   });
   app.use('/api/*',bodyLimit({maxSize:21*1024*1024,onError:c=>c.json({error:'送信データが大きすぎます'},413)}));
   const op=(header:string|undefined)=>safeId(header??randomUUID());
-  app.get('/api/health',c=>c.json({ok:true,piEnabled:!!options.runner,ruleId:RULE.id}));
+  app.get('/api/health',c=>c.json({ok:true,ruleId:RULE.id}));
   app.get('/api/rules',c=>c.json([RULE]));
   app.get('/api/tasks',c=>c.json(service.listTasks()));
   app.post('/api/tasks',async c=>{
@@ -74,12 +73,7 @@ export function createApp(service:FieldService,options:{token:string;runner?:Tas
   });
   app.post('/api/tasks/:id/answers',async c=>{
     const input=await c.req.json(),id=c.req.param('id');
-    const result=await commands.run(id,()=>service.store.db.transaction(()=>{
-      const answer=service.answer(id,input);
-      // Commit the answer and its next job together. A crash cannot lose the wakeup.
-      if(options.runner&&service.getSessionPath(id)) options.runner.enqueue(id,'追加要求への回答が届きました。現行の仕事を再読し、再検証してください。',`answer-${input.id}`);
-      return answer;
-    })());
+    const result=await commands.run(id,()=>service.answer(id,input));
     return c.json(result);
   });
   app.post('/api/tasks/:id/validate',async c=>c.json(await commands.run(c.req.param('id'),()=>service.validateTask(c.req.param('id')))));
@@ -91,16 +85,10 @@ export function createApp(service:FieldService,options:{token:string;runner?:Tas
   });
   app.post('/api/tasks/:id/replay',async c=>{
     const input=await c.req.json(),id=c.req.param('id');
-    const result=await commands.run(id,()=>service.replay(id,input.scenario,input.phase??'initial',()=>{
-      if(options.runner&&service.getSessionPath(id)) options.runner.enqueue(id,'合成の追加記録が届きました。現行版を検証してください。',`replay-${id}-${input.scenario}-answer`);
-    }));
+    const result=await commands.run(id,()=>service.replay(id,input.scenario,input.phase??'initial'));
     return c.json(result);
   });
-  app.post('/api/tasks/:id/run',async c=>{
-    if(!options.runner)throw new AppError(503,'Piはこのサーバーでは無効です');
-    const input=await c.req.json();return c.json(options.runner.enqueue(c.req.param('id'),input.message,op(c.req.header('Idempotency-Key'))),202);
-  });
-  app.post('/api/tasks/:id/cancel',c=>c.json(options.runner?options.runner.cancel(c.req.param('id')):service.cancel(c.req.param('id'))));
+  app.post('/api/tasks/:id/cancel',c=>c.json(service.cancel(c.req.param('id'))));
   app.get('/api/tasks/:id/events',c=>{
     const id=c.req.param('id');service.getTask(id);
     let cursor=Number(c.req.header('Last-Event-ID')??c.req.query('after')??0);

@@ -42,7 +42,6 @@ export const labels: Record<string, string> = {
   capture: "追加撮影", measurement: "追加計測", confirmation: "確認依頼",
   open: "回答待ち", answered: "回答済み", unavailable: "取得不能", superseded: "旧版・失効",
   active: "確認中", waiting: "追加情報待ち", review_ready: "資料作成済み", cancelled: "中止済み",
-  idle: "待機中", queued: "実行待ち", running: "実行中", failed: "実行失敗",
 };
 export function label(value: string | null | undefined): string { return value ? labels[value] ?? value : "未入力"; }
 export function fieldLabel(path: string): string {

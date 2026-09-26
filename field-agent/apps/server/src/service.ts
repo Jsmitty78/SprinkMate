@@ -41,7 +41,7 @@ export class FieldService {
     })();
   }
   getTask(id:string) { return this.store.get(safeId(id)); }
-  listTasks() { return this.store.list().map(({id,title,state,revision,updatedAt,run})=>({id,title,state,revision,updatedAt,run})); }
+  listTasks() { return this.store.list().map(({id,title,state,revision,updatedAt})=>({id,title,state,revision,updatedAt})); }
   private active(id:string) { const task=this.getTask(id); if(task.state==='cancelled') throw new AppError(409,'この仕事はキャンセル済みです'); return task; }
   private changed(task:TaskSnapshot,type:string) {
     task.revision++; task.updatedAt=now(); task.validation=null; task.artifact=null;
@@ -55,7 +55,7 @@ export class FieldService {
     if(!['pendent','upright','sideways'].includes(orientation)) throw new AppError(400,'図面方向が不正です');
     return this.store.operation(id,'create',input,()=>{
       const plan={revision:1,targetId:'H1',model:'TY3231',orientation,lengthMeters:2};
-      const task:TaskSnapshot={id,title:requireText(input.title??'配管1区間の現場確認','title'),targetId:'H1',revision:1,createdAt:now(),updatedAt:now(),state:'active',plan:{...plan,svg:planSvg(plan)},facts:emptyFacts(),candidates:[],findings:[],observations:[],measurements:[],requests:[],validation:null,artifact:null,run:{status:'idle'}};
+      const task:TaskSnapshot={id,title:requireText(input.title??'配管1区間の現場確認','title'),targetId:'H1',revision:1,createdAt:now(),updatedAt:now(),state:'active',plan:{...plan,svg:planSvg(plan)},facts:emptyFacts(),candidates:[],findings:[],observations:[],measurements:[],requests:[],validation:null,artifact:null};
       this.store.save(task); this.store.event(id,'created',{revision:1}); return task;
     });
   }
@@ -207,12 +207,9 @@ export class FieldService {
     });
   }
   cancel(id:string) {
-    return this.store.db.transaction(()=>{const t=this.getTask(id);t.state='cancelled';t.run={status:'idle'};this.store.save(t);this.store.db.prepare("UPDATE jobs SET status='cancelled' WHERE task_id=? AND status IN ('pending','running')").run(id);this.store.event(id,'cancelled',{});return t;})();
+    return this.store.db.transaction(()=>{const t=this.getTask(id);t.state='cancelled';this.store.save(t);this.store.event(id,'cancelled',{});return t;})();
   }
-  recordAgentEvent(id:string,event:unknown) { this.active(id);this.store.event(id,'agent',event); }
-  getSessionPath(id:string) { return (this.store.db.prepare('SELECT path FROM sessions WHERE task_id=?').get(id) as {path:string}|undefined)?.path; }
-  setSessionPath(id:string,path:string) { this.store.db.prepare('INSERT INTO sessions(task_id,path) VALUES(?,?) ON CONFLICT(task_id) DO UPDATE SET path=excluded.path').run(id,path); }
-  async replay(id:string,scenario:string,phase:'initial'|'answer'='initial',onAnswered?:()=>void) {
+  async replay(id:string,scenario:string,phase:'initial'|'answer'='initial') {
     const options=['normal','nonconforming','matching_wrong','missing','other_model','uninstalled','obstacle'];
     if(!options.includes(scenario)||!['initial','answer'].includes(phase)) throw new AppError(400,'未知のリプレイケースです');
     const orientation=scenario==='nonconforming'||scenario==='matching_wrong'?'upright':'pendent';
@@ -227,7 +224,6 @@ export class FieldService {
     return this.store.db.transaction(()=>{
       if(phase==='answer') {
         for(const req of this.getTask(id).requests.filter(r=>r.status==='open'&&r.kind!=='measurement')) this.answer(id,{id:`reply-${req.id}`,requestId:req.id,observationIds:[observationId]});
-        onAnswered?.();
       }
       this.validateTask(id);return this.getTask(id);
     })();

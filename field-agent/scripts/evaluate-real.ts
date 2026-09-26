@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-/** Offline evaluation only. Labels are never loaded by the server or Pi. */
+/** Offline evaluation only. Labels are never loaded by the server. */
 interface ImageCase {id:string;synthetic:false;expected:'pendent'|'upright'|'sideways';predicted:'pendent'|'upright'|'sideways'|null}
 interface DistanceCase {id:string;synthetic:false;referenceMeters:number;measuredMeters:number|null;wrongHit:boolean}
 export function evaluateReal(input:{orientationCases:ImageCase[];measurementCases:DistanceCase[]}) {

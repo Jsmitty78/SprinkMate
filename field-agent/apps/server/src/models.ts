@@ -91,7 +91,6 @@ export interface TaskSnapshot {
   requests: EvidenceRequest[];
   validation: ValidationReport | null;
   artifact: Artifact | null;
-  run: { status: 'idle' | 'queued' | 'running' | 'failed'; error?: string };
 }
 export class AppError extends Error {
   constructor(public status: number, message: string) { super(message); }

@@ -1,3 +1,4 @@
+import { RULE } from '@field-agent/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -5,9 +6,7 @@ import { join } from 'node:path';
 import { FieldService } from '../src/service.js';
 import { createApp } from '../src/api.js';
 import { sceneSvg } from '../src/drawing.js';
-import { TaskRunner, type AgentDriver } from '../src/runner.js';
 import type { TaskSnapshot } from '../src/models.js';
-import { AppError } from '../src/models.js';
 
 const directories:string[]=[],services:FieldService[]=[];
 function setup(){const dir=mkdtempSync(join(tmpdir(),'field-test-'));directories.push(dir);const service=new FieldService(dir);services.push(service);return service;}
@@ -16,7 +15,23 @@ const token='integration-test-token-only';
 const json=(body:unknown,key?:string)=>({method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{})},body:JSON.stringify(body)});
 
 describe('durable deterministic workflow',()=>{
-  it.each(['.','..','../outside'])('rejects a task ID that could escape its Pi directory: %s',id=>{
+  it('preserves legacy task evidence without resuming or exposing removed runtime state',async()=>{
+    let s=setup();const t=s.createTask({title:'existing work'});await s.replay(t.id,'normal');
+    const saved={...s.getTask(t.id),run:{status:'running'}};
+    s.store.db.prepare('UPDATE tasks SET data=? WHERE id=?').run(JSON.stringify(saved),t.id);
+    s.store.db.exec("CREATE TABLE jobs (id TEXT PRIMARY KEY, task_id TEXT, status TEXT); CREATE TABLE sessions (task_id TEXT PRIMARY KEY, path TEXT);");
+    s.store.db.prepare('INSERT INTO jobs VALUES(?,?,?)').run('old-run',t.id,'running');
+    s.store.db.prepare('INSERT INTO sessions VALUES(?,?)').run(t.id,'legacy-session');
+    const dir=s.dataDir;s.store.close();s=new FieldService(dir);services.push(s);
+    expect(s.getTask(t.id)).toMatchObject({title:'existing work',observations:saved.observations,facts:saved.facts});
+    expect(s.getTask(t.id)).not.toHaveProperty('run');
+    expect(s.listTasks()[0]).not.toHaveProperty('run');
+    expect(s.store.db.prepare('SELECT status FROM jobs WHERE id=?').get('old-run')).toEqual({status:'running'});
+    expect(s.store.db.prepare('SELECT path FROM sessions WHERE task_id=?').get(t.id)).toEqual({path:'legacy-session'});
+    expect(s.cancel(t.id).state).toBe('cancelled');
+    expect(s.getTask(t.id).observations).toEqual(saved.observations);
+  });
+  it.each(['.','..','../outside'])('rejects a task ID that could escape its task directory: %s',id=>{
     const s=setup();expect(()=>s.createTask({id})).toThrow('IDの形式');
   });
   it('restarts with an open request; a repeated answer is idempotent; unknown becomes pass only after confirmed evidence',async()=>{
@@ -107,14 +122,19 @@ describe('durable deterministic workflow',()=>{
 });
 
 describe('same API for web, replay, and camera',()=>{
-  it('saves an answer and its wakeup atomically',async()=>{
-    const s=setup(),t=s.createTask();await s.replay(t.id,'normal');s.setSessionPath(t.id,'test-session');
+  it('saves and deduplicates an answer without an agent runtime',async()=>{
+    const s=setup(),t=s.createTask();await s.replay(t.id,'normal');
     const request=s.requestEvidence(t.id,{kind:'capture',reason:'追加',fields:['orientation']});
-    const runner={enqueue(){throw new AppError(429,'queue full');}} as unknown as TaskRunner;
-    const app=createApp(s,{token,runner});
-    const response=await app.request(`/api/tasks/${t.id}/answers`,json({id:'atomic-answer',requestId:request.id,observationIds:['normal-initial']}));
-    expect(response.status).toBe(429);expect(s.getTask(t.id).requests[0].status).toBe('open');
-    expect(s.store.db.prepare('SELECT 1 FROM operations WHERE task_id=? AND id=?').get(t.id,'answer:atomic-answer')).toBeUndefined();
+    const app=createApp(s,{token});
+    const input={id:'manual-answer',requestId:request.id,observationIds:['normal-initial']};
+    const response=await app.request(`/api/tasks/${t.id}/answers`,json(input));
+    expect(response.status).toBe(200);expect(s.getTask(t.id).requests[0].status).toBe('answered');
+    const revision=s.getTask(t.id).revision;
+    expect((await app.request(`/api/tasks/${t.id}/answers`,json(input))).status).toBe(200);
+    expect(s.getTask(t.id).revision).toBe(revision);
+    expect((await app.request(`/api/tasks/${t.id}/run`,json({}))).status).toBe(404);
+    const health=await app.request('/api/health',{headers:{Authorization:`Bearer ${token}`}});
+    expect(await health.json()).toEqual({ok:true,ruleId:RULE.id});
   });
   it('authenticates, handles multipart retries, serves images, and rejects changed duplicate payloads',async()=>{
     const s=setup(),app=createApp(s,{token});
@@ -129,34 +149,5 @@ describe('same API for web, replay, and camera',()=>{
     expect((await app.request('/api/tasks',json({title:'different'},'http-task'))).status).toBe(409);
     expect((await app.request(`/api/tasks/${t.id}/measurements`,json({}))).status).toBe(400);
     expect((await app.request(`/api/tasks/${t.id}/artifact`,{headers:{Authorization:`Bearer ${token}`}})).status).toBe(409);
-  });
-});
-
-describe('serialized recoverable runner',()=>{
-  it('does not lose a job queued between draining and runner cleanup',async()=>{
-    const s=setup(),t=s.createTask();const started:string[]=[];
-    let release!:()=>void;const paused=new Promise<void>(resolve=>release=resolve);
-    let firstStarted!:()=>void;const ready=new Promise<void>(resolve=>firstStarted=resolve);
-    const runner=new TaskRunner(s,{async run(_id,message){started.push(message);if(message==='first'){firstStarted();await paused;}}});
-    runner.enqueue(t.id,'first','race-first');await ready;release();
-    queueMicrotask(()=>queueMicrotask(()=>runner.enqueue(t.id,'second','race-second')));
-    await runner.idle(t.id);expect(started).toEqual(['first','second']);await runner.close();
-  });
-  it('runs one turn at a time and deduplicates durable run IDs',async()=>{
-    const s=setup(),t=s.createTask();let running=0,max=0,calls=0;
-    const driver:AgentDriver={async run(){running++;calls++;max=Math.max(max,running);await new Promise(resolve=>setTimeout(resolve,10));running--;}};
-    const runner=new TaskRunner(s,driver);runner.enqueue(t.id,'first','job-one');runner.enqueue(t.id,'second','job-two');runner.enqueue(t.id,'first','job-one');
-    await runner.idle(t.id);expect(calls).toBe(2);expect(max).toBe(1);expect(s.getTask(t.id).run.status).toBe('idle');await runner.close();
-  });
-  it('recovers an interrupted persisted job after server restart',async()=>{
-    let s=setup();const t=s.createTask();s.store.db.prepare("INSERT INTO jobs(id,task_id,message,status,created_at) VALUES(?,?,?,'running',?)").run('interrupted',t.id,'resume',new Date().toISOString());
-    const dir=s.dataDir;s.store.close();s=new FieldService(dir);services.push(s);let resumed=false;
-    const runner=new TaskRunner(s,{async run(){resumed=true;}});runner.recover();await runner.idle(t.id);
-    expect(resumed).toBe(true);expect((s.store.db.prepare('SELECT status FROM jobs WHERE id=?').get('interrupted') as {status:string}).status).toBe('completed');await runner.close();
-  });
-  it('abort prevents late driver actions after cancel',async()=>{
-    const s=setup(),t=s.createTask();let started!:()=>void;const ready=new Promise<void>(r=>started=r);
-    const runner=new TaskRunner(s,{async run(_id,_message,signal){started();await new Promise<void>((_,reject)=>signal.addEventListener('abort',()=>reject(new Error('abort')),{once:true}));}});
-    runner.enqueue(t.id);await ready;runner.cancel(t.id);await runner.idle(t.id);expect(s.getTask(t.id).state).toBe('cancelled');expect(s.getTask(t.id).run.status).toBe('idle');await runner.close();
   });
 });
