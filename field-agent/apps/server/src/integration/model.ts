@@ -1,14 +1,7 @@
 import { createHash } from "node:crypto";
+import { adaptationInterval, adaptationMillimetres, restoreAdaptation, type PackagePlan, type WorkPackageSnapshot } from "@field-agent/core";
 import {
-  localBoxToPlan,
-  siteFrameFor,
-  SITE_FRAME_FIELD,
-  toMillimetres,
-  type PackagePlan,
-  type WorkPackageSnapshot,
-} from "@field-agent/core";
-import {
-  spearsCatalog,
+  fabricationCatalog,
   toLocalPlanGeometry,
   toPlanningProduct,
   type FabricationInput,
@@ -94,16 +87,25 @@ function lengthValue(
   };
 }
 
+function confirmedProductBinding(s: WorkPackageSnapshot, field: string, subject: string): string {
+  const binding = value<string>(s, field, subject);
+  return binding.status === "confirmed" && typeof binding.value === "string" ? binding.value : "";
+}
+
 /** The saved graph owns connectivity. Coordinates alone never join two parts. */
 export function fabricationInput(
   s: WorkPackageSnapshot,
   plan: PackagePlan,
 ): FabricationInput {
+  const interval = s.intent === "adapt_to_site" && plan.id === s.baselinePlan?.id ? adaptationInterval(s) : null;
+  if (interval) plan = interval.plan;
   if (!s.sourceDrawing || !s.scope || !s.baselinePlan)
     throw new Error("Drawing, scope and baseline are required");
   // Entities outside the scope are retained context (heads, adjacent pipe): kept in the plan and
   // shown, never detailed, counted or connected. A connection into the context would be a guess.
-  const context = new Set(s.scope.excludedEntityIds);
+  // The interval adapter validates explicit endpoint connections and retains their
+  // stations as calculation boundaries, even when the source heads are excluded.
+  const context = new Set(s.scope.excludedEntityIds.filter(id => !interval?.ends.some(end => end.entity.id === id)));
   if (
     plan.connections.some((c) =>
       [c.from, c.to].some((e) => context.has(e.entityId)),
@@ -154,7 +156,9 @@ export function fabricationInput(
       const end = i === 0 ? "start" : "end";
       const c = connected.get(`${p.id}/${port.id}`),
         other = c && plan.entities.find((e) => e.id === c.entityId);
-      if (other && !["fitting", "tie_in"].includes(other.kind))
+      const datum = value<string>(s, `datum.${end}`, p.id);
+      const scopeInterface = datum.status === "confirmed" && datum.value === "scope_interface";
+      if (other && !["fitting", "tie_in"].includes(other.kind) && !(scopeInterface && other.kind === "head"))
         throw new Error("Pipe endpoints require a fitting or tie-in");
       const otherPort = other?.ports.find((p) => p.id === c!.portId);
       if (
@@ -164,17 +168,16 @@ export function fabricationInput(
       )
         throw new Error("Connected ports disagree on the centerline position");
       const nodeId = other ? `node-${other.id}` : `node-${p.id}-${end}`;
-      const datum = value<string>(s, `datum.${end}`, p.id);
       const physical =
         !other &&
         datum.status === "confirmed" &&
         datum.value === "physical_pipe_end";
-      if (!c && !physical)
+      if (!c && !physical && !scopeInterface)
         throw new Error(
           `Unconnected endpoint ${p.id}/${end}; explicitly detail an open end or connection`,
         );
       if (!nodes.some((n) => n.id === nodeId)) {
-        const offset = other
+        const offset = other && (s.intent !== "adapt_to_site" || s.baselinePlan!.entities.find(e => e.id === other.id)?.kind === "tie_in")
           ? lengthValue(s, "netCutOffset", other.id)
           : {
               value: null,
@@ -185,7 +188,7 @@ export function fabricationInput(
         nodes.push({
           id: nodeId,
           datum:
-            other?.kind === "fitting"
+            scopeInterface ? "scope_interface" : other?.kind === "fitting"
               ? "fitting_center"
               : physical
                 ? "physical_pipe_end"
@@ -242,6 +245,11 @@ export function fabricationInput(
             ? ("start" as const)
             : ("end" as const),
         location: "field" as const,
+        threadMakeup: {
+          pipeProductId: confirmedProductBinding(s, `threadMakeup.${port.id}.pipeProductId`, f.id),
+          fittingProductId: confirmedProductBinding(s, `threadMakeup.${port.id}.fittingProductId`, f.id),
+          axialEngagement: lengthValue(s, `threadMakeup.${port.id}`, f.id),
+        },
       };
     });
     fittings.push({
@@ -258,13 +266,22 @@ export function fabricationInput(
     description: `Explicit ${plan.confirmation} structured drawing dimensions: ${s.sourceDrawing.drawingId} ${s.sourceDrawing.revision}`,
   });
   const jointMovement: Record<string, Value<boolean>> = {};
+  const threadedJointPlan: NonNullable<FabricationInput["assemblyConditions"]["threadedJointPlan"]> = {};
   for (const f of fittings)
     for (const port of f.ports) {
       const id = `${f.id}/${port.id}`;
       jointMovement[id] = value<boolean>(s, `movement.${port.id}`, f.id);
+      threadedJointPlan[id] = {
+        pipeProductId: confirmedProductBinding(s, `threadedJointPlan.${port.id}.pipeProductId`, f.id),
+        fittingProductId: confirmedProductBinding(s, `threadedJointPlan.${port.id}.fittingProductId`, f.id),
+        plan: value<string>(s, `threadedJointPlan.${port.id}`, f.id),
+        movement: value<boolean>(s, `movement.${port.id}`, f.id),
+      };
       for (const e of evidence.filter((e) => e.subjectIds.includes(f.id)))
         e.subjectIds.push(id);
     }
+  const retainedContext = (entityId: string) => nodes.some(n =>
+    n.datum === "scope_interface" && n.id === `node-${entityId}`) || s.scope!.excludedEntityIds.includes(entityId);
   return {
     projectId: s.projectId,
     packageId: s.id,
@@ -303,38 +320,40 @@ export function fabricationInput(
               : "other",
         productId: e.productId,
         quantity: {
-          value: 1,
-          status: "proposed",
+          value: retainedContext(e.id) ? null : 1,
+          status: retainedContext(e.id) ? "unknown" : "proposed",
           evidenceIds: [],
-          reason: "Counted from the saved model",
+          reason: retainedContext(e.id) ? "Retained context entity; purchasing quantity is unknown" : "Counted from the saved model",
         },
         attachedPieceIds: [],
-        reason: "Installation outside the supported catalog",
+        reason: retainedContext(e.id) ? "Retained context; one model reference, not a purchased item" : "Installation outside the supported catalog",
       })),
     assemblyConditions: {
       workAreaAccess: value<boolean>(s, "workAreaAccess"),
       curePlan: value<string>(s, "curePlan"),
       jointMovement,
+      threadedJointPlan,
     },
   };
 }
 
+function cutDatum(s: WorkPackageSnapshot, field: string, subject: string): Fact<"center_to_center" | "physical_pipe_end"> {
+  const datum = fact<"center_to_center" | "physical_pipe_end">(s, field, subject);
+  return datum.value === "center_to_center" || datum.value === "physical_pipe_end" ? datum : unknown();
+}
 export function planningPlan(
   s: WorkPackageSnapshot,
   input: FabricationInput,
 ): Plan {
-  const catalog = spearsCatalog(s.configVersion),
+  const catalog = fabricationCatalog(s.configVersion),
     geometry = toLocalPlanGeometry(input, catalog);
   return {
     ...geometry,
     segments: geometry.segments.map((seg) => ({
       ...seg,
       productId: input.pieces.find((p) => p.id === seg.id)!.productId,
-      cutEndDatumAtStart: fact(s, "datum.start", seg.id),
-      cutEndDatumAtEnd: fact(s, "datum.end", seg.id),
-      outsideDiameter: seg.outsideDiameter.value
-        ? seg.outsideDiameter
-        : enteredDiameter(s, seg.id) ?? seg.outsideDiameter,
+      cutEndDatumAtStart: cutDatum(s, "datum.start", seg.id),
+      cutEndDatumAtEnd: cutDatum(s, "datum.end", seg.id),
     })),
     fittings: geometry.fittings.map((f) => ({
       ...f,
@@ -344,72 +363,32 @@ export function planningPlan(
     ducts: [],
   };
 }
-/** A pipe OD the user entered for a piece with no catalog product. Never inferred from nominal size. */
-function enteredDiameter(s: WorkPackageSnapshot, pieceId: string) {
-  const f = savedFact(s, "pipeOutsideDiameter", pieceId);
-  return f?.confirmation === "confirmed" &&
-    typeof f.value === "number" &&
-    f.value > 0 &&
-    ["mm", "m", "in", "ft"].includes(f.unit ?? "")
-    ? known({ value: f.value, unit: f.unit as Length["unit"] }, [f.id])
-    : null;
-}
-/**
- * A confirmed six-face box in the plan frame. With a confirmed `siteFrame` fact the faces were
- * entered along a span (local X, Y, Z) in any length unit, and are transformed here; otherwise they
- * are plan-frame millimetres. Anything missing, unconfirmed or inverted is unknown.
- */
-export function boxFact(s: WorkPackageSnapshot, prefix: string): Fact<Box> {
+function boxFact(s: WorkPackageSnapshot, prefix: string): Fact<Box> {
   const fields = ["min.x", "min.y", "min.z", "max.x", "max.y", "max.z"];
   const fs = fields.map((k) => savedFact(s, `${prefix}.${k}`));
-  const frameFacts = [...s.detailing, ...s.siteFacts].filter(
-    (f) => f.field === SITE_FRAME_FIELD,
-  );
-  if (frameFacts.length > 1) throw new Error("Ambiguous fact: siteFrame");
-  const frameFact = frameFacts[0];
-  const mm = fs.map((f) =>
-    f && f.confirmation === "confirmed" && typeof f.value === "number"
-      ? toMillimetres(f.value, frameFact ? f.unit : f.unit === "mm" ? "mm" : null)
-      : null,
-  );
-  if (mm.some((v) => v === null)) return unknown();
-  const [a, b] = [0, 3].map((o) => ({ x: mm[o]!, y: mm[o + 1]!, z: mm[o + 2]! }));
-  if (!(a.x < b.x && a.y < b.y && a.z < b.z)) return unknown();
-  let box = { min: a, max: b };
-  const evidence = fs.map((f) => f!.id);
-  if (frameFact) {
-    if (
-      frameFact.confirmation !== "confirmed" ||
-      frameFact.subjectIds.length !== 1 ||
-      (frameFact.value !== "left" && frameFact.value !== "right")
+  if (
+    fs.some(
+      (f) =>
+        !f ||
+        f.confirmation !== "confirmed" ||
+        typeof f.value !== "number" ||
+        !["mm", "m", "in", "ft"].includes(f.unit ?? ""),
     )
-      return unknown();
-    const frame = siteFrameFor(s.baselinePlan!, frameFact.subjectIds[0], frameFact.value);
-    if ("reason" in frame) return unknown();
-    const planBox = localBoxToPlan(frame, a, b);
-    if ("reason" in planBox) return unknown();
-    box = planBox;
-    evidence.push(frameFact.id);
-  }
-  const point = (p: { x: number; y: number; z: number }) => ({
-    ...p,
+  )
+    return unknown();
+  const point = (offset: number) => ({
+    x: adaptationMillimetres(fs[offset]!.value as number, fs[offset]!.unit),
+    y: adaptationMillimetres(fs[offset + 1]!.value as number, fs[offset + 1]!.unit),
+    z: adaptationMillimetres(fs[offset + 2]!.value as number, fs[offset + 2]!.unit),
     unit: "mm" as const,
-    frameId: s.baselinePlan!.coordinateFrame.id,
+    frameId: adaptationInterval(s).plan.coordinateFrame.id,
   });
   return known(
-    { kind: "axis_aligned_box", min: point(box.min), max: point(box.max) },
-    evidence,
+    { kind: "axis_aligned_box", min: point(0), max: point(3) },
+    fs.map((f) => f!.id),
   );
 }
 export function generationInput(s: WorkPackageSnapshot): GenerateInput {
-  if (
-    s.baselinePlan?.entities.some((e) =>
-      ["head", "support", "unsupported"].includes(e.kind),
-    )
-  )
-    throw new Error(
-      "Candidate generation is limited to an isolated span; protected heads/supports require an explicit impact adapter",
-    );
   const input = fabricationInput(s, s.baselinePlan!),
     baseline = planningPlan(s, input);
   baseline.ducts = [
@@ -433,10 +412,11 @@ export function generationInput(s: WorkPackageSnapshot): GenerateInput {
     requiredPipeClearance:
       clearance?.confirmation === "confirmed" &&
       typeof clearance.value === "number" &&
-      clearance.unit === "mm"
-        ? known({ value: clearance.value, unit: "mm" }, [clearance.id])
+      ["mm", "m", "in", "ft"].includes(clearance.unit ?? "")
+        ? known({ value: adaptationMillimetres(clearance.value, clearance.unit), unit: "mm" }, [clearance.id])
         : unknown(),
-    product: toPlanningProduct(spearsCatalog(s.configVersion)),
+    product: toPlanningProduct(fabricationCatalog(s.configVersion),
+      input.pieces.find(p => p.id === s.changeRequest?.affectedEntityIds[0])?.productId ?? null),
   };
 }
 /** Stable API-safe identities, with all structural references transformed together. */
@@ -519,4 +499,9 @@ export function packagePlan(plan: Plan, baseline: PackagePlan): PackagePlan {
     entities,
     connections,
   };
+}
+
+/** Public plans preserve source context; internal planning/quantities cover the active interval. */
+export function candidatePackage(plan: Plan, s: WorkPackageSnapshot): PackagePlan {
+  return restoreAdaptation(packagePlan(plan, adaptationInterval(s).plan), s);
 }

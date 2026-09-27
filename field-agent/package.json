@@ -14,7 +14,8 @@
     "start": "pnpm --filter @field-agent/server start",
     "replay": "tsx scripts/replay.ts",
     "rules:sf-basis": "node --import tsx scripts/resolve-sf-basis.ts",
-    "rules:evaluate": "node --import tsx scripts/evaluate-project.ts"
+    "rules:evaluate": "node --import tsx scripts/evaluate-project.ts",
+    "sources:import": "node --import tsx scripts/import-sources.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

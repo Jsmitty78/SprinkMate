@@ -3,7 +3,7 @@ import type { PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "./api.js";
 import { lengthInput, lengthText, parseLength, toMetres } from "./format.js";
 import {
-  BOX_KEYS, buildRun, ELBOW, inScope, PIPE, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
+  showCpvcInputs, showSfInputs, activeDetailingPlan, BOX_KEYS, buildRun, ELBOW, inScope, PIPE, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
   syncRunDraft, type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
 } from "./model.js";
 import { Badge, Button, Callout, Field, Icon, Section } from "./ui.js";
@@ -252,12 +252,12 @@ export function FactRow({ s, act, busy, unit, setNotice, spec }: Common & { spec
 
 export function DetailingInputs(props: Common & { callouts: Callouts }) {
   const { s, callouts } = props;
-  const plan = s.baselinePlan;
+  const plan = activeDetailingPlan(s);
   const work = inScope(s);
   const pipes = plan?.entities.filter(e => e.kind === "pipe" && work(e.id)) ?? [];
   const ties = plan?.entities.filter(e => e.kind === "tie_in" && work(e.id)) ?? [];
   const fits = plan?.entities.filter(e => e.kind === "fitting" && work(e.id)) ?? [];
-  const datum: Kind = { type: "choice", options: [["center_to_center", "Center to center (fitting or tie-in)"], ["physical_pipe_end", "Physical pipe end"]] };
+  const datum: Kind = { type: "choice", options: [["center_to_center", "Center to center (fitting or tie-in)"], ["physical_pipe_end", "Physical pipe end"], ["scope_interface", "Scope station (not a physical joint)"]] };
   const done = (rows: RowSpec[]) => rows.every(r => isConfirmed(findFact(s, r.field, r.subject)));
   const dims: RowSpec[] = [
     ...pipes.flatMap(p => (["start", "end"] as const).map(end => ({ field: `datum.${end}`, subject: p.id, label: `Piece ${callouts.piece.get(p.id)} ${end}: dimension to`, kind: datum }))),
@@ -266,13 +266,13 @@ export function DetailingInputs(props: Common & { callouts: Callouts }) {
   const assembly: RowSpec[] = [
     ...fits.flatMap(f => f.ports.map(port => ({ field: `movement.${port.id}`, subject: f.id, label: `${callouts.fitting.get(f.id)}/${port.id}: full insertion and quarter turn possible`, kind: { type: "bool", yes: "Yes, confirmed", no: "No" } as Kind }))),
     { field: "workAreaAccess", label: "Work-area access", kind: { type: "bool", yes: "Access confirmed", no: "No access" } },
-    { field: "curePlan", label: "Set and cure plan (temperature, fit, test pressure)", kind: { type: "text" } },
+    ...(showCpvcInputs(s) ? [{ field: "curePlan", label: "Set and cure plan (temperature, fit, test pressure)", kind: { type: "text" } as Kind }] : []),
   ];
-  const project: RowSpec[] = PROJECT_BASIS.map(b => ({ field: b.field, label: b.label, kind: b.options.length ? { type: "choice", options: b.options } : { type: "text" } }));
+  const project: RowSpec[] = (showSfInputs(s) ? PROJECT_BASIS : []).map(b => ({ field: b.field, label: b.label, kind: b.options.length ? { type: "choice", options: b.options } : { type: "text" } }));
   return <>
     {plan && <Section title="Dimensions" count={`${dims.filter(r => isConfirmed(findFact(s, r.field, r.subject))).length}/${dims.length}`} defaultOpen={!done(dims)}>{dims.map(r => <FactRow key={`${r.field}.${r.subject}`} {...props} spec={r} />)}</Section>}
     <Section title="Assembly conditions" count={`${assembly.filter(r => isConfirmed(findFact(s, r.field, r.subject))).length}/${assembly.length}`} defaultOpen={!done(assembly)}>{assembly.map(r => <FactRow key={`${r.field}.${r.subject}`} {...props} spec={r} />)}</Section>
-    <Section title="Project basis" count={`${project.filter(r => isConfirmed(findFact(s, r.field))).length}/${project.length}`} defaultOpen={!done(project)}>{project.map(r => <FactRow key={r.field} {...props} spec={r} />)}</Section>
+    <Section title="Project basis" count={`${project.filter(r => isConfirmed(findFact(s, r.field))).length}/${project.length}`} defaultOpen={!done(project)}>{!showSfInputs(s) && <p className="fa-muted">This package has no confirmed San Francisco basis. Source basis, current applicability and approval remain separate; supply project-specific facts through the shared intake/API.</p>}{project.map(r => <FactRow key={r.field} {...props} spec={r} />)}</Section>
   </>;
 }
 
@@ -289,8 +289,9 @@ export function ChangeInputs({ s, act, busy, setNotice, callouts }: Common & { c
   if (!pipes.length) return <p className="fa-muted">Enter the existing run first, then choose the piece the obstacle blocks.</p>;
   return <div className="fa-stack">
     <Field label="What did you find on site?"><textarea rows={2} value={desc} onChange={e => setDesc(e.target.value)} placeholder="e.g. Duct installed where the branch should run" /></Field>
-    <div className="fa-chips" role="group" aria-label="Affected pieces">{pipes.map(p => <label key={p.id} className={`fa-chip ${ids.includes(p.id) ? "is-on" : ""}`}>
-      <input type="checkbox" checked={ids.includes(p.id)} onChange={e => setIds(e.target.checked ? [...ids, p.id] : ids.filter(x => x !== p.id))} />Piece {callouts.piece.get(p.id)}
+    <p className="fa-muted small">Choose one straight interval. Remaining pipes, heads and connections are retained as protected context and excluded from this interval’s purchase quantities.</p>
+    <div className="fa-chips" role="radiogroup" aria-label="Active straight interval">{pipes.map(p => <label key={p.id} className={`fa-chip ${ids.includes(p.id) ? "is-on" : ""}`}>
+      <input type="radio" name="active-interval" checked={ids.includes(p.id)} onChange={() => setIds([p.id])} />Piece {callouts.piece.get(p.id)}
     </label>)}</div>
     <div className="fa-actions"><Button variant="primary" busy={busy === "change"} disabled={!!busy || !desc.trim() || !ids.length} onClick={() => void save()}>Save site condition</Button></div>
   </div>;

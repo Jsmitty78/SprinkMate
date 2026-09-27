@@ -1,7 +1,5 @@
-import {
-  isAssumption, localBoxToPlan, siteFrameFor, SITE_FRAME_FIELD,
-  type PackageInputs, type PackagePlan, type PackageResult, type SiteFrame, type WorkPackageSnapshot,
-} from "@field-agent/core";
+import { adaptationFrame, adaptationInterval } from "@field-agent/core";
+import type { PackageInputs, PackagePlan, PackageResult, WorkPackageSnapshot } from "@field-agent/core";
 import { lengthInput, parseLength } from "./format.js";
 
 /**
@@ -101,22 +99,23 @@ export function readBox(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">,
     box: complete ? { min: { x: values[0]!, y: values[1]!, z: values[2]! }, max: { x: values[3]!, y: values[4]!, z: values[5]! } } : null,
   };
 }
-/** The saved site frame (a span and a Y side), or null when boxes are entered in the plan frame. */
-export function siteFrameOf(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts" | "baselinePlan">): { fact: Fact; frame: SiteFrame | null; reason: string | null } | null {
-  const fact = [...s.detailing, ...s.siteFacts].find(f => f.field === SITE_FRAME_FIELD);
-  if (!fact) return null;
-  if (!s.baselinePlan || (fact.value !== "left" && fact.value !== "right")) return { fact, frame: null, reason: "Choose the span and side again" };
-  const frame = siteFrameFor(s.baselinePlan, fact.subjectIds[0] ?? "", fact.value);
-  return "reason" in frame ? { fact, frame: null, reason: frame.reason } : { fact, frame, reason: null };
-}
-/** A box in the plan frame for drawing on the plan, whatever frame it was entered in. */
-export function planBox(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts" | "baselinePlan">, prefix: string): Box | null {
-  const box = readBox(s, prefix).box;
-  const site = siteFrameOf(s);
-  if (!box || !site) return box;
-  if (!site.frame) return null;
-  const b = localBoxToPlan(site.frame, box.min, box.max);
-  return "reason" in b ? null : b;
+/** Source prefix for fictional values entered to exercise the software. Confirming never removes it. */
+export const ASSUMPTION_PREFIX = "ASSUMPTION:";
+export const FRAME_FIELDS = ["origin.x", "origin.y", "origin.z", "yaw"].map(k => `adaptationFrame.${k}`);
+/**
+ * The explicit local frame (docs/contracts/adaptation-interval.md), or null when boxes are in the
+ * drawing frame. `reason` is set when the saved facts are partial or unconfirmed.
+ */
+export function siteFrameOf(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">) {
+  const facts = FRAME_FIELDS.map(f => findFact(s, f));
+  if (facts.every(f => !f)) return null;
+  try {
+    const t = adaptationFrame(s);
+    const yaw = facts[3]!.value as number;
+    return { facts, yaw, origin: { x: t.toDrawing({ x: 0, y: 0, z: 0 }).x, y: t.toDrawing({ x: 0, y: 0, z: 0 }).y, z: t.toDrawing({ x: 0, y: 0, z: 0 }).z }, toLocal: t.toLocal, toDrawing: t.toDrawing, reason: null as string | null };
+  } catch (e) {
+    return { facts, yaw: null, origin: null, toLocal: null, toDrawing: null, reason: e instanceof Error ? e.message : String(e) };
+  }
 }
 /** Which faces a box still needs, in words a fitter would use. */
 export function boxGaps(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">, prefix: string, local: boolean): string[] {
@@ -129,8 +128,8 @@ export function boxGaps(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">,
   });
   return out;
 }
-export const isTestAssumption = (f: Fact | undefined) => isAssumption(f?.source.description);
-function toMm(value: number, unit: string | null): number | null {
+export const isTestAssumption = (f: Fact | undefined) => !!f?.source.description.startsWith(ASSUMPTION_PREFIX);
+export function toMm(value: number, unit: string | null): number | null {
   const factor: Record<string, number> = { mm: 1, m: 1000, cm: 10, in: 25.4, ft: 304.8 };
   const f = factor[unit ?? "mm"];
   return f === undefined ? null : value * f;
@@ -321,6 +320,16 @@ export const PROJECT_BASIS: Array<{ field: string; label: string; options: Array
 /** Entities outside the scope are retained context: shown, never part of the work. */
 export const contextIds = (s: Pick<WorkPackageSnapshot, "scope">): Set<string> => new Set(s.scope?.excludedEntityIds ?? []);
 export const inScope = (s: Pick<WorkPackageSnapshot, "scope">) => { const c = contextIds(s); return (id: string) => !c.has(id); };
+/** Only request detailing for the active interval; retained context is not a new-work item. */
+export function activeDetailingPlan(s: WorkPackageSnapshot): Plan | null {
+  if (s.intent !== "adapt_to_site" || !s.baselinePlan) return s.baselinePlan;
+  const ids = s.changeRequest?.affectedEntityIds ?? [];
+  const adjacent = s.baselinePlan.connections.flatMap(c => ids.includes(c.from.entityId) ? [c.to.entityId] : ids.includes(c.to.entityId) ? [c.from.entityId] : []);
+  return { ...s.baselinePlan, entities: s.baselinePlan.entities.filter(e => ids.includes(e.id) || (e.kind === "tie_in" && adjacent.includes(e.id))) };
+}
+
+export const showCpvcInputs = (s: WorkPackageSnapshot) => activeDetailingPlan(s)?.entities.some(e => e.kind === "pipe" && e.productId === PIPE) ?? false;
+export const showSfInputs = (s: WorkPackageSnapshot) => s.intent !== "adapt_to_site" || findFact(s, "jurisdiction")?.value === "san_francisco";
 
 /** Presence checks only; the server decides whether the inputs are sufficient. */
 export function requirements(s: WorkPackageSnapshot): Requirement[] {
@@ -330,7 +339,7 @@ export function requirements(s: WorkPackageSnapshot): Requirement[] {
   add({ id: "drawing", group: "Drawing", label: "Source drawing uploaded", done: !!d?.assetId });
   if (d?.view) add({ id: "workArea", group: "Drawing", label: "Work area selected on the sheet", done: !!d.view.workArea });
   add({ id: "scale", group: "Drawing", label: "Drawing scale confirmed", done: d?.scale.basis === "confirmed_inputs", hint: d?.scale.reason ?? undefined });
-  const plan = s.baselinePlan;
+  const plan = activeDetailingPlan(s);
   const work = inScope(s);
   add({ id: "run", group: "Run", label: "Run traced or entered (points, turns, ends)", done: !!plan?.entities.length && !!s.scope });
   add({ id: "run-confirmed", group: "Run", label: "Run confirmed against the drawing", done: plan?.confirmation === "confirmed" });
@@ -345,12 +354,12 @@ export function requirements(s: WorkPackageSnapshot): Requirement[] {
         add({ id: `movement.${port.id}.${fit.id}`, group: "Assembly", label: `Joint movement at ${fit.id}/${port.id} can be made`, done: isConfirmed(findFact(s, `movement.${port.id}`, fit.id)) });
   }
   add({ id: "workAreaAccess", group: "Assembly", label: "Work-area access confirmed", done: isConfirmed(findFact(s, "workAreaAccess")) });
-  add({ id: "curePlan", group: "Assembly", label: "Cement set and cure plan", done: isConfirmed(findFact(s, "curePlan")) });
-  for (const b of PROJECT_BASIS) add({ id: b.field, group: "Project", label: b.label, done: isConfirmed(findFact(s, b.field)) });
+  if (showCpvcInputs(s)) add({ id: "curePlan", group: "Assembly", label: "Cement set and cure plan", done: isConfirmed(findFact(s, "curePlan")) });
+  for (const b of showSfInputs(s) ? PROJECT_BASIS : []) add({ id: b.field, group: "Project", label: b.label, done: isConfirmed(findFact(s, b.field)) });
   if (s.intent === "adapt_to_site") {
     add({ id: "change", group: "Site", label: "Affected pipe chosen", done: !!s.changeRequest?.affectedEntityIds.length });
     const site = siteFrameOf(s);
-    if (site) add({ id: "siteFrame", group: "Site", label: "Site frame pinned to a span", done: isConfirmed(site.fact) && !!site.frame, hint: site.reason ?? undefined });
+    if (site) add({ id: "siteFrame", group: "Site", label: "Local frame along the span confirmed", done: !site.reason, hint: site.reason ?? undefined });
     for (const [prefix, label] of [["duct", "Obstacle"], ["workEnvelope", "Work boundary"]] as const) {
       const gaps = readBox(s, prefix).values.some(v => v !== null) ? boxGaps(s, prefix, !!site) : [];
       if (gaps.length) for (const g of gaps) add({ id: `${prefix}.${g}`, group: "Site", label: `${label} ${g}`, done: false });
@@ -446,6 +455,10 @@ export function runBlockers(s: WorkPackageSnapshot): string[] {
   if (!s.sourceDrawing) out.push("Upload the source drawing.");
   if (!s.baselinePlan || !s.scope) out.push("Enter and save the run.");
   const plan = s.baselinePlan;
+  if (plan && s.intent === "adapt_to_site" && s.scope) {
+    try { adaptationInterval(s); } catch (e) { out.push(e instanceof Error ? e.message : String(e)); }
+    return out;
+  }
   if (plan) {
     const connected = new Set(plan.connections.flatMap(c => [`${c.from.entityId}/${c.from.portId}`, `${c.to.entityId}/${c.to.portId}`]));
     for (const pipe of plan.entities.filter(e => e.kind === "pipe" && inScope(s)(e.id)))

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { ASSUMPTION_PREFIX, localBoxToPlan, toMillimetres, SITE_FRAME_FIELD, siteFrameFor, type PackageInputs, type SiteFrame, type SiteYSide } from "@field-agent/core";
+import type { PackageInputs } from "@field-agent/core";
 import type { Snapshot } from "../api.js";
 import { lengthInput, lengthText, parseLength } from "../format.js";
-import { BOX_KEYS, boxGaps, findFact, inScope, isConfirmed, isTestAssumption, readBox, siteFrameOf, upsertFacts, type Callouts, type Fact } from "../model.js";
+import { ASSUMPTION_PREFIX, BOX_KEYS, boxGaps, findFact, inScope, isConfirmed, isTestAssumption, readBox, siteFrameOf, toMm, upsertFacts, type Callouts, type Fact } from "../model.js";
 import { MEASURED, patchClearing, type Act, type Unit } from "../inputs.js";
 import { Badge, Button, Field } from "../ui.js";
 
@@ -10,7 +10,7 @@ interface Common { s: Snapshot; act: Act; busy: string; unit: Unit; setNotice: (
 
 /**
  * Site geometry for a discrepancy: a local frame pinned to one span, the obstacle and work boundary
- * as boxes in that frame, and the clearance and pipe OD the planner needs. Each value says whether it
+ * as boxes in that frame, and the clearance the planner needs. Each value says whether it
  * was measured on site or is a fictional test assumption; confirming a value never changes which.
  */
 type Basis = "measured" | "assumption";
@@ -60,8 +60,28 @@ function affine(c: number, terms: Array<[number, string]>) {
   }
   return parts.join(" ") || "0";
 }
+/** A right-handed local frame: origin, unit X and unit Y (Y = X turned 90° counterclockwise), all in the plan frame. */
+export interface LocalFrame { origin: { x: number; y: number; z: number }; x: { x: number; y: number }; y: { x: number; y: number } }
+export const frameFromYaw = (origin: LocalFrame["origin"], yawDeg: number): LocalFrame => {
+  const r = yawDeg * Math.PI / 180, c = Math.cos(r), n = Math.sin(r);
+  const clean = (v: number) => Math.abs(v) < 1e-12 ? 0 : Math.abs(Math.abs(v) - 1) < 1e-12 ? Math.sign(v) : v;
+  return { origin, x: { x: clean(c), y: clean(n) }, y: { x: clean(-n), y: clean(c) } };
+};
+/** The frame a span gives: origin at its start, X along it. Null for a sloped or zero-length span. */
+export function spanFrame(plan: NonNullable<Snapshot["baselinePlan"]>, spanId: string): { origin: LocalFrame["origin"]; yaw: number; length: number } | null {
+  const pipe = plan.entities.find(e => e.id === spanId && e.kind === "pipe");
+  const [a, b] = [pipe?.ports[0]?.position, pipe?.ports.at(-1)?.position];
+  if (!a || !b) return null;
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  if (!(length > 0) || Math.abs(b.z - a.z) > 1e-6 * length) return null;
+  // Whole degrees stay exact; otherwise keep the full angle so the span stays on local X.
+  const raw = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+  const yaw = Math.abs(raw - Math.round(raw)) < 1e-9 ? Math.round(raw) : raw;
+  return { origin: { ...a }, yaw, length };
+}
+
 /** Plan and drawing coordinates of a local point, as formulas a reviewer can check by hand. */
-export function frameFormulas(frame: SiteFrame, rotationDeg: number | null) {
+export function frameFormulas(frame: LocalFrame, rotationDeg: number | null) {
   const plan = `Plan (mm) = (${affine(frame.origin.x, [[frame.x.x, "X"], [frame.y.x, "Y"]])}, ${affine(frame.origin.y, [[frame.x.y, "X"], [frame.y.y, "Y"]])}, ${affine(frame.origin.z, [[1, "Z"]])})`;
   if (rotationDeg === null) return { plan, drawing: null };
   // Plan = R(rotation)·(u, −v), where (u, v) are sheet millimetres from the frame origin with Y down the sheet.
@@ -72,61 +92,63 @@ export function frameFormulas(frame: SiteFrame, rotationDeg: number | null) {
   return { plan, drawing: `Drawing XY (mm from the sheet origin, Y down the sheet) = (${affine(clean(o.u), [[clean(ax.u), "X"], [clean(ay.u), "Y"]])}, ${affine(clean(o.v), [[clean(ax.v), "X"], [clean(ay.v), "Y"]])})` };
 }
 
+/**
+ * Pins the explicit local frame of docs/contracts/adaptation-interval.md to a span: the four
+ * `adaptationFrame.*` facts, origin at the span start and yaw along it. The frame is right-handed,
+ * so Y is to the left of the pipe looking along X.
+ */
 export function SiteFrameInputs({ s, act, busy, setNotice, callouts }: Common & { callouts: Callouts }) {
   const plan = s.baselinePlan;
   const pipes = plan?.entities.filter(e => e.kind === "pipe" && inScope(s)(e.id)) ?? [];
   const saved = siteFrameOf(s);
-  const initial = () => ({ span: saved?.fact.subjectIds[0] ?? s.changeRequest?.affectedEntityIds[0] ?? pipes[0]?.id ?? "", side: (saved?.fact.value === "right" ? "right" : "left") as SiteYSide });
-  const [draft, setDraft] = useState(initial);
-  useEffect(() => setDraft(initial()), [saved?.fact.id, saved?.fact.value, s.changeRequest?.affectedEntityIds.join(",")]);
+  const pinned = saved?.origin ? pipes.find(p => { const f = plan && spanFrame(plan, p.id); return f && Math.hypot(f.origin.x - saved.origin!.x, f.origin.y - saved.origin!.y) < 1e-6 && Math.abs(((f.yaw - saved.yaw! + 540) % 360) - 180) < 1e-9; })?.id : undefined;
+  const initial = () => pinned ?? s.changeRequest?.affectedEntityIds[0] ?? pipes[0]?.id ?? "";
+  const [span, setSpan] = useState(initial);
+  useEffect(() => setSpan(initial()), [pinned, saved?.reason, s.changeRequest?.affectedEntityIds.join(",")]);
   if (!plan || !pipes.length) return <p className="fa-muted">Trace or enter the existing run first, then pin the frame to the span the obstacle blocks.</p>;
 
-  const preview = draft.span ? siteFrameFor(plan, draft.span, draft.side) : { reason: "Choose a span" };
-  const frame = "reason" in preview ? null : preview;
-  const aligned = frame ? !("reason" in localBoxToPlan(frame, { x: 0, y: 0, z: 0 }, { x: 1, y: 1, z: 1 })) : false;
+  const target = span ? spanFrame(plan, span) : null;
+  const frame = target ? frameFromYaw(target.origin, target.yaw) : null;
   const view = s.sourceDrawing?.view;
   const formulas = frame ? frameFormulas(frame, view && plan.coordinateFrame.id === "drawing-plan" ? view.frame.rotationDeg : null) : null;
   const label = (id: string) => { const l = findFact(s, "sourceLabel", id)?.value; return `Piece ${callouts.piece.get(id) ?? id}${typeof l === "string" && l ? ` (${l})` : ""}`; };
   const endLabel = (end: "start" | "end") => {
-    const pipe = plan.entities.find(e => e.id === draft.span);
-    const port = end === "start" ? pipe?.ports[0] : pipe?.ports.at(-1);
-    const at = port?.position;
-    const labels = at ? plan.entities.filter(e => e.id !== draft.span && e.ports.some(p => p.position && Math.hypot(p.position.x - at.x, p.position.y - at.y) < 1e-6))
+    const pipe = plan.entities.find(e => e.id === span);
+    const at = (end === "start" ? pipe?.ports[0] : pipe?.ports.at(-1))?.position;
+    const labels = at ? plan.entities.filter(e => e.id !== span && e.ports.some(p => p.position && Math.hypot(p.position.x - at.x, p.position.y - at.y) < 1e-6))
       .map(e => findFact(s, "sourceLabel", e.id)?.value).filter((l): l is string => typeof l === "string" && !!l) : [];
     return labels[0] ?? `its ${end}`;
   };
-  const changed = !saved || saved.fact.subjectIds[0] !== draft.span || saved.fact.value !== draft.side || !isConfirmed(saved.fact);
+  const changed = !saved || !!saved.reason || pinned !== span;
 
   const save = () => act("siteFrame", async cur => {
+    if (!target) return;
     const hadFrame = !!siteFrameOf(cur);
     const boxes = (f: Fact) => /^(duct|workEnvelope)\./.test(f.field);
     // The same numbers mean a different place in a new frame: keep them, but ask for them to be confirmed again.
     const reopen = (f: Fact): Fact => boxes(f) && f.confirmation === "confirmed" ? { ...f, confirmation: "proposed" } : f;
-    const base = { detailing: cur.detailing.filter(f => f.field !== SITE_FRAME_FIELD), siteFacts: cur.siteFacts.filter(f => f.field !== SITE_FRAME_FIELD).map(reopen) };
-    const facts = upsertFacts(base, [{ field: SITE_FRAME_FIELD, subjectIds: [draft.span], value: draft.side, confirmation: "confirmed", context: "observed", source: "Site frame chosen by you in Sprink" }]);
-    const reopened = cur.siteFacts.some(f => boxes(f) && f.confirmation === "confirmed");
-    const patch: Partial<PackageInputs> = { ...facts };
-    await patchClearing(cur, patch, setNotice);
-    if (reopened) setNotice(hadFrame ? "The site frame changed. The obstacle and work boundary keep their numbers but need confirming again in the new frame." : "Boxes are now read along the span. Check the obstacle and work boundary numbers and confirm them again.");
+    const reopened = [...cur.siteFacts, ...cur.detailing].some(f => boxes(f) && f.confirmation === "confirmed");
+    const source = `Local frame chosen by you in Sprink: origin at the start of ${label(span)}, X along it`;
+    const facts = upsertFacts({ detailing: cur.detailing.map(reopen), siteFacts: cur.siteFacts.map(reopen) }, [
+      ...(["x", "y", "z"] as const).map(k => ({ field: `adaptationFrame.origin.${k}`, value: target.origin[k], unit: "mm", confirmation: "confirmed" as const, context: "detailing" as const, source })),
+      { field: "adaptationFrame.yaw", value: target.yaw, unit: "deg", confirmation: "confirmed", context: "detailing", source },
+    ]);
+    await patchClearing(cur, facts as Partial<PackageInputs>, setNotice);
+    if (reopened) setNotice(hadFrame ? "The local frame changed. The obstacle and work boundary keep their numbers but need confirming again in the new frame." : "Boxes are now read along the span. Check the obstacle and work boundary numbers and confirm them again.");
   });
 
   return <div className="fa-stack">
-    <Field label="Span the frame is pinned to"><select value={draft.span} onChange={e => setDraft({ ...draft, span: e.target.value })}>
+    <Field label="Span the frame is pinned to"><select value={span} onChange={e => setSpan(e.target.value)}>
       {pipes.map(p => <option key={p.id} value={p.id}>{label(p.id)}</option>)}
     </select></Field>
-    <div className="fa-chips" role="radiogroup" aria-label="Y side">
-      {(["left", "right"] as const).map(side => <label key={side} className={`fa-chip ${draft.side === side ? "is-on" : ""}`}>
-        <input type="radio" name="site-y-side" checked={draft.side === side} onChange={() => setDraft({ ...draft, side })} />Y to the {side} of the pipe
-      </label>)}
-    </div>
-    {frame ? <div className="fa-frame-note">
-      <p>X runs along the pipe from {endLabel("start")} (X = 0) to {endLabel("end")} (X = {lengthText({ value: frame.length, unit: "mm", basis: "confirmed_inputs" }).primary}). Y is level, to the {draft.side} of X looking down{draft.side === "right" ? ", so this frame is mirrored" : ""}. Z is up, 0 at the pipe centerline.</p>
+    {frame && target ? <div className="fa-frame-note">
+      <p>X runs along the pipe from {endLabel("start")} (X = 0) to {endLabel("end")} (X = {lengthText({ value: target.length, unit: "mm", basis: "confirmed_inputs" }).primary}). Y is level and points to the left of the pipe looking along X. Z is up, 0 at the pipe centerline.</p>
       <p className="mono small">{formulas!.plan}</p>
       {formulas!.drawing && <p className="mono small">{formulas!.drawing}</p>}
-      {!aligned && <p className="fa-warn small">This span is not parallel to a plan axis, so the planner cannot use a box along it. Use Pick X axis in Plan frame along this span first.</p>}
-    </div> : <p className="fa-warn small">{(preview as { reason: string }).reason}</p>}
-    <div className="fa-fact-head"><span className="fa-muted small">A frame choice, not a measurement.</span>{saved ? isConfirmed(saved.fact) && saved.frame ? <Badge tone="green">Saved</Badge> : <Badge tone="amber">{saved.reason ?? "Not saved"}</Badge> : <Badge tone="neutral">Plan frame</Badge>}</div>
-    <div className="fa-actions"><Button variant="primary" busy={busy === "siteFrame"} disabled={!!busy || !frame || !changed} onClick={() => void save()}>{saved ? "Save frame" : "Enter boxes along this span"}</Button></div>
+      <p className="small fa-muted">The frame is right-handed (yaw {target.yaw < 0 ? "−" : ""}{num(target.yaw)}°). A value given with Y to the right of the pipe is entered with its Y sign flipped.</p>
+    </div> : <p className="fa-warn small">This span is not level or has no length, so it cannot carry a local frame.</p>}
+    <div className="fa-fact-head"><span className="fa-muted small">A frame choice, not a measurement.</span>{saved ? saved.reason ? <Badge tone="amber">{saved.reason}</Badge> : pinned ? <Badge tone="green">Saved</Badge> : <Badge tone="neutral">Saved on another origin</Badge> : <Badge tone="neutral">Drawing frame</Badge>}</div>
+    <div className="fa-actions"><Button variant="primary" busy={busy === "siteFrame"} disabled={!!busy || !target || !changed} onClick={() => void save()}>{saved ? "Save frame" : "Enter boxes along this span"}</Button></div>
   </div>;
 }
 
@@ -158,9 +180,8 @@ export function SiteBoxInputs({ s, act, busy, unit, setNotice, prefix, title, he
   const order = AXES.map((_, i) => parsed[i] !== null && parsed[i + 3] !== null && parsed[i]! >= parsed[i + 3]!);
   const complete = parsed.every(v => v !== null);
   const sample = facts.some(f => f?.source.description.startsWith("SAMPLE"));
-  const side = site?.fact.value === "right" ? "right" : "left";
   const axisLabel = local
-    ? ["Along the pipe (X)", `Across, + to the ${side} (Y)`, "Up from the pipe centerline (Z)"]
+    ? ["Along the pipe (X)", "Across, + to the left (Y)", "Up from the pipe centerline (Z)"]
     : ["East (plan X)", "North (plan Y)", "Up (plan Z)"];
 
   const save = (confirm: boolean) => act(`${prefix}.${confirm ? "confirm" : "save"}`, async cur => {
@@ -198,7 +219,7 @@ export function SiteBoxInputs({ s, act, busy, unit, setNotice, prefix, title, he
     {gaps.length > 0 && <ul className="fa-gaps">{gaps.map(g => <li key={g}>{g}</li>)}</ul>}
     <div className="fa-actions">
       <Button busy={busy === `${prefix}.save`} disabled={!!busy || invalid} onClick={() => void save(false)}>Save</Button>
-      <Button variant="primary" busy={busy === `${prefix}.confirm`} disabled={!!busy || invalid || !complete || order.some(Boolean) || (local && !site?.frame)} onClick={() => void save(true)}>{basis === "assumption" ? "Confirm test values" : "Confirm measurement"}</Button>
+      <Button variant="primary" busy={busy === `${prefix}.confirm`} disabled={!!busy || invalid || !complete || order.some(Boolean) || (local && !!site?.reason)} onClick={() => void save(true)}>{basis === "assumption" ? "Confirm test values" : "Confirm measurement"}</Button>
     </div>
   </div>;
 }
@@ -207,7 +228,7 @@ export function SiteBoxInputs({ s, act, busy, unit, setNotice, prefix, title, he
 
 export function SiteLengthInput({ s, act, busy, unit, setNotice, field, subject, label, tag, help }: Common & { field: string; subject?: string; label: string; tag?: string; help: string }) {
   const f = findFact(s, field, subject);
-  const savedMm = typeof f?.value === "number" ? toMillimetres(f.value, f.unit ?? "mm") : null;
+  const savedMm = typeof f?.value === "number" ? toMm(f.value, f.unit) : null;
   const shown = show(savedMm, unit);
   const [value, setValue] = useState(shown);
   const [basis, setBasis] = useState<Basis>(() => basisOf(f));

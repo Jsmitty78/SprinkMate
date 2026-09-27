@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { siteFrameFor, type PackageInputs, type PackagePlan } from "@field-agent/core";
-import { boxGaps, planBox, requirements, siteFrameOf } from "../model.js";
-import { frameFormulas } from "./SiteInputs.js";
+import type { PackageInputs, PackagePlan } from "@field-agent/core";
+import { boxGaps, requirements, siteFrameOf } from "../model.js";
+import { frameFormulas, frameFromYaw, spanFrame } from "./SiteInputs.js";
 
 // FS-01 P27 traced in the drawing-plan frame: N27 (12544.2133, 9620.5040) to N28 (12544.2133, 12668.1653)
 // drawing mm, Y down the sheet, so plan Y is negated.
@@ -19,21 +19,30 @@ const f = (field: string, value: Fact["value"], extra: Partial<Fact> = {}): Fact
 const box = (prefix: string, v: Array<number | null>) => ["min.x", "min.y", "min.z", "max.x", "max.y", "max.z"].map((k, i) => f(`${prefix}.${k}`, v[i]));
 
 describe("site frame", () => {
-  it("reproduces the FS-01 acceptance mapping with Y to the right of the pipe", () => {
-    const frame = siteFrameFor(plan, "p1", "right");
-    if ("reason" in frame) throw new Error(frame.reason);
-    expect(frame.length).toBeCloseTo(3047.6613, 6);
-    expect(frameFormulas(frame, 0).drawing).toBe("Drawing XY (mm from the sheet origin, Y down the sheet) = (12544.2133 − Y, 9620.504 + X)");
-    expect(frameFormulas(frame, 0).plan).toBe("Plan (mm) = (12544.2133 − Y, −9620.504 − X, Z)");
+  it("pins a right-handed frame to the FS-01 span", () => {
+    const span = spanFrame(plan, "p1");
+    if (!span) throw new Error("no frame");
+    expect(span.length).toBeCloseTo(3047.6613, 6);
+    expect(span.yaw).toBe(-90);
+    const frame = frameFromYaw(span.origin, span.yaw);
+    expect(frameFormulas(frame, 0).plan).toBe("Plan (mm) = (12544.2133 + Y, −9620.504 − X, Z)");
+    expect(frameFormulas(frame, 0).drawing).toBe("Drawing XY (mm from the sheet origin, Y down the sheet) = (12544.2133 + Y, 9620.504 + X)");
   });
 
-  it("draws the duct in the plan frame and names missing faces", () => {
-    const s = { detailing: [], siteFacts: [f("siteFrame", "right", { subjectIds: ["p1"] }), ...box("duct", [1200, -250, null, 1800, 250, null])], baselinePlan: plan };
-    expect(siteFrameOf(s)?.frame?.spanId).toBe("p1");
-    expect(planBox(s, "duct")).toBeNull();
+  it("reads boxes in the saved adaptationFrame facts and names missing faces", () => {
+    const frame = [f("adaptationFrame.origin.x", 12544.2133), f("adaptationFrame.origin.y", -9620.504), f("adaptationFrame.origin.z", 0), f("adaptationFrame.yaw", -90, { unit: "deg" })];
+    const s = { detailing: frame, siteFacts: box("duct", [1200, -250, null, 1800, 250, null]), baselinePlan: plan };
+    const site = siteFrameOf(s);
+    expect(site?.reason).toBeNull();
+    const d = site!.toDrawing!({ x: 1200, y: 250, z: 0 });
+    expect(d.x).toBeCloseTo(12794.2133, 6);
+    expect(d.y).toBeCloseTo(-10820.504, 6);
     expect(boxGaps(s, "duct", true)).toEqual(["height (Z): both faces missing"]);
-    const full = { ...s, siteFacts: [s.siteFacts[0], ...box("duct", [1200, -250, -300, 1800, 250, 300])] };
-    expect(planBox(full, "duct")).toEqual({ min: { x: 12294.2133, y: -11420.504, z: -300 }, max: { x: 12794.2133, y: -10820.504, z: 300 } });
+  });
+
+  it("reports an incomplete frame instead of guessing", () => {
+    const s = { detailing: [f("adaptationFrame.yaw", -90, { unit: "deg" })], siteFacts: [], baselinePlan: plan };
+    expect(siteFrameOf(s)?.reason).toBeTruthy();
   });
 
   it("asks for each missing box face by name in adaptation", () => {

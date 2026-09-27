@@ -100,13 +100,20 @@ export async function renderPdf(s: ExportSnapshot, options: PdfOptions = {}): Pr
       const top = y;
       doc.rect(left, top, width, 220).lineWidth(0.6).strokeColor('#CDD9DF').stroke();
       at(axes[2], left + 10, top + 8, 9);
-      const points = [...view.segments.flatMap(r => [r.from, r.to]), ...view.joints.map(r => r.position)];
+      const points = [...view.segments.flatMap(r => [r.from, r.to]), ...view.joints.map(r => r.position), ...(view.context ?? []).flatMap(r => r.positions)];
       if (!points.length) { at('Geometry unavailable', left + 10, top + 40); y += 230; continue; }
       const a = axes[0], b = axes[1];
       const minA = Math.min(...points.map(p => p[a])), maxA = Math.max(...points.map(p => p[a]));
       const minB = Math.min(...points.map(p => p[b])), maxB = Math.max(...points.map(p => p[b]));
       const scale = Math.min(420 / Math.max(maxA - minA, 1), 130 / Math.max(maxB - minB, 1));
       const xy = (p: number[]): [number, number] => [left + 40 + (p[a] - minA) * scale, top + 175 - (p[b] - minB) * scale];
+      (view.context ?? []).forEach((r, index) => {
+        const pts = r.positions.map(xy);
+        if (r.kind === 'pipe' && pts.length === 2) doc.moveTo(...pts[0]).lineTo(...pts[1]).lineWidth(1).strokeColor('#8B9298').stroke();
+        else pts.slice(0, 1).forEach(([x, cy]) => doc.circle(x, cy, 4).strokeColor('#8B9298').stroke());
+        const label = r.kind === "pipe" && pts.length === 2 ? [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2] : pts[0];
+        if (label) at(`C${index + 1}`, label[0] - 18, label[1] - 18, 7);
+      });
       view.segments.forEach((r, index) => {
         const [x1, y1] = xy(r.from), [x2, y2] = xy(r.to);
         doc.moveTo(x1, y1).lineTo(x2, y2).lineWidth(2).strokeColor('#235B67').stroke();
@@ -123,6 +130,7 @@ export async function renderPdf(s: ExportSnapshot, options: PdfOptions = {}): Pr
       y += 230;
     }
     table(['Callout', 'Segment / pieces', 'Coordinates (' + view.unit + ')'], [55, 220, 236], view.segments.map((r, i) => [String(i + 1), `${r.id}\nPieces: ${r.pieceIds.join(', ') || 'unresolved'}`, `${r.from.join(', ')} -> ${r.to.join(', ')}`]));
+    if (view.context?.length) table(['Context', 'Retained item (not purchase)', 'Coordinates (' + view.unit + ')'], [55, 220, 236], view.context.map((r, i) => [`C${i + 1}`, `${r.id} (${r.kind})`, r.positions.map(p => p.join(', ')).join(' -> ') || 'Unknown position']));
     table(['Callout', 'Joint', 'Coordinates (' + view.unit + ')'], [55, 220, 236], view.joints.map((r, i) => [`J${i + 1}`, r.id, r.position.join(', ')]));
   };
   try {
@@ -137,7 +145,7 @@ export async function renderPdf(s: ExportSnapshot, options: PdfOptions = {}): Pr
     if (s.baselinePlan) plan(s.baselinePlan, 'Before / unchanged baseline');
     plan(s.selectedPlan, s.intent === 'adapt_to_site' ? 'After / selected proposal' : 'Numbered work plan');
     heading('Material quantities');
-    paragraph('Installed quantities from the selected plan. Purchasing stock and allowances are not inferred. Numeric values are preserved without added rounding.');
+    paragraph('Modeled quantities from the selected plan; physical fabrication splits may remain unresolved. Purchasing stock and allowances are not inferred. Numeric values are preserved without added rounding.');
     table(['Material / subjects', 'Quantity / unit', 'Status / sources / notes'], [205, 100, 206], s.materials.map(r => [`${r.id}: ${r.description}\nSubjects: ${r.subjectIds.join(', ')}`, r.quantity === null ? `UNRESOLVED\n${r.unit}` : `${r.quantity}\n${r.unit}`, `${r.status}\nSources: ${r.sourceIds.join(', ') || 'none'}\n${r.unresolvedReason ?? ''}`]));
     heading('Cut list');
     table(['Piece / segments / joints', 'Cut / unit', 'Status / sources / notes'], [205, 100, 206], s.cuts.map(r => [`${r.pieceId}\nSegments: ${r.segmentIds.join(', ')}\nJoints: ${r.jointIds.join(', ')}`, r.length === null ? `UNRESOLVED\n${r.unit}` : `${r.length}\n${r.unit}`, `${r.status}\nSources: ${r.sourceIds.join(', ') || 'none'}\n${r.unresolvedReason ?? ''}`]));
