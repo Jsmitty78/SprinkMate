@@ -47,14 +47,15 @@ export function PlanCanvas(props: CanvasProps) {
   const baseShape = useMemo(() => planShape(baseline), [baseline]);
   const routeShapes = useMemo(() => routes.map(r => ({ route: r, shape: planShape(r.plan) })), [routes]);
 
+  const protectedIds = new Set(mode === "adapt" ? baseline?.entities.filter(e => !props.affectedIds.includes(e.id)).map(e => e.id) : []);
   const boxPoints = (b: Box) => [b.min, { ...b.min, x: b.max.x }, b.max, { ...b.max, x: b.min.x }].map(p => props.boxToDrawing?.(p) ?? p);
   const polygon = (b: Box) => boxPoints(b).map(p => `${p.x},${-p.y}`).join(" ");
   const boxLabel = (b: Box) => boxPoints(b)[2];
   const fit = useMemo(() => {
     const pts: Point[] = [];
     for (const s of [baseShape, ...routeShapes.map(r => r.shape)]) {
-      s.segments.forEach(g => pts.push(g.a, g.b));
-      s.markers.forEach(m => pts.push(m.at));
+      s.segments.filter(g => !protectedIds.has(g.id)).forEach(g => pts.push(g.a, g.b));
+      s.markers.filter(m => !protectedIds.has(m.id)).forEach(m => pts.push(m.at));
     }
     for (const b of [duct, envelope]) if (b) pts.push(...boxPoints(b));
     if (!pts.length) return null;
@@ -65,7 +66,7 @@ export function PlanCanvas(props: CanvasProps) {
     let vw = w * (1 + PAD * 2), vh = h * (1 + PAD * 2);
     if (vw / vh < aspect) vw = vh * aspect; else vh = vw / aspect;
     return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, vw, vh };
-  }, [baseShape, routeShapes, duct, envelope, size, props.boxToDrawing]);
+  }, [baseShape, routeShapes, duct, envelope, size, props.boxToDrawing, props.affectedIds]);
 
   const v = view ?? (fit ? { cx: fit.cx, cy: fit.cy, zoom: 1 } : null);
   if (!fit || !v) return <div className="fa-canvas fa-canvas-empty" ref={host}>{props.empty}</div>;
@@ -102,7 +103,6 @@ export function PlanCanvas(props: CanvasProps) {
   const others = routeShapes.filter(r => r.route.plan.id !== focusRouteId);
   const baselineIsWork = mode === "prepare" || !routes.length || !!props.staleRoutes;
 
-  const protectedIds = new Set(mode === "adapt" ? baseline?.entities.filter(e => !props.affectedIds.includes(e.id)).map(e => e.id) : []);
   const drawPieces = (shape: ReturnType<typeof planShape>, c: Callouts, cls: string, interactive: boolean) => (
     <g className={cls}>
       {shape.segments.map(s => {

@@ -444,7 +444,7 @@ export function createIntegratedServices(
             for (const original of wanted ?? []) {
               const c = structuredClone(original);
               c.plan.ducts = generationInput(s).baseline.ducts;
-              const input = toFabricationInput(
+              const input: FabricationInput = toFabricationInput(
                 { ...s, packageId: s.id, plan: c.plan, status: "proposed" },
                 {
                   baselinePlanId: s.baselinePlan!.id,
@@ -458,6 +458,11 @@ export function createIntegratedServices(
                   assemblyConditions: baseInput.assemblyConditions,
                 },
               );
+              // Retain source-only station semantics; a generated route cannot confirm a physical end.
+              for (const node of input.nodes) if (baseInput.nodes.some(n => n.id === node.id && n.datum === "scope_interface")) {
+                node.datum = "scope_interface";
+                delete node.netCutOffset;
+              }
               const d = derive(s, input, c.plan);
               d.delta = compareWorkPackages(base.fabrication, d.fabrication);
               details.push(d);

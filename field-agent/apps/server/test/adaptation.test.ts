@@ -1,3 +1,4 @@
+import { fs01Adaptation } from "./fixtures/fs01-adaptation.js";
 import { expect, it } from "vitest";
 import { adaptationInterval, adaptationFrame, evaluateLocalPlanGeometry, type WorkPackageSnapshot } from "@field-agent/core";
 import { generateCandidates, createLocalGeometryPort } from "@field-agent/planning";
@@ -48,4 +49,22 @@ it("preserves missing-height and bounded no-route states instead of fabricating 
   expect(result.candidates).toHaveLength(0);
   expect(result.state).toBe("no_candidate");
   expect(result.reasons[0].message).toContain("not proof of global infeasibility");
+});
+
+it("generates steel routes for frozen FS-01 P27 with fictional site bounds and preserves the entire source context", () => {
+  const s = { ...fixture(), ...fs01Adaptation("asset"), projectId: "idaho-source-test" };
+  const result = search(s);
+  expect(result.candidates).toHaveLength(2);
+  expect(result.candidates.map(c => c.comparison.addedFittings)).toEqual([4, 4]);
+  // Midpoint between expanded obstacle Y=380.1625 and pipe-radius-reduced bounds:
+  // +775 and -875 mm lanes => +1550 / +1750 mm, independent of the #1 oracle routes.
+  expect(result.candidates[0].comparison.centerlineLengthDeltaM).toBeCloseTo(1.55, 9);
+  expect(result.candidates[1].comparison.centerlineLengthDeltaM).toBeCloseTo(1.75, 9);
+  for (const c of result.candidates) {
+    const candidate = candidatePackage(apiCandidate(c.plan), s);
+    for (const entity of s.baselinePlan!.entities.filter(e => e.id !== "P27")) expect(candidate.entities.find(e => e.id === entity.id)).toEqual(entity);
+    expect(candidate.connections.filter(c => c.id.startsWith("P28-") || c.id.startsWith("P30-"))).toEqual(s.baselinePlan!.connections.filter(c => c.id.startsWith("P28-") || c.id.startsWith("P30-")));
+  }
+  expect(s.detailing.some(f => f.field === "jurisdiction")).toBe(false);
+  expect(result.candidates.every(c => c.geometry.totalCutLengthM === null)).toBe(true);
 });

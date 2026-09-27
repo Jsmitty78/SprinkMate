@@ -291,6 +291,9 @@ export function activeDetailingPlan(s: WorkPackageSnapshot): Plan | null {
   return { ...s.baselinePlan, entities: s.baselinePlan.entities.filter(e => ids.includes(e.id) || (e.kind === "tie_in" && adjacent.includes(e.id))) };
 }
 
+export const showCpvcInputs = (s: WorkPackageSnapshot) => activeDetailingPlan(s)?.entities.some(e => e.kind === "pipe" && e.productId === PIPE) ?? false;
+export const showSfInputs = (s: WorkPackageSnapshot) => s.intent !== "adapt_to_site" || findFact(s, "jurisdiction")?.value === "san_francisco";
+
 /** Presence checks only; the server decides whether the inputs are sufficient. */
 export function requirements(s: WorkPackageSnapshot): Requirement[] {
   const out: Requirement[] = [];
@@ -312,8 +315,8 @@ export function requirements(s: WorkPackageSnapshot): Requirement[] {
         add({ id: `movement.${port.id}.${fit.id}`, group: "Assembly", label: `Joint movement at ${fit.id}/${port.id} can be made`, done: isConfirmed(findFact(s, `movement.${port.id}`, fit.id)) });
   }
   add({ id: "workAreaAccess", group: "Assembly", label: "Work-area access confirmed", done: isConfirmed(findFact(s, "workAreaAccess")) });
-  add({ id: "curePlan", group: "Assembly", label: "Cement set and cure plan", done: isConfirmed(findFact(s, "curePlan")) });
-  for (const b of PROJECT_BASIS) add({ id: b.field, group: "Project", label: b.label, done: isConfirmed(findFact(s, b.field)) });
+  if (showCpvcInputs(s)) add({ id: "curePlan", group: "Assembly", label: "Cement set and cure plan", done: isConfirmed(findFact(s, "curePlan")) });
+  for (const b of showSfInputs(s) ? PROJECT_BASIS : []) add({ id: b.field, group: "Project", label: b.label, done: isConfirmed(findFact(s, b.field)) });
   if (s.intent === "adapt_to_site") {
     add({ id: "change", group: "Site", label: "Affected pipe chosen", done: !!s.changeRequest?.affectedEntityIds.length });
     add({ id: "duct", group: "Site", label: "Obstacle measured (all six faces)", done: readBox(s, "duct").confirmed });

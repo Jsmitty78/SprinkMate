@@ -156,7 +156,7 @@ export function RouteComparison({ routes, baseline, baselineResult, focusId, sel
 export function PackageDelta({ detail, callouts, baselineResult }: { detail: DetailPlan | undefined; callouts: Callouts; baselineResult: PackageResult | undefined }) {
   const delta = detail?.delta;
   if (!delta) return null;
-  const name = (id: string) => { const [kind, product] = id.split(":"); return kind === "consumable" ? "Solvent cement" : productName(product); };
+  const name = (id: string) => { if (id.startsWith("unresolved-")) return `${id.slice(11)} requirements (unresolved)`; const [kind, product] = id.split(":"); return kind === "consumable" ? "Solvent cement" : productName(product); };
   return <Section title="Change from the original">
     <table className="fa-table"><thead><tr><th>Item</th><th className="num">Original</th><th className="num">Revised</th><th className="num">Change</th></tr></thead>
       <tbody>{delta.materials.map(m => <tr key={m.id}>

@@ -1,3 +1,4 @@
+import { fs01Adaptation } from "./fixtures/fs01-adaptation.js";
 import { adaptationFixture } from "./fixtures/adaptation-package.js";
 import { exportSnapshot } from "../src/integration/snapshot.js";
 import { validateSnapshot } from "../src/exports/snapshot.js";
@@ -432,4 +433,19 @@ it("runs an independently created rotated interval with retained context through
   expect(changed.baselinePlan).toEqual(s.baselinePlan);
   expect(() => t.packages.artifact(s.id, artifact.id)).toThrow("stale_artifact");
   expect(() => t.packages.select(s.id, { expectedRevision: changed.inputRevision, planId: candidate.plan.id })).toThrow("stale_candidates");
+});
+
+it("persists FS-01 steel alternatives with unknown physical closure and no SF/CPVC default", async () => {
+  const t = setup(), s = await create(t, 3, false, input => Object.assign(input, fs01Adaptation(input.sourceDrawing!.assetId)));
+  const generated = await run(t, s.id);
+  expect(generated.outputs.candidates?.candidates, JSON.stringify(t.detailStore.get(s.id)?.latestRun)).toHaveLength(2);
+  const details = t.detailStore.get(s.id)!.details;
+  expect(details).toHaveLength(3);
+  for (const d of details) {
+    expect(d.input.nodes.filter(n => n.datum === "scope_interface")).toHaveLength(2);
+    expect(d.fabrication.cuts.every(c => c.cutLength.value === null)).toBe(true);
+    expect(d.fabrication.materials.some(m => m.productId?.startsWith("spears/"))).toBe(false);
+    expect(d.profile?.project.basis).toBeUndefined();
+  }
+  expect(generated.baselinePlan).toEqual(s.baselinePlan);
 });
