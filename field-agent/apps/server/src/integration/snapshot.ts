@@ -74,6 +74,7 @@ export function exportSnapshot(
       },
     ]),
   );
+  for (const e of f.evidence) sources.set(e.id, { id: e.id, title: e.id, reference: e.description });
   for (const c of d.profile.checks)
     for (const ref of c.sourceRefs)
       if (!sources.has(ref))
@@ -155,7 +156,7 @@ export function exportSnapshot(
     ...(s.intent === "adapt_to_site" ? { baselinePlan: view(baseline) } : {}),
     materials: f.materials.map((m) => ({
       id: m.id,
-      description: m.productId ?? m.kind,
+      description: m.kind === "pipe" ? `${m.productId ?? "Unselected pipe"} (modeled spans; not purchasing stock)` : m.productId ?? m.kind,
       quantity: m.quantity.value,
       unit: m.quantity.unit,
       status: m.quantity.value === null ? "unresolved" : "known",
@@ -176,7 +177,7 @@ export function exportSnapshot(
       length: c.cutLength.value,
       unit: "m",
       status: c.cutLength.value === null ? "unresolved" : "known",
-      sourceIds: [...new Set(c.takeouts.flatMap((t) => t.sourceIds))],
+      sourceIds: [...new Set([...c.centerline.evidenceIds, ...c.takeouts.flatMap(t => [...t.sourceIds, ...t.netTakeout.evidenceIds])])],
       unresolvedReason:
         c.cutLength.value === null
           ? reason(c.cutLength.reasons, "Cut unresolved")

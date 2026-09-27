@@ -44,7 +44,7 @@ export interface Catalog {
 export interface Node {
   id: string;
   position: Value<Point3>;
-  datum: "fitting_center" | "physical_pipe_end" | "tie_in";
+  datum: "fitting_center" | "physical_pipe_end" | "tie_in" | "scope_interface";
   /** Required for tie_in only; positive offset shortens the pipe. */
   netCutOffset?: Value<Length>;
 }
@@ -162,7 +162,7 @@ export interface FabricationOutput {
   selectedProducts: Catalog["products"];
   frame: FabricationInput["frame"];
   rounding: "none; metres in calculation; renderer must declare display rounding";
-  quantityBasis: "installed pieces; no stock nesting, waste, or procurement allowance";
+  quantityBasis: "modeled pieces/spans; physical splits and purchasing stock require separate detailing";
   fittings: (Fitting & { callout: string; position: Value<Point3>; jointIds: string[] })[];
   materials: MaterialRow[]; cuts: CutRow[]; joints: Joint[]; operations: Operation[];
   subassemblies: { id: string; pieceIds: string[]; jointIds: string[] }[];

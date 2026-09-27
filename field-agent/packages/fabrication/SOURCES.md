@@ -15,3 +15,29 @@ Source-backed nominal math is G=0.0333375 m, H=0.060325 m and H-G=0.0269875 m. N
 The earlier Wheatland/Anvil threaded candidate was not used: its axial makeup and selected pipe-end compatibility remain unresolved. No turn-to-linear conversion, mixed product revision, nominal-size-to-OD substitution, or pressure/listing transfer is implemented.
 
 The source-backed positive example demonstrates detailing of a prefabricated two-pipe/one-elbow spool using real catalog dimensions and procedure references. It does not establish physical fit, onsite measurements, environmental conditions, final field closure, system performance, or a release-level complete positive Scenario 3 installation. Those remain integration/field acceptance work.
+
+## Steel extension (#10, retrieved 2026-09-27 UTC)
+
+The **earlier malleable-iron candidate** above is still not a confirmed FS-01 match.
+This extension selects separate black steel / cast-iron families. Source revisions
+and downloaded SHA-256 digests are in `src/steel-catalog.ts`.
+
+- [Wheatland A53 Schedule 40 submittal](https://www.wheatland.com/wp-content/uploads/2017/12/ASTM-A53-Schedule-40-Submittal-Sheet-1.pdf), WFS-101025: page 1 identifies threading suitability and manufacturer UL/FM claims. NPS 2 OD is 2.375 inches; NPS 1 OD is 1.315 inches. Actual supplied pipe type/end preparation and project approval remain unresolved.
+- [Anvil Fig.351 submittal](https://www.asc-es.com/resources-and-downloads/351-90-elbow-straight-submittal), PS-SUB-351-v01 20211022: pages 1-2 specify cast iron, ASME B16.4 / B1.20.1; page 3's **B** is center-to-face (NPS 2: 2.25 inches; NPS 1: 1.5 inches). **A is not the face datum.** Page 4 provides thread inspection, sealant and makeup sequence. It does not provide a final axial engagement datum. Exact fitting listing scope needs further confirmation; pipe listing claims are not transferred to the fitting.
+
+The paired catalog identities are dimensional candidates. They do not assert
+manufacturer cross-brand joint certification, a purchase SKU, or job approval.
+R2 still has no actual product selected from FS-02's material requirement alone.
+There is no default for MSU FP2.1. `STEEL-CONTRACT.md` documents explicit inputs.
+
+The positive **software arithmetic fixture** is an invented open-ended spool with
+609.6/457.2 mm centerlines and 12/15 mm final axial engagements. NPS 2 cuts are
+564.45/415.05 mm; NPS 1 cuts are 583.5/434.1 mm. These are independent hand
+calculations, not measurements. Missing, foreign, or product-mismatched engagement
+keeps cuts unknown. No turn-to-distance conversion is used.
+
+Complete positive product/field acceptance remains open: obtain actual scoped
+engagement and physical-length evidence, fitting listing/compatibility and project
+suitability review, end-preparation/tool/sealant review, and practitioner-reviewed
+assembly. #29 owns fixed-end closure components and sequence; #12 owns generation
+and protected context. The Draft PR does not close #10 or the #8 acceptance gate.

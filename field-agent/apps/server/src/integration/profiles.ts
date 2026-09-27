@@ -39,6 +39,8 @@ export function evaluateProfile(
   const heads = s.baselinePlan!.entities.filter((e) => e.kind === "head");
   const tyco = heads.filter((e) => e.productId === "TY3231");
   const supports = s.baselinePlan!.entities.filter((e) => e.kind === "support");
+  const jurisdiction = fact<string>(s, "jurisdiction");
+  const sfApplicable = jurisdiction.confirmed && jurisdiction.value === "san_francisco" && jurisdiction.evidenceIds.length > 0;
   const request: ProjectEvaluationRequest = {
     project: {
       id: s.projectId,
@@ -46,12 +48,12 @@ export function evaluateProfile(
       asOf: s.updatedAt.slice(0, 10),
     },
     selectedRulePacks: [
-      "sf-project-basis",
-      ...(supports.length ? ["sf-supports-2025" as const] : []),
+      ...(sfApplicable ? ["sf-project-basis" as const] : []),
+      ...(sfApplicable && supports.length ? ["sf-supports-2025" as const] : []),
       ...(tyco.length
         ? ["tyco-tfp171-head" as const, "tyco-tfp171-extra" as const]
         : []),
-      ...(adaptation ? ["sf-local-change-2025" as const] : []),
+      ...(sfApplicable && adaptation ? ["sf-local-change-2025" as const] : []),
     ],
     facts: {
       sfNfpa13: {
@@ -179,6 +181,18 @@ export function evaluateProfile(
       reason: project.basis?.reason ?? "Project basis unresolved",
       sourceRefs: project.basis?.sourceRefs.map((r) => r.url) ?? [],
     },
+    ...output.selectedProducts.filter(p => p.limitations?.length).map(p => ({
+      id: `PRODUCT-SUITABILITY-${p.id}`, subjectIds: input.pieces.filter(x => x.productId === p.id).map(x => x.id),
+      status: "unknown" as const, state: "input_missing", reason: p.limitations!.join(" "), sourceRefs: p.sourceIds,
+    })),
+    ...input.pieces.flatMap(p => {
+      const required = fact<string>(s, "requiredConnectionMethod", p.id);
+      const product = output.selectedProducts.find(x => x.id === p.productId);
+      return required.confirmed && product && required.value !== product.connection ? [{
+        id: `MATERIAL-CONFLICT-${p.id}`, subjectIds: [p.id], status: "fail" as const, state: "conflict",
+        reason: "Selected product conflicts with the explicit source connection requirement; document a design change before using it.", sourceRefs: required.evidenceIds,
+      }] : [];
+    }),
     ...output.cuts.map((c) => ({
       id: `CUT-${c.pieceId}`,
       subjectIds: [c.pieceId],
@@ -255,7 +269,10 @@ export function evaluateProfile(
     checks,
     project,
     excluded: [
-      ...(!adaptation
+      ...(!sfApplicable ? [{ id: "sf-project-basis", reason: "No confirmed San Francisco jurisdiction; source drawing basis does not establish current applicability." },
+        { id: "sf-supports-2025", reason: "San Francisco applicability is unconfirmed or outside this project." },
+        { id: "sf-local-change-2025", reason: "San Francisco applicability is unconfirmed or outside this project." }] : []),
+      ...(sfApplicable && !adaptation
         ? [
             {
               id: "sf-local-change-2025",

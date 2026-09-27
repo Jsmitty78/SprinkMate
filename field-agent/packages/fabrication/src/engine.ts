@@ -117,6 +117,10 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
       base.netTakeout = metric(0, "confirmed_inputs");
       return base;
     }
+    if (node.datum === "scope_interface") {
+      base.netTakeout = metric(null, "unknown", ["Scope interface is not a physical pipe end or confirmed joint datum", "Thread engagement/product evidence and physical length/elevation require detailing"]);
+      return base;
+    }
     if (node.datum === "tie_in") {
       const offset = read(input, node.netCutOffset, node.id);
       base.netTakeout = metric(offset.value ? toMeters(offset.value) : null, offset.basis, offset.reasons, offset.evidenceIds);
@@ -193,7 +197,7 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
   const joints: Joint[] = [];
   for (const piece of input.pieces) for (const end of ["start", "end"] as const) {
     const node = nodes.get(end === "start" ? piece.startNodeId : piece.endNodeId)!;
-    if (node.datum === "physical_pipe_end") continue;
+    if (node.datum === "physical_pipe_end" || node.datum === "scope_interface") continue;
     const connection = portMap.get(`${piece.id}/${end}`);
     const id = connection ? `${connection.fitting.id}/${connection.port.id}` : `${piece.id}/${end}/tie-in`;
     const cut = cuts.find(c => c.pieceId === piece.id)!;
@@ -238,6 +242,13 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
       quantity: metric(value.value, value.basis, value.reasons, value.evidenceIds, "each"), centerlineLength: null, cutLength: null,
       status: "unsupported", reasons: [accessory.reason || "Accessory installation is outside this catalog", ...value.reasons] });
   }
+  if (input.nodes.some(n => n.datum === "scope_interface")) {
+    for (const kind of ["other", "support"] as const) materials.push({
+      id: `unresolved-${kind}`, kind, productId: null, entityIds: input.pieces.map(p => p.id),
+      quantity: metric(null, "unknown", [kind === "other" ? "Physical joints, closure components and purchasing stock unresolved" : "Support requirements and quantities unresolved"], [], "each"),
+      centerlineLength: null, cutLength: null, status: "unresolved", reasons: ["Drawing scope does not establish physical fabrication quantities"],
+    });
+  }
   if (joints.some(j => j.procedureId === "spears-fg3-socket-1in")) materials.push({ id: "consumable:cement", kind: "consumable", productId: CEMENT_ID,
     entityIds: joints.filter(j => j.procedureId === "spears-fg3-socket-1in").map(j => j.id), quantity: metric(null, "unknown", ["Cement purchase quantity is not estimated"], [], "each"),
     centerlineLength: null, cutLength: null, status: "unresolved", reasons: ["No stock or consumables optimization"] });
@@ -254,13 +265,15 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
     siteEvidenceIds: [...input.siteEvidenceIds], evidenceClass: catalog.evidenceClass, frame: { ...input.frame },
     selectedProducts: structuredClone(catalog.products.filter(p => [...input.pieces, ...input.fittings].some(e => e.productId === p.id))),
     rounding: "none; metres in calculation; renderer must declare display rounding",
-    quantityBasis: "installed pieces; no stock nesting, waste, or procurement allowance",
+    quantityBasis: "modeled pieces/spans; physical splits and purchasing stock require separate detailing",
     fittings: input.fittings.map((f, i) => ({ ...structuredClone(f), callout: `F${i + 1}`,
       position: structuredClone(nodes.get(f.nodeId)!.position), jointIds: joints.filter(j => j.fittingId === f.id).map(j => j.id) })),
     materials, cuts, joints, operations,
     subassemblies: unique(input.pieces.map(p => p.subassemblyId)).map(id => ({ id,
       pieceIds: input.pieces.filter(p => p.subassemblyId === id).map(p => p.id), jointIds: joints.filter(j => j.subassemblyId === id).map(j => j.id) })),
-    gaps, sources: structuredClone(catalog.sources), evidence: structuredClone(input.evidence), constructionApproval: "not_assessed",
+    gaps, sources: structuredClone(catalog.sources.filter(source =>
+      catalog.products.some(p => p.sourceIds.includes(source.id) && [...input.pieces, ...input.fittings].some(e => e.productId === p.id))
+      || operations.some(o => o.sourceIds.includes(source.id)))), evidence: structuredClone(input.evidence), constructionApproval: "not_assessed",
   };
 }
 

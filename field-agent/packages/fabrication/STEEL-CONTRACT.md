@@ -33,3 +33,21 @@ joint does not inherit an existing joint's measured engagement.
 Acceptance remains partial pending real engagement measurements, project/product
 approval, complete positive detailing evidence and practitioner review. Numerical
 fixtures use explicit invented dimensions and are not field acceptance.
+
+`Node.datum = "scope_interface"` (saved `datum.start/end`) marks a work-area
+station that is neither a physical cut end nor a proven joint. It retains projected
+length but yields null cut and unresolved joints/support/stock requirements.
+Source-context heads have null purchasing quantity; each row remains one retained
+model reference. The production adapter accepts a head boundary only with that
+explicit datum. This is independent of #12's adaptation interval extraction.
+
+`toPlanningProduct(catalog, pipeProductId, elbowProductId?)` selects the pair
+explicitly; omission works only for a catalog containing exactly one pipe choice.
+Steel `insertionOrThreadMakeup` is null because a generated joint has no measured
+engagement. #12 may generate geometrically provisional routes, but must preserve
+this null through detailing. Per-existing-joint engagement travels through
+`toLocalPlanGeometry` with its input basis/evidence, never promoted from proposed.
+
+The production aggregate configuration is `scenario-integration-2-steel`.
+San Francisco rules run only with an explicit confirmed SF jurisdiction fact;
+source NFPA editions and catalog selection do not create jurisdiction/permit facts.

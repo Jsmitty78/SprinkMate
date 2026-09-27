@@ -11,7 +11,7 @@ import {
 import {
   deriveWorkPackage,
   compareWorkPackages,
-  spearsCatalog,
+  fabricationCatalog,
   type FabricationOutput,
   type FabricationInput,
 } from "@field-agent/fabrication";
@@ -50,7 +50,7 @@ import {
 import { evaluateProfile, type ProfileOutput } from "./profiles.js";
 import { exportSnapshot } from "./snapshot.js";
 
-export const INTEGRATION_VERSION = "scenario-integration-1";
+export const INTEGRATION_VERSION = "scenario-integration-2-steel";
 export interface Detail {
   id: string;
   input: FabricationInput;
@@ -131,7 +131,7 @@ function summary(d: Detail, api: PackagePlan): PackageResult {
     materials: f.materials.map((m) => ({
       id: safe(m.id),
       entityIds: subjects(m.entityIds),
-      description: m.productId ?? m.kind,
+      description: m.kind === "pipe" ? `${m.productId ?? "Unselected pipe"} (modeled spans; not purchasing stock)` : m.productId ?? m.kind,
       quantity: q(m.quantity),
     })),
     cuts: f.cuts.map((c) => ({
@@ -168,7 +168,7 @@ function derive(
   input: FabricationInput,
   plan: Plan,
 ): Detail {
-  const fabrication = deriveWorkPackage(input, spearsCatalog(s.configVersion));
+  const fabrication = deriveWorkPackage(input, fabricationCatalog(s.configVersion));
   const calculated = geometry({
     plan,
     proposedNodeIds: input.nodes
@@ -371,6 +371,7 @@ export function createIntegratedServices(
               1,
             ],
           ] as const) {
+            if (key === "curePlan" && !base?.entities.some(e => fabricationCatalog(s.configVersion).products.some(p => p.id === e.productId && p.connection === "cpvc_socket_solvent"))) continue;
             if (
               value(s, key).status === "unknown" &&
               !state.acknowledgedQuestions?.includes(key) &&
