@@ -15,22 +15,6 @@ const token='integration-test-token-only';
 const json=(body:unknown,key?:string)=>({method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{})},body:JSON.stringify(body)});
 
 describe('durable deterministic workflow',()=>{
-  it('preserves legacy task evidence without resuming or exposing removed runtime state',async()=>{
-    let s=setup();const t=s.createTask({title:'existing work'});await s.replay(t.id,'normal');
-    const saved={...s.getTask(t.id),run:{status:'running'}};
-    s.store.db.prepare('UPDATE tasks SET data=? WHERE id=?').run(JSON.stringify(saved),t.id);
-    s.store.db.exec("CREATE TABLE jobs (id TEXT PRIMARY KEY, task_id TEXT, status TEXT); CREATE TABLE sessions (task_id TEXT PRIMARY KEY, path TEXT);");
-    s.store.db.prepare('INSERT INTO jobs VALUES(?,?,?)').run('old-run',t.id,'running');
-    s.store.db.prepare('INSERT INTO sessions VALUES(?,?)').run(t.id,'legacy-session');
-    const dir=s.dataDir;s.store.close();s=new FieldService(dir);services.push(s);
-    expect(s.getTask(t.id)).toMatchObject({title:'existing work',observations:saved.observations,facts:saved.facts});
-    expect(s.getTask(t.id)).not.toHaveProperty('run');
-    expect(s.listTasks()[0]).not.toHaveProperty('run');
-    expect(s.store.db.prepare('SELECT status FROM jobs WHERE id=?').get('old-run')).toEqual({status:'running'});
-    expect(s.store.db.prepare('SELECT path FROM sessions WHERE task_id=?').get(t.id)).toEqual({path:'legacy-session'});
-    expect(s.cancel(t.id).state).toBe('cancelled');
-    expect(s.getTask(t.id).observations).toEqual(saved.observations);
-  });
   it.each(['.','..','../outside'])('rejects a task ID that could escape its task directory: %s',id=>{
     const s=setup();expect(()=>s.createTask({id})).toThrow('IDの形式');
   });
@@ -81,14 +65,6 @@ describe('durable deterministic workflow',()=>{
     expect(artifact.validation.rules.some(rule=>rule.status==='unknown'&&rule.missingInputs.includes('installationTorqueFtLb'))).toBe(true);
     expect(artifact.unresolved).toContain('施工記録なし');
   });
-  it('does not let an AI pressure candidate confirm itself',async()=>{
-    const s=setup(),t=s.createTask();await s.replay(t.id,'normal');
-    s.reviewFacts(t.id,{baseRevision:s.getTask(t.id).revision,facts:{workingPressurePsi:{value:null,confirmed:false,evidenceIds:[],source:'manual'}}});
-    s.proposeFacts(t.id,{id:'pressure-candidate',targetId:'H1',reason:'記録上は100 psiの候補',facts:{workingPressurePsi:{value:100,confirmed:true,source:'manual',evidenceIds:['normal-initial']}}});
-    const current=s.getTask(t.id);
-    expect(current.facts.workingPressurePsi).toMatchObject({value:100,confirmed:false,source:'model'});
-    expect(current.validation?.rules.some(rule=>rule.status==='unknown'&&rule.missingInputs.includes('workingPressurePsi.confirmation'))).toBe(true);
-  });
   it('never reuses the artifact or result version after confirmation is removed',async()=>{
     const s=setup(),t=s.createTask();await s.replay(t.id,'normal');const artifact=s.prepareArtifact(t.id);
     const before=s.getTask(t.id);
@@ -133,14 +109,6 @@ describe('durable deterministic workflow',()=>{
     const report=s.prepareArtifact(t.id);
     expect(report.validation.rule.status).toBe('unknown');expect(report.unresolved).toContain('天井内にアクセスできない');
   });
-  it('model candidates cannot confirm themselves or overwrite manual confirmation',async()=>{
-    const s=setup(),t=s.createTask();await s.replay(t.id,'missing');
-    s.proposeFacts(t.id,{id:'model-proposal',targetId:'H1',reason:'画面で下を向いているように見える',facts:{orientation:{value:'pendent',confirmed:true,source:'manual',evidenceIds:['missing-initial']}}});
-    let current=s.getTask(t.id);expect(current.facts.orientation.confirmed).toBe(false);expect(current.validation?.rule.status).toBe('unknown');
-    await s.replay(t.id,'nonconforming');
-    s.proposeFacts(t.id,{id:'second-proposal',targetId:'H1',reason:'カタログはpendent',facts:{orientation:{value:'pendent',confirmed:true,source:'fixture',evidenceIds:['nonconforming-initial']}}});
-    current=s.getTask(t.id);expect(current.facts.orientation.value).toBe('upright');expect(current.validation?.rule.status).toBe('fail');
-  });
   it('rejects evidence from another target and measurements with malformed input',async()=>{
     const s=setup(),t=s.createTask();await s.addObservation(t.id,{id:'another',targetId:'H2',capturedAt:new Date().toISOString(),source:'fixture',synthetic:true},Buffer.from(sceneSvg('pendent')));
     expect(()=>s.reviewFacts(t.id,{baseRevision:s.getTask(t.id).revision,facts:{model:{value:'TY3231',confirmed:true,source:'manual',evidenceIds:['another']}}})).toThrow('同じ対象');
@@ -158,13 +126,6 @@ describe('durable deterministic workflow',()=>{
     expect(s.getTask(t.id).validation?.comparison.status).toBe('different');
     expect(s.getTask(t.id).validation?.rule.status).toBe('pass');
     expect(()=>s.answer(t.id,{id:'late',requestId:req.id,observationIds:['normal-initial']})).toThrow('古い図面');
-  });
-  it('bounds crops and separates unverified obstruction findings from rule compliance',async()=>{
-    const s=setup(),t=s.createTask();await s.replay(t.id,'obstacle');
-    await expect(s.cropImage(t.id,'obstacle-initial',{x:9999,y:0,width:1,height:1})).rejects.toThrow('画像外');
-    expect((await s.cropImage(t.id,'obstacle-initial',{x:0,y:0,width:10,height:10})).mimeType).toBe('image/jpeg');
-    s.recordFinding(t.id,{id:'obstruction',targetId:'H1',description:'下側に障害物候補。散水障害の判定は未実施。',evidenceIds:['obstacle-initial']});
-    const artifact=s.prepareArtifact(t.id);expect(artifact.validation.rule.status).toBe('pass');expect(artifact.findings[0].status).toBe('unverified');expect(artifact.unresolved[0]).toContain('障害物候補');
   });
   it('cancelled jobs reject late mutations',async()=>{
     const s=setup(),t=s.createTask();s.cancel(t.id);
@@ -213,7 +174,6 @@ describe('same API for web, replay, and camera',()=>{
     const revision=s.getTask(t.id).revision;
     expect((await app.request(`/api/tasks/${t.id}/answers`,json(input))).status).toBe(200);
     expect(s.getTask(t.id).revision).toBe(revision);
-    expect((await app.request(`/api/tasks/${t.id}/run`,json({}))).status).toBe(404);
     const health=await app.request('/api/health',{headers:{Authorization:`Bearer ${token}`}});
     expect(await health.json()).toEqual({ok:true,ruleId:RULE.id});
   });

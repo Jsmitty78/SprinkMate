@@ -33,7 +33,7 @@ pnpm --filter @field-agent/fabrication typecheck
 pnpm --filter @field-agent/fabrication examples
 ```
 
-The checked-in JSON examples are generated from `examples/fixtures.ts`. Their drawing, access, and cure confirmations are invented fixture data. Manufacturer dimensional provenance is real; site validation is not. The separate synthetic arithmetic test replaces dimensions and explicitly labels the catalog `synthetic_arithmetic`.
+The command above generates local JSON examples from `examples/fixtures.ts`; generated outputs are not checked in. Their drawing, access, and cure confirmations are invented fixture data. Manufacturer dimensional provenance is real; site validation is not. The separate synthetic arithmetic test replaces dimensions and explicitly labels the catalog `synthetic_arithmetic`.
 
 Independent expectations: the drawing example has 24 in and 18 in centerlines; subtract 1.3125 in from each for cuts of 22.6875 in (576.2625 mm) and 16.6875 in (423.8625 mm). The selected candidate preserves both endpoints and 42 in total centerline, with three pieces and two elbows. Two additional takeouts reduce total pipe cut length by 2.625 in (66.675 mm). Its generated positions remain proposed and movement remains unconfirmed.
 

@@ -3,8 +3,8 @@ import type { PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "./api.js";
 import { lengthInput, lengthText, parseLength, toMetres } from "./format.js";
 import {
-  BOX_KEYS, buildRun, dropOrphanFacts, dropSubjectFacts, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, topologyChanged, upsertFacts,
-  type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
+  BOX_KEYS, buildRun, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
+  syncRunDraft, type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
 } from "./model.js";
 import { Badge, Button, Callout, Field, Icon, Section } from "./ui.js";
 
@@ -54,10 +54,11 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
   useEffect(() => { setRev(d?.revision ?? "A"); setPage(String(d?.page ?? 1)); setScale(d?.scale.value != null ? String(d.scale.value) : ""); }, [d?.assetId, d?.revision, d?.page, d?.scale.value]);
 
   const upload = (file: File) => act("upload", async cur => {
+    pageNumber(page);
     const asset = await api.upload(cur.id, file);
     await patchClearing(cur, {
       sourceDrawing: {
-        assetId: asset.id, drawingId: safeId(file.name), revision: rev.trim() || "A", page: Math.max(1, Number(page) || 1), approval: "unreviewed",
+        assetId: asset.id, drawingId: safeId(file.name), revision: rev.trim() || "A", page: pageNumber(page), approval: "unreviewed",
         scale: { value: null, unit: scaleUnit, reason: "Scale not confirmed yet", basis: "unknown" },
       },
     }, setNotice);
@@ -68,8 +69,8 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
     const known = scale.trim() !== "" && Number.isFinite(value) && value > 0;
     await patchClearing(cur, {
       sourceDrawing: {
-        ...cur.sourceDrawing, revision: rev.trim() || cur.sourceDrawing.revision, page: Math.max(1, Number(page) || 1),
-        scale: known && confirm ? { value, unit: scaleUnit, reason: null, basis: "confirmed_inputs" } : { value: null, unit: scaleUnit, reason: known ? "Scale entered but not confirmed" : "Scale not confirmed yet", basis: "unknown" },
+        ...cur.sourceDrawing, revision: rev.trim() || cur.sourceDrawing.revision, page: pageNumber(page),
+        scale: known ? { value, unit: scaleUnit, reason: null, basis: confirm ? "confirmed_inputs" : "proposed_inputs" } : { value: null, unit: scaleUnit, reason: "Scale not confirmed yet", basis: "unknown" },
       },
     }, setNotice);
   });
@@ -80,7 +81,7 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
     <p className="fa-muted">Upload the approved sheet for this work (PDF, PNG or JPEG, up to 20 MB). It stays linked to every result.</p>
     <div className="fa-row2">
       <Field label="Revision"><input value={rev} onChange={e => setRev(e.target.value)} maxLength={40} /></Field>
-      <Field label="Page"><input value={page} inputMode="numeric" onChange={e => setPage(e.target.value)} /></Field>
+      <Field label="Page"><input value={page} inputMode="numeric" aria-invalid={!pageOk(page)} className={pageOk(page) ? undefined : "is-invalid"} onChange={e => setPage(e.target.value)} /></Field>
     </div>
     <label className={`fa-drop ${busy === "upload" ? "is-busy" : ""}`}>
       <Icon name="upload" /><span>{busy === "upload" ? "Uploading…" : "Choose drawing file"}</span>
@@ -93,12 +94,12 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
       <span>Sheet</span><strong className="mono">{d.drawingId}</strong>
       <span>Revision</span><strong>{d.revision} · page {d.page}</strong>
       <span>Approval</span><strong>{d.approval === "approved" ? <Badge tone="green">Approved drawing</Badge> : d.approval === "superseded" ? <Badge tone="red">Superseded</Badge> : <Badge>Not reviewed</Badge>}</strong>
-      <span>Scale</span><strong>{d.scale.basis === "confirmed_inputs" ? <>{d.scale.value} {d.scale.unit} <Badge tone="green">Confirmed</Badge></> : <Badge tone="amber">{d.scale.reason ?? "Not confirmed"}</Badge>}</strong>
+      <span>Scale</span><strong>{d.scale.basis === "confirmed_inputs" ? <>{d.scale.value} {d.scale.unit} <Badge tone="green">Confirmed</Badge></> : d.scale.value !== null ? <>{d.scale.value} {d.scale.unit} <Badge tone="amber">Not confirmed</Badge></> : <Badge tone="amber">{d.scale.reason ?? "Not confirmed"}</Badge>}</strong>
     </div>
     {frozen ? <p className="fa-muted">{runConfirmed ? "The drawing is frozen with the confirmed run." : "The approved drawing is frozen in this package."} Start a new package for a new revision.</p> : <>
       <div className="fa-row3">
         <Field label="Revision"><input value={rev} onChange={e => setRev(e.target.value)} maxLength={40} /></Field>
-        <Field label="Page"><input value={page} inputMode="numeric" onChange={e => setPage(e.target.value)} /></Field>
+        <Field label="Page"><input value={page} inputMode="numeric" aria-invalid={!pageOk(page)} className={pageOk(page) ? undefined : "is-invalid"} onChange={e => setPage(e.target.value)} /></Field>
         <Field label="Scale, mm per pixel"><input value={scale} inputMode="decimal" placeholder="e.g. 1" onChange={e => setScale(e.target.value)} /></Field>
       </div>
       <div className="fa-actions">
@@ -112,17 +113,21 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
 
 // ---------------------------------------------------------------- run editor
 
+/** The contract wants a positive whole page number; anything else stops the action before the upload or patch. */
+const pageOk = (text: string) => /^\s*\d+\s*$/.test(text) && Number(text) >= 1;
+const pageNumber = (text: string) => { if (!pageOk(text)) throw new Error("Page must be a whole number, 1 or more."); return Number(text); };
+
 const KIND_LABEL: Record<RunNodeKind, string> = { tie_in: "Tie-in", open_end: "Open end", elbow: "90° elbow" };
 
 export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & { callouts: Callouts }) {
   const saved = useMemo(() => runNodes(s.baselinePlan), [s.baselinePlan]);
   const frozen = s.baselinePlan?.confirmation === "confirmed";
   const blank: RunNode[] = s.intent === "adapt_to_site" ? [{ kind: "tie_in", x: 0, y: 0 }, { kind: "tie_in", x: null, y: 0 }] : [{ kind: "open_end", x: 0, y: 0 }, { kind: "elbow", x: null, y: 0 }, { kind: "open_end", x: null, y: null }];
-  const [rows, setRows] = useState<Array<{ kind: RunNodeKind; x: string; y: string }>>([]);
-  useEffect(() => {
-    const nodes = saved ?? blank;
-    setRows(nodes.map(n => ({ kind: n.kind, x: lengthInput(n.x, unit), y: lengthInput(n.y, unit) })));
-  }, [saved, unit]);
+  const [draft, setDraft] = useState(() => syncRunDraft(null, saved ?? blank, unit));
+  const currentDraft = syncRunDraft(draft, saved ?? blank, unit);
+  if (currentDraft !== draft) setDraft(currentDraft);
+  const rows = currentDraft.rows;
+  const setRows = (rows: typeof draft.rows) => setDraft({ ...currentDraft, rows });
 
   const nodes: RunNode[] = rows.map(r => ({ kind: r.kind, x: parseLength(r.x, unit), y: parseLength(r.y, unit) }));
   const built = buildRun(nodes, s.baselinePlan?.id ?? "baseline");
@@ -132,11 +137,9 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
 
   const save = () => act("run", async cur => {
     if ("problems" in built) return;
-    // Entity ids are renumbered from the run's shape, so after a shape change an id can name a different pipe, fitting or tie-in.
-    const reshaped = topologyChanged(nodes, runNodes(cur.baselinePlan));
-    const base = reshaped ? dropSubjectFacts(cur) : cur;
-    const keep = built.datums.filter(d => findFact(base, d.field, d.subjectIds![0])?.value !== d.value);
-    await patchClearing(cur, { baselinePlan: built.plan, scope: built.scope, ...dropOrphanFacts(upsertFacts(base, keep), built.plan) }, setNotice);
+    const patch = runEditPatch(cur, nodes, built);
+    await patchClearing(cur, patch, setNotice);
+    if (patch.changeRequest === null && cur.changeRequest) setNotice("Your site change was cleared because the run shape changed. Choose the affected pipe again.");
   });
   const confirm = () => {
     if (!s.baselinePlan) return;

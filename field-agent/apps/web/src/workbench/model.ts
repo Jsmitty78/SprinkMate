@@ -227,17 +227,44 @@ export function runNodes(plan: Plan | null | undefined): RunNode[] | null {
     const other = c.from.entityId === pipe ? c.to.entityId : c.from.entityId;
     return plan.entities.find(e => e.id === other) ?? null;
   };
+  // Walk the connections from the pipe whose start is not an elbow, never the array order.
+  const first = pipes.find(p => connectedTo(p.id, "start")?.kind !== "fitting");
+  if (!first) return null;
+  const ordered = [first];
+  for (;;) {
+    const cur = ordered[ordered.length - 1];
+    const fit = connectedTo(cur.id, "end");
+    if (fit?.kind !== "fitting") break;
+    const next = pipes.find(p => !ordered.includes(p) && connectedTo(p.id, "start")?.id === fit.id);
+    if (!next) return null;
+    ordered.push(next);
+  }
+  if (ordered.length !== pipes.length) return null;
   const nodes: RunNode[] = [];
   const endKind = (pipe: Entity, port: string): RunNodeKind => connectedTo(pipe.id, port)?.kind === "tie_in" ? "tie_in" : connectedTo(pipe.id, port)?.kind === "fitting" ? "elbow" : "open_end";
-  pipes.forEach((p, i) => {
+  ordered.forEach((p, i) => {
     const s = at(p, "start");
     nodes.push({ kind: i === 0 ? endKind(p, "start") : "elbow", x: s?.x ?? null, y: s?.y ?? null });
   });
-  const last = pipes[pipes.length - 1], e = at(last, "end");
+  const last = ordered[ordered.length - 1], e = at(last, "end");
   nodes.push({ kind: endKind(last, "end"), x: e?.x ?? null, y: e?.y ?? null });
   const rebuilt = buildRun(nodes, plan.id);
   if ("problems" in rebuilt) return nodes;
-  return rebuilt.plan.entities.length === plan.entities.length ? nodes : null;
+  // Only hand the run to the editor if saving it would reproduce the same connections.
+  return topologySignature(rebuilt.plan) === topologySignature(plan) ? nodes : null;
+}
+
+/** Entity kinds plus each connection as the kinds, ports and positions it joins, independent of ids and array order. */
+function topologySignature(plan: Plan): string {
+  const byId = new Map(plan.entities.map(e => [e.id, e]));
+  const side = (ref: { entityId: string; portId: string }) => {
+    const e = byId.get(ref.entityId);
+    const pos = e?.ports.find(p => p.id === ref.portId)?.position;
+    return `${e?.kind}:${ref.portId}@${pos ? `${pos.x.toFixed(2)},${pos.y.toFixed(2)}` : "?"}`;
+  };
+  const kinds = plan.entities.map(e => e.kind).sort().join(",");
+  const joins = plan.connections.map(c => [side(c.from), side(c.to)].sort().join("|")).sort().join(";");
+  return `${kinds}#${joins}`;
 }
 
 // ---------------------------------------------------------------- missing inputs
@@ -383,4 +410,39 @@ export function runBlockers(s: WorkPackageSnapshot): string[] {
       });
   }
   return out;
+}
+
+
+interface RunDraft {
+  geometry: string;
+  unit: "mm" | "in";
+  rows: Array<{ kind: RunNodeKind; x: string; y: string }>;
+}
+
+/** Refresh only changed geometry; unit switches preserve exact draft values, including incomplete text. */
+export function syncRunDraft(draft: RunDraft | null, saved: RunNode[], unit: "mm" | "in"): RunDraft {
+  const geometry = JSON.stringify(saved);
+  if (!draft || draft.geometry !== geometry) return {
+    geometry, unit, rows: saved.map(n => ({ kind: n.kind, x: lengthInput(n.x, unit), y: lengthInput(n.y, unit) })),
+  };
+  if (draft.unit === unit) return draft;
+  const nodes = draft.rows.map(r => ({ kind: r.kind, x: parseLength(r.x, draft.unit), y: parseLength(r.y, draft.unit) }));
+  if (!runChanged(nodes, saved, draft.unit)) return syncRunDraft(null, saved, unit);
+  const convert = (text: string) => {
+    const mm = parseLength(text, draft.unit);
+    return mm === null ? text : `${mm} mm`;
+  };
+  return { geometry, unit, rows: draft.rows.map(r => ({ kind: r.kind, x: convert(r.x), y: convert(r.y) })) };
+}
+
+
+export function runEditPatch(cur: WorkPackageSnapshot, nodes: RunNode[], built: Extract<ReturnType<typeof buildRun>, { plan: Plan }>): Partial<PackageInputs> {
+  const reshaped = topologyChanged(nodes, runNodes(cur.baselinePlan));
+  const base = reshaped ? dropSubjectFacts(cur) : cur;
+  const keep = built.datums.filter(d => findFact(base, d.field, d.subjectIds![0])?.value !== d.value);
+  return {
+    baselinePlan: built.plan, scope: built.scope,
+    ...(reshaped ? { changeRequest: null } : {}),
+    ...dropOrphanFacts(upsertFacts(base, keep), built.plan),
+  };
 }

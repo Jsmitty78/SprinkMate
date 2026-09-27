@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WorkPackageSnapshot } from "@field-agent/core";
 import { countText, feetInches, lengthInput, lengthText, parseLength } from "./format.js";
-import { buildRun, callouts, dropOrphanFacts, dropSubjectFacts, findFact, groupChecks, requirements, routeOptions, runBlockers, runChanged, runNodes, topologyChanged, upsertFacts, type RunNode } from "./model.js";
+import { runEditPatch, syncRunDraft, buildRun, callouts, dropOrphanFacts, dropSubjectFacts, findFact, groupChecks, requirements, routeOptions, runBlockers, runChanged, runNodes, topologyChanged, upsertFacts, type RunNode } from "./model.js";
 import { sampleInputs } from "./sample.js";
 
 describe("display formatting", () => {
@@ -191,5 +191,67 @@ describe("run reshaping", () => {
       { field: "workAreaAccess", value: true, confirmation: "confirmed", context: "detailing", source: "test" },
     ]);
     expect(dropSubjectFacts(facts).detailing.map(f => f.field)).toEqual(["workAreaAccess"]);
+  });
+});
+
+
+describe("run draft retention", () => {
+  const saved: RunNode[] = [{ kind: "open_end", x: 0, y: 0 }, { kind: "open_end", x: 600, y: 0 }];
+  it("keeps edits when a reload returns equal geometry", () => {
+    const draft = syncRunDraft(null, saved, "mm");
+    draft.rows[1].x = "600.1234";
+    expect(syncRunDraft(draft, structuredClone(saved), "mm")).toBe(draft);
+    const converted = syncRunDraft(draft, structuredClone(saved), "in");
+    expect(parseLength(converted.rows[1].x, "in")).toBe(600.1234);
+    expect(parseLength(syncRunDraft(converted, saved, "mm").rows[1].x)).toBe(600.1234);
+  });
+  it("keeps incomplete text through unit changes", () => {
+    const draft = syncRunDraft(null, saved, "mm");
+    draft.rows[1].x = "-";
+    expect(syncRunDraft(draft, saved, "in").rows[1].x).toBe("-");
+  });
+  it("adopts actual saved geometry changes", () => {
+    const draft = syncRunDraft(null, saved, "mm");
+    draft.rows[1].x = "700";
+    expect(syncRunDraft(draft, [saved[0], { ...saved[1], x: 800 }], "mm").rows[1].x).toBe("800");
+  });
+  it("does not dirty an untouched run when changing units", () => {
+    const draft = syncRunDraft(syncRunDraft(null, saved, "mm"), saved, "in");
+    const nodes = draft.rows.map(r => ({ kind: r.kind, x: parseLength(r.x, "in"), y: parseLength(r.y, "in") }));
+    expect(runChanged(nodes, saved, "in")).toBe(false);
+  });
+});
+
+
+it("clears site targets on reshape but preserves them for coordinate-only edits", () => {
+  const original: RunNode[] = [{ kind: "tie_in", x: 0, y: 0 }, { kind: "elbow", x: 1000, y: 0 }, { kind: "tie_in", x: 1000, y: 1000 }];
+  const before = buildRun(original);
+  if ("problems" in before) throw new Error();
+  for (const affectedEntityIds of [["p1"], ["p2"]]) {
+    const cur = { baselinePlan: before.plan, detailing: [], siteFacts: [], changeRequest: { id: "change", description: "Obstruction", affectedEntityIds, factIds: [] } } as unknown as WorkPackageSnapshot;
+    const shorter: RunNode[] = [{ kind: "tie_in", x: 1000, y: 0 }, original[2]];
+    const after = buildRun(shorter);
+    if ("problems" in after) throw new Error();
+    expect(runEditPatch(cur, shorter, after).changeRequest).toBeNull();
+    const moved = original.map(n => ({ ...n, x: n.x! + 100 }));
+    const shifted = buildRun(moved);
+    if ("problems" in shifted) throw new Error();
+    expect(runEditPatch(cur, moved, shifted)).not.toHaveProperty("changeRequest");
+  }
+});
+
+describe("run reconstruction", () => {
+  const run: RunNode[] = [{ kind: "tie_in", x: 0, y: 0 }, { kind: "elbow", x: 1000, y: 0 }, { kind: "elbow", x: 1000, y: 800 }, { kind: "tie_in", x: 2000, y: 800 }];
+  it("follows connections, not the order pipes are stored in", () => {
+    const built = buildRun(run, "baseline", "test");
+    if ("problems" in built) throw new Error("bad run");
+    const shuffled = { ...built.plan, entities: [...built.plan.entities].reverse() };
+    expect(runNodes(shuffled)).toEqual(runNodes(built.plan));
+    expect(runNodes(built.plan)?.map(n => n.kind)).toEqual(run.map(n => n.kind));
+  });
+  it("refuses a plan whose connections it would not reproduce", () => {
+    const built = buildRun(run, "baseline", "test");
+    if ("problems" in built) throw new Error("bad run");
+    expect(runNodes({ ...built.plan, connections: built.plan.connections.slice(1) })).toBeNull();
   });
 });

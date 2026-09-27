@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { pollAfterSettled } from "./poll.js";
 import { api, ApiError, type Detail, type Snapshot } from "./api.js";
 
 export interface PackageState {
@@ -51,8 +52,7 @@ export function usePackage(id: string, onAuthFailure: () => void): PackageState 
   const running = snapshot?.run?.status === "running";
   useEffect(() => {
     if (!running) return;
-    const timer = setInterval(() => { load().catch(fail); }, 900);
-    return () => clearInterval(timer);
+    return pollAfterSettled(() => load().catch(fail), 900);
   }, [running, load, fail]);
 
   const act = useCallback(async (label: string, fn: (s: Snapshot) => Promise<unknown>) => {

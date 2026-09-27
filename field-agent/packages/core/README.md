@@ -85,7 +85,7 @@ Endpoints must share a session and coordinate frame and have finite positions/ti
 
 ## JSON boundary
 
-Exports include `HeadFactsSchema`, `HeadFactsPatchSchema` (strict partial updates), `FactSchema`, `OrientationSchema`, `EvidenceSchema`, `RuleContextSchema`, `MeasurementEndpointSchema`, `MeasurementSchema`, and `factSchema`. Validate untrusted API input before calling typed functions using `checkSchema(schema, value)`, `assertSchema(schema, value)`, or `validateSchema(schema, value)` (returns `{ valid: true, value }` or `{ valid: false, errors }`). Unknown properties are rejected.
+Exports include `HeadFactsSchema`, `HeadFactsPatchSchema` (strict partial updates), `OrientationSchema`, `EvidenceSchema`, `RuleContextSchema`, `MeasurementEndpointSchema`, `MeasurementSchema`, and `factSchema`. Validate untrusted API input before calling typed functions using `checkSchema(schema, value)`, which returns a boolean. Unknown properties are rejected.
 
 From the workspace root:
 

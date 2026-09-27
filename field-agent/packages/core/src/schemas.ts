@@ -1,5 +1,5 @@
-import { Type, type Static, type TSchema } from "typebox";
-import { Check, Errors } from "typebox/value";
+import { Type, type TSchema } from "typebox";
+import { Check } from "typebox/value";
 import { FACT_OPTIONS } from "./types.js";
 
 const identifier = () => Type.String({ minLength: 1 });
@@ -18,7 +18,6 @@ export function factSchema<T extends TSchema>(value: T) {
 export const OrientationSchema = Type.Union([
   Type.Literal("pendent"), Type.Literal("upright"), Type.Literal("sideways"), Type.Literal("unknown"),
 ]);
-export const FactSchema = factSchema(Type.String());
 export const HeadFactsSchema = Type.Object({
   model: factSchema(Type.String()),
   installation: factSchema(Type.Union([Type.Literal("installed"), Type.Literal("uninstalled")])),
@@ -85,12 +84,3 @@ export const MeasurementSchema = Type.Union([
 ]);
 
 export { Check as checkSchema };
-
-export function validateSchema<T extends TSchema>(schema: T, input: unknown):
-  { valid: true; value: Static<T> } | { valid: false; errors: ReturnType<typeof Errors> } {
-  return Check(schema, input) ? { valid: true, value: input } : { valid: false, errors: Errors(schema, input) };
-}
-
-export function assertSchema<T extends TSchema>(schema: T, input: unknown): asserts input is Static<T> {
-  if (!Check(schema, input)) throw new Error(`Invalid input: ${JSON.stringify(Errors(schema, input))}`);
-}
