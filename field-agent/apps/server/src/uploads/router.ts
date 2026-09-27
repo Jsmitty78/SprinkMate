@@ -3,7 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { SourceError } from '../sources/store.js';
 import { LIMITS, UploadError } from './formats.js';
-import type { ReferenceMetadata, UploadPurpose, UploadService } from './service.js';
+import type { UploadPurpose, UploadService } from './service.js';
 
 const PURPOSES: UploadPurpose[] = ['reference', 'site_photo'];
 const PROJECT = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,80}$/;
@@ -25,6 +25,7 @@ export function uploadRouter(uploads: UploadService) {
     if (!(file instanceof File)) throw new UploadError(400, 'missing_file', 'No file was attached.');
     const purpose = String(form.purpose ?? '') as UploadPurpose;
     if (!PURPOSES.includes(purpose)) throw new UploadError(400, 'missing_purpose', 'Say whether this is a reference document for the library or a site photo for this question.');
+    if (purpose === 'reference') throw new UploadError(403, 'managed_library', 'Reference sources are maintained by the library administrator.');
     const projectId = typeof form.projectId === 'string' && PROJECT.test(form.projectId) ? form.projectId : null;
     const packageId = typeof form.packageId === 'string' && PROJECT.test(form.packageId) ? form.packageId : null;
     const bytes = Buffer.from(await file.arrayBuffer());
@@ -36,18 +37,12 @@ export function uploadRouter(uploads: UploadService) {
     return c.json({ uploads: uploads.list({ purpose: purpose && PURPOSES.includes(purpose) ? purpose : undefined, projectId: c.req.query('projectId') || undefined }) });
   });
   app.get('/uploads/:id', c => c.json(uploads.get(c.req.param('id'))));
-  app.delete('/uploads/:id', async c => { await uploads.remove(c.req.param('id')); return c.json({ ok: true }); });
-  app.post('/uploads/:id/retry', async c => c.json(await uploads.retry(c.req.param('id')), 202));
+  app.delete('/uploads/:id', async c => { if (uploads.get(c.req.param('id')).purpose === 'reference') throw new UploadError(403, 'managed_library', 'Reference sources are maintained by the library administrator.'); await uploads.remove(c.req.param('id')); return c.json({ ok: true }); });
+  app.post('/uploads/:id/retry', async c => {
+    if (uploads.get(c.req.param('id')).purpose === 'reference') throw new UploadError(403, 'managed_library', 'Reference sources are maintained by the library administrator.');
+    return c.json(await uploads.retry(c.req.param('id')), 202);
+  });
   app.get('/uploads/:id/review', async c => c.json(await uploads.review(c.req.param('id'))));
-  app.put('/uploads/:id/review', async c => {
-    const body = await c.req.json() as { text?: string; acknowledged?: string[]; metadata?: ReferenceMetadata };
-    return c.json(uploads.saveCorrection(c.req.param('id'), body ?? {}));
-  });
-  app.post('/uploads/:id/index', async c => {
-    const body = await c.req.json() as { metadata?: ReferenceMetadata };
-    if (!body?.metadata || typeof body.metadata !== 'object') throw new UploadError(400, 'missing_metadata', 'Fill in the document details before indexing.');
-    return c.json(await uploads.index(c.req.param('id'), body.metadata));
-  });
   app.get('/uploads/:id/observations', async c => {
     const { upload, observations } = await uploads.observations(c.req.param('id'));
     return c.json({ upload, observations });

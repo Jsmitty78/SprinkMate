@@ -145,7 +145,7 @@ export function createApp(service:FieldService,options:{token:string;webDir?:str
   const sources=options.sources??new SourceStore(service.store.db);
   const uploads=options.uploads??new UploadService(service.store.db,service.dataDir,sources);
   app.route('/api',uploadRouter(uploads));
-  app.route('/api',sourceRouter(sources,id=>workPackages.get(id),uploads,options.sourceSearch));
+  app.route('/api',sourceRouter(sources,id=>workPackages.get(id),uploads,options.sourceSearch,service.dataDir));
   if(options.workPackageExports) app.route('/api/work-packages',exportRoutes(options.workPackageExports));
   app.all('/api/*',c=>c.json({error:'APIが見つかりません'},404));
   app.onError((error,c)=>{

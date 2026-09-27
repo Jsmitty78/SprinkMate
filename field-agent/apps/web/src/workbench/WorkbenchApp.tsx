@@ -8,6 +8,7 @@ import { Workbench } from "./Workbench.js";
 import { SprinkLogo } from "./logo.js";
 import { Inspections } from "./inspections/Inspections.js";
 import "./workbench.css";
+import { AskPanel } from "./ask/AskPanel.js";
 
 const PROJECT_KEY = "field-agent.project";
 const readProject = () => { try { return localStorage.getItem(PROJECT_KEY) || "field-agent-demo"; } catch { return "field-agent-demo"; } };
@@ -23,12 +24,13 @@ function usePath(): [string, (to: string) => void] {
   return [path, (to: string) => { history.pushState(null, "", to); setPath(to); scrollTo(0, 0); }];
 }
 
-function TopBar({ right, crumbs, onHome, onInspections, inspections = false }: { right?: ReactNode; crumbs?: ReactNode; onHome: () => void; onInspections: () => void; inspections?: boolean }) {
+function TopBar({ right, crumbs, onHome, onInspections, onRules, rules = false, inspections = false }: { right?: ReactNode; crumbs?: ReactNode; onHome: () => void; onInspections: () => void; onRules: () => void; rules?: boolean; inspections?: boolean }) {
   return <header className="fa-top">
     <button type="button" className="fa-brand" onClick={onHome} aria-label={tr("Sprink home")}><SprinkLogo /></button>
     <nav className="fa-navigation" aria-label={tr("Workflows")}>
-      <Button variant="quiet" aria-current={!inspections ? "page" : undefined} onClick={onHome}>{tr("Work packages")}</Button>
+      <Button variant="quiet" aria-current={!inspections && !rules ? "page" : undefined} onClick={onHome}>{tr("Work packages")}</Button>
       <Button variant="quiet" aria-current={inspections ? "page" : undefined} onClick={onInspections}>{tr("Field inspections")}</Button>
+      <Button variant="quiet" aria-current={rules ? "page" : undefined} onClick={onRules}>{tr("Rule search")}</Button>
     </nav>
     {crumbs && <nav className="fa-crumbs" aria-label={tr("Breadcrumb")}>{crumbs}</nav>}
     <div className="fa-top-right"><LanguageSwitch />{right}</div>
@@ -43,14 +45,16 @@ export function WorkbenchApp() {
   const signOut = useCallback(() => { session.clear(); setToken(""); }, []);
   const home = () => go("/");
   const inspections = () => go("/inspections");
+  const rules = () => go("/codes");
   if (!token) return <Connect onConnect={t => { session.setToken(t); setToken(t); }} />;
-  if (path === "/inspections") return <div className="fa-app"><TopBar onHome={home} onInspections={inspections} inspections right={<Button variant="quiet" onClick={signOut}>{tr("Disconnect")}</Button>} />
+  if (path === "/codes") return <div className="fa-app"><TopBar onHome={home} onInspections={inspections} onRules={rules} rules right={<Button variant="quiet" onClick={signOut}>{tr("Disconnect")}</Button>} /><main className="wf-codes fa-rules-page"><AskPanel embedded onClose={home} /></main></div>;
+  if (path === "/inspections") return <div className="fa-app"><TopBar onHome={home} onInspections={inspections} onRules={rules} inspections right={<Button variant="quiet" onClick={signOut}>{tr("Disconnect")}</Button>} />
     <Inspections token={token} onAuthFailure={signOut} />
   </div>;
   const match = /^\/p\/([^/]+)/.exec(path);
   if (match) return <div className="fa-app"><Workbench key={match[1]} id={decodeURIComponent(match[1])} onHome={home} onAuthFailure={signOut}
     onOpen={id => go(`/p/${encodeURIComponent(id)}`)} /></div>;
-  return <div className="fa-app"><TopBar onHome={home} onInspections={inspections} right={<Button variant="quiet" onClick={signOut}>{tr("Disconnect")}</Button>} /><Home open={id => go(`/p/${encodeURIComponent(id)}`)} onAuthFailure={signOut} /></div>;
+  return <div className="fa-app"><TopBar onHome={home} onInspections={inspections} onRules={rules} right={<Button variant="quiet" onClick={signOut}>{tr("Disconnect")}</Button>} /><Home open={id => go(`/p/${encodeURIComponent(id)}`)} onAuthFailure={signOut} /></div>;
 }
 
 function Connect({ onConnect }: { onConnect: (token: string) => void }) {

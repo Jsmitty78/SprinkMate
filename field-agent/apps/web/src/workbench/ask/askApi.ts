@@ -13,9 +13,11 @@ export interface Citation {
   notes: Array<{ text: string; author: string }>;
   link: string; original: string | null;
   revision: { uploadId: string; revision: number; basis: "extracted" | "corrected"; label: string } | null;
+  excerpt?: { id: string; label: string; box: PdfBox; contextBox: PdfBox; pageWidth: number; pageHeight: number };
   page: { image: string; number: number } | null;
   regions: Region[];
 }
+export interface PdfBox { x: number; y: number; w: number; h: number }
 export interface Region { page: number; x: number; y: number; w: number; h: number }
 export interface Claim { id: string; text: string; citations: string[]; kind: "note" | "pointer" | "quote"; status: "supported" | "unresolved"; reason?: string }
 export interface AttachmentView {
@@ -42,12 +44,6 @@ export interface AskAnswer {
   attachments: AttachmentView[];
   timings: { retrievalMs: number; compositionMs: number; modelMs: number; totalMs: number };
 }
-export interface AskRequest {
-  question: string; packageId?: string; selectedElementId?: string;
-  measurements?: Array<{ name: string; value: number; unit: string }>;
-  answers?: { nfpa13Edition?: string; jurisdiction?: string; observations?: Record<string, "yes" | "no"> };
-  attachments?: string[];
-}
 export interface SourceDocument {
   id: string; title: string; publisher: string; type: string; edition: string; demonstration: boolean;
   scope: Record<string, unknown>; url?: string; importedAt: string; sectionCount: number; flags: string[];
@@ -60,30 +56,6 @@ export interface SectionView {
   limited: string | null; notes?: Array<{ text: string; author: string }>; regions?: Region[];
 }
 
-export type UploadPurpose = "reference" | "site_photo";
-export type UploadStatus = "uploaded" | "extracting" | "review" | "indexing" | "ready" | "failed";
-export interface UploadRecord {
-  id: string; purpose: UploadPurpose; filename: string; kind: string; kindLabel: string; mime: string; size: number;
-  status: UploadStatus; failedStage?: "extracting" | "indexing"; error?: { code: string; message: string };
-  projectId: string | null; pageCount: number | null; pages: Array<{ n: number; width: number; height: number; method: string; confidence: number | null }>;
-  notes: string[]; review: { items: number; blocking: number }; revision: number; indexedRevision: number | null; docId: string | null;
-  metadata: ReferenceMetadata | null;
-  timings: { uploadMs?: number; decodeMs?: number; textMs?: number; ocrMs?: number; ocrPages?: number; extractMs?: number; indexMs?: number };
-  createdAt: string; updatedAt: string;
-}
-export interface ReferenceMetadata {
-  title: string; publisher: string; type: string; edition: string; scope: Record<string, unknown>; url?: string; demonstration: boolean;
-  authorization: { basis: string; storeAndIndex: boolean; useWithAi: boolean; display: string; maxQuoteChars?: number };
-}
-export interface ReviewItem { id: string; kind: string; page: number; lineId: string | null; text: string; message: string; bbox: { x: number; y: number; w: number; h: number } | null; blocking: boolean }
-export interface ReviewData {
-  upload: UploadRecord;
-  revision: { rev: number; basis: "extracted" | "corrected"; text: string; acknowledged: string[]; createdAt: string };
-  revisions: Array<{ rev: number; basis: string; createdAt: string; author: string }>;
-  items: ReviewItem[];
-  pages: Array<{ n: number; width: number; height: number; method: string; confidence: number | null }>;
-}
-
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(path, { ...init, headers: { Authorization: `Bearer ${session.token()}`, ...(init.body ? { "Content-Type": "application/json" } : {}), ...init.headers } });
   if (!res.ok) {
@@ -94,27 +66,6 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-/** Uploads with progress. XMLHttpRequest is used because fetch has no upload progress. */
-function sendUpload(file: File, fields: Record<string, string>, onProgress?: (fraction: number) => void): Promise<UploadRecord> {
-  return new Promise((resolve, reject) => {
-    const form = new FormData();
-    form.set("file", file, file.name || "upload");
-    for (const [k, v] of Object.entries(fields)) form.set(k, v);
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/uploads");
-    xhr.setRequestHeader("Authorization", `Bearer ${session.token()}`);
-    xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
-    xhr.onload = () => {
-      let body: { error?: string; code?: string } & Partial<UploadRecord> = {};
-      try { body = JSON.parse(xhr.responseText); } catch { /* keep empty */ }
-      if (xhr.status >= 200 && xhr.status < 300) resolve(body as UploadRecord);
-      else reject(new ApiError(xhr.status, body.code ?? String(xhr.status), body.error ?? `Upload failed (${xhr.status})`));
-    };
-    xhr.onerror = () => reject(new ApiError(0, "network", "The upload was interrupted. Check the connection and retry."));
-    xhr.send(form);
-  });
-}
-
 /** Fetches an authenticated file (page image, preview, original) as an object URL. */
 export async function authedBlobUrl(href: string): Promise<string> {
   const res = await fetch(href, { headers: { Authorization: `Bearer ${session.token()}` } });
@@ -123,19 +74,9 @@ export async function authedBlobUrl(href: string): Promise<string> {
 }
 
 export const askApi = {
-  ask: (body: AskRequest) => call<AskAnswer>("/api/ask", { method: "POST", body: JSON.stringify(body) }),
+  search: (question: string) => call<AskAnswer>("/api/rules/search", { method: "POST", body: JSON.stringify({ question }) }),
   documents: () => call<{ documents: SourceDocument[] }>("/api/sources"),
-  loadDemo: (projectId: string) => call<{ documents: SourceDocument[] }>("/api/sources/demo", { method: "POST", body: JSON.stringify({ projectId }) }),
-  importDocument: (document: Record<string, unknown>) => call<SourceDocument>("/api/sources", { method: "POST", body: JSON.stringify({ document }) }),
   passage: (link: string) => call<{ document: SourceDocument; target: string; sections: SectionView[] }>(link),
-  upload: sendUpload,
-  uploads: (purpose?: UploadPurpose) => call<{ uploads: UploadRecord[] }>(`/api/uploads${purpose ? `?purpose=${purpose}` : ""}`),
-  getUpload: (id: string) => call<UploadRecord>(`/api/uploads/${id}`),
-  review: (id: string) => call<ReviewData>(`/api/uploads/${id}/review`),
-  saveReview: (id: string, body: { text?: string; acknowledged?: string[]; metadata?: ReferenceMetadata }) => call<UploadRecord>(`/api/uploads/${id}/review`, { method: "PUT", body: JSON.stringify(body) }),
-  indexUpload: (id: string, metadata: ReferenceMetadata) => call<UploadRecord>(`/api/uploads/${id}/index`, { method: "POST", body: JSON.stringify({ metadata }) }),
-  retryUpload: (id: string) => call<UploadRecord>(`/api/uploads/${id}/retry`, { method: "POST" }),
-  removeUpload: (id: string) => call<{ ok: true }>(`/api/uploads/${id}`, { method: "DELETE" }),
   async original(href: string): Promise<string> {
     const res = await fetch(href, { headers: { Authorization: `Bearer ${session.token()}` } });
     if (!res.ok) throw new ApiError(res.status, String(res.status), "Could not open the original file");

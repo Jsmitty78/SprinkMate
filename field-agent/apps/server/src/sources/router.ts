@@ -1,18 +1,16 @@
+import { sourcePdfPage } from './pdf.js';
 import { type SourceSearch } from './semantic.js';
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { WorkPackageSnapshot } from '@field-agent/core';
-import { ask, AskInputError, type AskRequest, type AttachmentInput } from './ask.js';
+import { ask, searchRules, isSharedReference, AskInputError, type AskRequest, type AttachmentInput } from './ask.js';
 import type { UploadService } from '../uploads/service.js';
 import { UploadError } from '../uploads/formats.js';
-import { loadDemoSources } from './demo.js';
 import { SourceError, type SourceStore } from './store.js';
-import type { ExplanationFile, SourceDocumentInput } from './types.js';
 
-const TEXT_FILE = /\.(md|markdown|txt)$/i;
 
 /** Mount only under the authenticated /api middleware. */
-export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => WorkPackageSnapshot, uploads?: UploadService, search?: SourceSearch) {
+export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => WorkPackageSnapshot, uploads?: UploadService, search?: SourceSearch, dataDir?: string) {
   const app = new Hono();
   app.onError((error, c) => {
     if (error instanceof SourceError) return c.json({ error: error.message, code: error.code }, error.status as ContentfulStatusCode);
@@ -22,24 +20,21 @@ export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => W
     return c.json({ error: 'Source library operation failed', code: 'internal_error' }, 500);
   });
 
-  app.get('/sources', c => c.json({ documents: store.documents() }));
-  app.post('/sources', async c => {
-    const body = await c.req.json() as { document?: SourceDocumentInput; explanations?: ExplanationFile };
-    const doc = body?.document;
-    if (!doc || typeof doc !== 'object') throw new SourceError(400, 'invalid_document', 'Send { document: {...metadata, content, filename} }.');
-    if (typeof doc.filename !== 'string' || !TEXT_FILE.test(doc.filename))
-      throw new SourceError(415, 'unsupported_file', 'This endpoint imports prepared text or Markdown (.md, .txt). Upload PDFs and images through /api/uploads, which extracts, reviews and indexes them.');
-    return c.json(store.import(doc, body.explanations), 201);
+  app.get('/sources', c => c.json({ documents: store.documents().filter(isSharedReference).map(publicDocument) }));
+  app.post('/rules/search', async c => {
+    const body = await c.req.json();
+    return c.json(await searchRules(store, body?.question, search));
   });
-  app.post('/sources/demo', async c => {
-    const body = await c.req.json().catch(() => ({})) as { projectId?: string };
-    const projectId = typeof body.projectId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,80}$/.test(body.projectId) ? body.projectId : undefined;
-    return c.json({ documents: loadDemoSources(store, projectId) }, 201);
+  app.get('/sources/:docId/pages/:page', async c => {
+    const bytes = await sourcePdfPage(store, dataDir, c.req.param('docId'), c.req.param('page'));
+    c.header('Content-Type', 'image/png');
+    c.header('Cache-Control', 'private, no-cache');
+    return c.body(new Uint8Array(bytes));
   });
   app.get('/sources/:docId', c => {
     const doc = store.document(c.req.param('docId'));
     if (!doc) throw new SourceError(404, 'not_found', 'Document not found.');
-    return c.json({ document: doc, sections: store.sections(doc.id).map(s => view(doc.authorization, s)) });
+    return c.json({ document: publicDocument(doc), sections: store.sections(doc.id).map(s => view(doc.authorization, s)) });
   });
   app.get('/sources/:docId/sections/:key', c => {
     const doc = store.document(c.req.param('docId'));
@@ -50,7 +45,7 @@ export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => W
     // The passage in place: its section, its exceptions and notes, and the neighbouring sections.
     const i = all.findIndex(s => s.key === top.key);
     const around = all.filter((s, j) => s.parentKey === top.key || s.key === top.key || (s.parentKey === null && Math.abs(j - i) <= 3));
-    return c.json({ document: doc, target: section.key, sections: around.map(s => ({ ...view(doc.authorization, s), notes: store.notes(s.key).map(n => ({ text: n.text, author: n.author })) })) });
+    return c.json({ document: publicDocument(doc), target: section.key, sections: around.map(s => ({ ...view(doc.authorization, s), notes: store.notes(s.key).map(n => ({ text: n.text, author: n.author })) })) });
   });
   app.get('/sources/:docId/file', c => {
     const doc = store.document(c.req.param('docId'));
@@ -86,4 +81,10 @@ function view(a: import('./types.js').SourceAuthorization, s: import('./types.js
   if (a.display === 'reference_only') return { ...s, text: '', table: null, limited: 'reference_only' };
   if (a.display === 'excerpt' && s.text.length > a.maxQuoteChars!) return { ...s, text: `${s.text.slice(0, a.maxQuoteChars)}…`, table: null, limited: 'excerpt' };
   return { ...s, limited: null };
+}
+
+/** Search-only excerpt text is not part of public document metadata. */
+function publicDocument(doc: import('./types.js').SourceDocument) {
+  if (!doc.pdf) return doc;
+  return { ...doc, pdf: { sha256: doc.pdf.sha256, pageCount: doc.pdf.pageCount } };
 }

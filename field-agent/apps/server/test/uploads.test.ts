@@ -8,14 +8,14 @@ import { FieldService } from '../src/service.js';
 import { createApp } from '../src/api.js';
 import { WorkPackageStore } from '../src/work-packages/store.js';
 import { WorkPackageService } from '../src/work-packages/service.js';
-import { SourceStore } from '../src/sources/store.js';
+import { SourceError, SourceStore } from '../src/sources/store.js';
 import { UploadService, type ReferenceMetadata, type UploadRecord } from '../src/uploads/service.js';
 import { NO_SOURCE, type AskAnswer } from '../src/sources/ask.js';
-import { sniff } from '../src/uploads/formats.js';
+import { UploadError, sniff } from '../src/uploads/formats.js';
 import { integratedInput } from './fixtures/integrated-package.js';
 
 /**
- * End-to-end server tests for uploads. These use the real decoders (sharp, libheif-js, PDF.js,
+ * Upload service and read-only HTTP tests. Reference ingestion uses the operator service. These use the real decoders (sharp, libheif-js, PDF.js,
  * bmp-ts) and real OCR (Tesseract via tesseract.js) on the invented fixtures in
  * fixtures/uploads. JEV selection is scripted; extraction, storage and citation paths are real.
  */
@@ -42,6 +42,10 @@ beforeAll(async () => {
 afterAll(async () => { await uploads.ocr.close(); packages.close(); field.store.close(); rmSync(dir, { recursive: true, force: true }); });
 
 async function upload(name: string, purpose: 'reference' | 'site_photo', as = name): Promise<{ status: number; body: UploadRecord & { error?: string; code?: string } }> {
+  if (purpose === 'reference') {
+    const res = await operatorResult(() => uploads.create(readFileSync(join(FIX, name)), { filename: as, purpose, projectId: 'demo-project', packageId: null }), 202);
+    return { status: res.status, body: await res.json() };
+  }
   const form = new FormData();
   form.set('file', new File([readFileSync(join(FIX, name))], as));
   form.set('purpose', purpose);
@@ -110,7 +114,7 @@ describe('upload formats (real decoders)', () => {
     const unsupported = await (async () => {
       const form = new FormData();
       form.set('file', new File([Buffer.from('PK\u0003\u0004 not an image or pdf at all')], 'drawing.pdf'));
-      form.set('purpose', 'reference');
+      form.set('purpose', 'site_photo');
       const res = await app.request('/api/uploads', { method: 'POST', headers: auth, body: form });
       return { status: res.status, body: await res.json() };
     })();
@@ -152,13 +156,13 @@ describe('reference documents: extract, review, index, answer', () => {
     expect(review.items.some((i: { kind: string }) => i.kind === 'embedded_instructions')).toBe(true);
 
     // Not ready until the table readings are checked.
-    let res = await app.request(`/api/uploads/${u.id}/index`, json('POST', { metadata: meta({ title: 'DEMONSTRATION Pipe Support Manual' }) }));
+    let res = await operatorResult(() => uploads.index(u.id, meta({ title: 'DEMONSTRATION Pipe Support Manual' })));
     expect(res.status).toBe(409);
     expect((await res.json()).code).toBe('review_required');
     expect(uploads.get(u.id).status).toBe('review');
 
-    await app.request(`/api/uploads/${u.id}/review`, json('PUT', { acknowledged: review.items.map((i: { id: string }) => i.id) }));
-    res = await app.request(`/api/uploads/${u.id}/index`, json('POST', { metadata: meta({ title: 'DEMONSTRATION Pipe Support Manual' }) }));
+    await operatorResult(() => uploads.saveCorrection(u.id, { acknowledged: review.items.map((i: { id: string }) => i.id) }));
+    res = await operatorResult(() => uploads.index(u.id, meta({ title: 'DEMONSTRATION Pipe Support Manual' })));
     u = await res.json();
     expect(res.status, JSON.stringify(u)).toBe(200);
     expect(u.status).toBe('ready');
@@ -200,8 +204,8 @@ describe('reference documents: extract, review, index, answer', () => {
     expect(u.pages.map(p => p.method)).toEqual(['ocr', 'ocr']);
     const review = await (await app.request(`/api/uploads/${u.id}/review`, { headers: auth })).json();
     expect(review.revision.text).toMatch(/PS-2\.4\.1 CPVC piping and fittings shall not be painted\./);
-    await app.request(`/api/uploads/${u.id}/review`, json('PUT', { acknowledged: review.items.map((i: { id: string }) => i.id) }));
-    const res = await app.request(`/api/uploads/${u.id}/index`, json('POST', { metadata: meta({ title: 'DEMONSTRATION Project Specification 21 13 13', type: 'project_document', edition: 'Issued for construction', scope: { projectId: 'demo-project' } }) }));
+    await operatorResult(() => uploads.saveCorrection(u.id, { acknowledged: review.items.map((i: { id: string }) => i.id) }));
+    const res = await operatorResult(() => uploads.index(u.id, meta({ title: 'DEMONSTRATION Project Specification 21 13 13', type: 'project_document', edition: 'Issued for construction', scope: { projectId: 'demo-project' } })));
     expect(res.status).toBe(200);
     const a = await ask({ question: 'Can CPVC piping be painted?', packageId: pkgId });
     const cite = a.sources.find(s => s.docId === `upload-${u.id}`)!;
@@ -224,13 +228,13 @@ describe('reference documents: extract, review, index, answer', () => {
     const blocking = review.items.filter((i: { blocking: boolean }) => i.blocking);
     expect(blocking.some((i: { kind: string }) => i.kind === 'uncertain_number')).toBe(true);
     const m = meta({ title: 'DEMONSTRATION unclear clearance note', type: 'company_procedure', scope: {} });
-    expect((await app.request(`/api/uploads/${u.id}/index`, json('POST', { metadata: m }))).status).toBe(409);
+    expect((await operatorResult(() => uploads.index(u.id, m))).status).toBe(409);
     const corrected = '<!-- page: 1 -->\n## UC-1.1 Clearance to ductwork\n\nUC-1.1.1 Keep 1 1/2 in clear to ductwork, or 38 mm where metric is used.\n';
-    const saved = await (await app.request(`/api/uploads/${u.id}/review`, json('PUT', { text: corrected, acknowledged: review.items.map((i: { id: string }) => i.id) }))).json();
+    const saved = await (await operatorResult(() => uploads.saveCorrection(u.id, { text: corrected, acknowledged: review.items.map((i: { id: string }) => i.id) }))).json();
     expect(saved.revision).toBe(2);
     const revs = (await (await app.request(`/api/uploads/${u.id}/review`, { headers: auth })).json()).revisions;
     expect(revs.map((r: { basis: string }) => r.basis)).toEqual(['extracted', 'corrected']);
-    const res = await app.request(`/api/uploads/${u.id}/index`, json('POST', { metadata: m }));
+    const res = await operatorResult(() => uploads.index(u.id, m));
     expect(res.status).toBe(200);
     const a = await ask({ question: 'What clearance to ductwork does the company procedure require?', packageId: pkgId });
     const cite = a.sources.find(s => s.docId === `upload-${u.id}`)!;
@@ -244,8 +248,8 @@ describe('reference documents: extract, review, index, answer', () => {
     for (const x of uploads.list({ purpose: 'reference' }).filter(x => x.filename === 'native-text-manual.pdf')) await uploads.remove(x.id);
     const u = await uploadAndSettle('native-text-manual.pdf', 'reference', 'manual-as-code.pdf');
     const review = await (await app.request(`/api/uploads/${u.id}/review`, { headers: auth })).json();
-    await app.request(`/api/uploads/${u.id}/review`, json('PUT', { acknowledged: review.items.map((i: { id: string }) => i.id) }));
-    const res = await app.request(`/api/uploads/${u.id}/index`, json('POST', { metadata: meta({ title: 'DEMONSTRATION code stand-in 2019', type: 'published_code', edition: '2019', scope: { standard: 'nfpa13' } }) }));
+    await operatorResult(() => uploads.saveCorrection(u.id, { acknowledged: review.items.map((i: { id: string }) => i.id) }));
+    const res = await operatorResult(() => uploads.index(u.id, meta({ title: 'DEMONSTRATION code stand-in 2019', type: 'published_code', edition: '2019', scope: { standard: 'nfpa13' } })));
     expect(res.status).toBe(200);
     const a = await ask({ question: 'How long must solvent cement cure before hydrostatic testing?', packageId: pkgId });
     expect(a.sources.some(s => s.docId === `upload-${u.id}`)).toBe(false);
@@ -279,7 +283,7 @@ describe('site photos are context, not authority', () => {
     expect(a.context.facts.find(f => f.name === 'obstructionWidth')?.origin).not.toBe('photo');
 
     // A photo cannot be indexed into the library.
-    const res = await app.request(`/api/uploads/${photo.id}/index`, json('POST', { metadata: meta({}) }));
+    const res = await operatorResult(() => uploads.index(photo.id, meta({})));
     expect(res.status).toBe(409);
     expect((await res.json()).code).toBe('site_photo_not_source');
   }, 120_000);
@@ -307,7 +311,7 @@ describe('recovery', () => {
     field.store.db.prepare('UPDATE uploads SET data=? WHERE id=?').run(JSON.stringify({ ...u, status: 'extracting' }), u.id);
     const restarted = new UploadService(field.store.db, dir, new SourceStore(field.store.db));
     expect(restarted.get(u.id)).toMatchObject({ status: 'failed', error: { code: 'interrupted' } });
-    const res = await app.request(`/api/uploads/${u.id}/retry`, { method: 'POST', headers: auth });
+    const res = await operatorResult(() => uploads.retry(u.id), 202);
     expect(res.status).toBe(202);
     expect((await uploads.settle(u.id)).status).toBe('review');
     await restarted.ocr.close();
@@ -317,11 +321,11 @@ describe('recovery', () => {
   it('keeps an upload in review when index metadata is invalid, then indexes after it is fixed', async () => {
     const u = await uploadAndSettle('label.png', 'reference', 'label-for-index.png');
     const review = await (await app.request(`/api/uploads/${u.id}/review`, { headers: auth })).json();
-    await app.request(`/api/uploads/${u.id}/review`, json('PUT', { acknowledged: review.items.map((i: { id: string }) => i.id) }));
-    const bad = await app.request(`/api/uploads/${u.id}/index`, json('POST', { metadata: meta({ authorization: { basis: 'x', storeAndIndex: true, useWithAi: false, display: 'full' } }) }));
+    await operatorResult(() => uploads.saveCorrection(u.id, { acknowledged: review.items.map((i: { id: string }) => i.id) }));
+    const bad = await operatorResult(() => uploads.index(u.id, meta({ authorization: { basis: 'x', storeAndIndex: true, useWithAi: false, display: 'full' } })));
     expect(bad.status).toBe(403);
     expect(uploads.get(u.id).status).toBe('review');
-    const good = await app.request(`/api/uploads/${u.id}/index`, json('POST', { metadata: meta({ title: 'DEMONSTRATION label' }) }));
+    const good = await operatorResult(() => uploads.index(u.id, meta({ title: 'DEMONSTRATION label' })));
     expect(good.status).toBe(200);
   }, 120_000);
 
@@ -331,3 +335,8 @@ describe('recovery', () => {
     expect((await app.request(`/api/uploads/${u.id}/pages/1`)).status).toBe(401);
   });
 });
+
+async function operatorResult(operation: () => unknown | Promise<unknown>, status = 200) {
+  try { const result = await operation(); return { status, json: async (): Promise<any> => result }; }
+  catch (e) { if (!(e instanceof UploadError || e instanceof SourceError)) throw e; return { status: e.status, json: async (): Promise<any> => ({ code: e.code, error: e.message }) }; }
+}

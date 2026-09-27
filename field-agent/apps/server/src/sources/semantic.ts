@@ -26,7 +26,7 @@ function request(question: string, passages: Passage[]): SearchRequest {
     exists: { type: 'noul', instructions: `Does the supplied text contain enough information to answer state.query? ${evidence}`, criteria: { true: 'An explicit answer exists in these passages.', false: 'Absent, only a related topic, or insufficient information.' } },
   };
   passages.forEach((_, i) => { questions[`support${i}`] = { type: 'noul', instructions: `Does passage p${i} supply an explicit answer or a necessary part of the answer to state.query? ${evidence}`, criteria: { true: 'Direct supporting text, including necessary qualifications.', false: 'Only related vocabulary, unrelated content, or no supporting answer.' } }; });
-  return { model: JEV_MODEL, state: { query: question, passages: passages.map(({ doc, section }, i) => ({ id: `p${i}`, key: section.key, document: doc.title, edition: doc.edition, sectionId: section.sectionId, heading: section.heading, text: section.text, table: section.table })) }, questions };
+  return { model: JEV_MODEL, state: { query: question, passages: passages.map(({ doc, section }, i) => ({ id: `p${i}`, key: section.key, document: doc.title, type: doc.type, scope: doc.scope, edition: doc.edition, sectionId: section.sectionId, heading: section.heading, text: section.text, table: section.table })) }, questions };
 }
 function answers(raw: unknown, req: SearchRequest): Record<string, any> {
   if (!object(raw) || raw.model !== JEV_MODEL || !object(raw.answers)) return fail('source_search_invalid_response');

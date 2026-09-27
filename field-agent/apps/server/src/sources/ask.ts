@@ -1,3 +1,4 @@
+import { excerptSections, type PdfExcerpt } from './pdf-excerpts.js';
 import { JevSourceSearch, type SourceSearch } from './semantic.js';
 import { randomUUID } from 'node:crypto';
 import { resolveSfNfpa13Edition, type Evidence, type Fact, type SfProjectFacts, type WorkPackageSnapshot } from '@field-agent/core';
@@ -49,6 +50,7 @@ export interface Citation {
   link: string; original: string | null;
   /** For uploaded documents: the reviewed revision that was indexed, and where the passage sits on the page image. */
   revision: { uploadId: string; revision: number; basis: 'extracted' | 'corrected'; label: string } | null;
+  excerpt?: PdfExcerpt;
   page: { image: string; number: number; width: number | null; height: number | null } | null;
   regions: Array<{ page: number; x: number; y: number; w: number; h: number }>;
 }
@@ -273,11 +275,12 @@ function citation(r: Retrieved): Citation {
     pageStart: r.section.pageStart, pageEnd: r.section.pageEnd, demonstration: r.doc.demonstration,
     flags: r.section.flags.map(f => ({ flag: f, label: QUALITY_LABEL[f] })),
     quote, quoteNote, table, notes: r.notes.map(n => ({ text: n.text, author: n.author })),
-    link: `/api/sources/${encodeURIComponent(r.doc.id)}/sections/${encodeURIComponent(r.section.key)}`,
+    excerpt: a.display === 'full' ? r.section.pdfExcerpt : undefined,
+    link: `/api/sources/${encodeURIComponent(r.doc.id)}/sections/${encodeURIComponent(r.section.pdfExcerpt?.sectionKey ?? r.section.key)}`,
     original: r.doc.url ?? (a.display === 'full' ? (up ? `/api/uploads/${up.uploadId}/original` : `/api/sources/${encodeURIComponent(r.doc.id)}/file`) : null),
     revision: up ? { uploadId: up.uploadId, revision: up.revision, basis: up.basis, label: `Revision ${up.revision} (${up.basis === 'corrected' ? 'text corrected in review' : 'as extracted, reviewed'})` } : null,
     // The page image shows the whole page, so it is offered only where the source allows full display.
-    page: up && a.display === 'full' && pageNo ? { image: `/api/uploads/${up.uploadId}/pages/${pageNo}`, number: pageNo, width: null, height: null } : null,
+    page: r.doc.pdf && a.display === 'full' && pageNo && pageNo <= r.doc.pdf.pageCount ? { image: `/api/sources/${encodeURIComponent(r.doc.id)}/pages/${pageNo}`, number: pageNo, width: null, height: null } : up && a.display === 'full' && pageNo ? { image: `/api/uploads/${up.uploadId}/pages/${pageNo}`, number: pageNo, width: null, height: null } : null,
     regions: up && a.display === 'full' ? (r.section.regions ?? []) : [],
   };
 }
@@ -452,3 +455,39 @@ export async function ask(store: SourceStore, req: AskRequest, snapshot: WorkPac
   };
 }
 const round = (n: number) => Math.round(n * 10) / 10;
+
+
+/** Only operator-maintained common references enter the public search catalog. */
+export const isSharedReference = (doc: SourceDocument): boolean =>
+  !doc.demonstration && !doc.scope.projectId && doc.type !== 'project_document' && doc.authorization.useWithAi;
+
+/** Reference lookup does not decide which edition or product governs a project. */
+export async function searchRules(store: SourceStore, question: string, search: SourceSearch = new JevSourceSearch()): Promise<AskAnswer> {
+  const t0 = performance.now();
+  if (typeof question !== 'string' || !question.trim()) throw new AskInputError('Type a question.');
+  if (question.length > 1000) throw new AskInputError('Keep the question under 1000 characters.');
+  question = question.trim();
+  const docs = store.documents().filter(isSharedReference);
+  const passages = docs.flatMap(doc => {
+    const sections = store.sections(doc.id);
+    return [...sections, ...excerptSections(doc, sections)].map(section => ({ doc, section }));
+  });
+  const keys = new Set(await search.select(question, passages));
+  const mains: Retrieved[] = passages.filter(p => keys.has(p.section.key)).map(p => ({ ...p, role: 'main', score: 0, notes: store.notes(p.section.key) }));
+  // Expand inside each document only: a shared catalog can hold unrelated jurisdictions and editions.
+  const items = docs.flatMap(doc => expand(store, mains.filter(m => m.doc.id === doc.id), [doc]));
+  const sources = items.map(citation);
+  const retrievalMs = performance.now() - t0;
+  const documentCount = new Set(sources.map(s => s.docId)).size;
+  return {
+    id: randomUUID(), question, askedAt: new Date().toISOString(),
+    context: { projectId: null, packageTitle: null, standard: null, edition: { value: null, status: 'unknown', reason: 'Reference search does not determine the edition adopted for a project.' }, jurisdiction: null, selectedElementId: null, siteCondition: null, facts: [] },
+    status: sources.length ? 'answered' : 'no_source',
+    summary: sources.length
+      ? `${sources.length} matching passage${sources.length === 1 ? '' : 's'} from ${documentCount} document${documentCount === 1 ? '' : 's'} in the shared library. Check each source’s edition and scope for your situation.`
+      : "No supporting passage was found in the shared library. The requested rule or edition may not be included.",
+    explanation: sourceClaims(items), sources,
+    unresolved: [], exceptions: [], missing: [], followUps: [], conflicts: [], excluded: [], attachments: [],
+    timings: { retrievalMs: round(retrievalMs), compositionMs: 0, modelMs: round(retrievalMs), totalMs: round(performance.now() - t0) },
+  };
+}

@@ -552,3 +552,6 @@ html, body { margin: 0; background: var(--fa-bg); }
 .fa-protected .fa-pipe, .fa-protected .fa-fit, .fa-protected .fa-head, .fa-protected .fa-tie { stroke: #929aa3; }
 .fa-protected .fa-pipe { stroke-dasharray: 4 3; }
 .fa-focus .is-on .fa-fit, .fa-work .is-on .fa-fit { stroke: #e39224; stroke-width: 4; }
+
+.fa-rules-page { height: calc(100dvh - 64px); min-height: 450px; }
+.fa-rules-page .fa-ask { position: static; height: 100%; width: 100%; }
