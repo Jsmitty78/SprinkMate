@@ -14,6 +14,7 @@ import { createApp } from "../src/api.js";
 import { WorkPackageStore } from "../src/work-packages/store.js";
 import { createIntegratedServices } from "../src/integration/runtime.js";
 import { integratedInput } from "./fixtures/integrated-package.js";
+import { sampleInputs } from "../../web/src/workbench/sample.js";
 import { integrationStream, integrationChoice } from "../../../packages/workflow/test/integration-stream.js";
 import { SourceStore } from "../src/sources/store.js";
 import { scriptedStream } from "../../../packages/workflow/test/fixtures/scripted-stream.js";
@@ -93,6 +94,31 @@ async function run(t: ReturnType<typeof setup>, id: string, goal?: string) {
   }
   throw new Error("Run did not stop");
 }
+it("runs the browser's synthetic preparation sample without treating its values as field evidence", async () => {
+  const t = setup();
+  const created = t.packages.create({ projectId: "sample-project", title: "sample preparation", intent: "prepare_from_drawing" });
+  const asset = await t.packages.upload(created.id, Buffer.from("%PDF-1.4\nfixture"), "application/pdf", "sample.pdf");
+  const input = sampleInputs("prepare", asset.id);
+  expect([...input.detailing, ...input.siteFacts].every(f => f.provenance === "synthetic_assumption" && f.confirmation === "proposed")).toBe(true);
+  expect(input.baselinePlan?.confirmation).toBe("proposed");
+  expect(input.sourceDrawing?.scale.basis).toBe("proposed_inputs");
+  t.packages.edit(created.id, { expectedRevision: 1, patch: input });
+
+  for (const field of ["workAreaAccess", "curePlan"]) {
+    const waiting = await run(t, created.id);
+    expect(waiting.run?.status).toBe("waiting_input");
+    const request = waiting.outputs.requests.find(r => r.question.toLowerCase().includes(field === "curePlan" ? "cure plan" : "work-area access"));
+    expect(request).toBeDefined();
+    t.packages.answer(created.id, { expectedRevision: waiting.inputRevision, requestId: request!.id, value: null, unavailableReason: "Synthetic sample has no field confirmation" });
+  }
+  const prepared = await run(t, created.id);
+  expect(prepared.run?.status).toBe("completed");
+  expect(prepared.outputs.results[0]).toMatchObject({ materials: expect.any(Array), cuts: expect.any(Array), assembly: expect.any(Array) });
+  expect(prepared.outputs.results[0].cuts.every(c => c.length.value === null)).toBe(true);
+  const exported = await run(t, created.id, "export_selected_package");
+  expect(exported.run?.status).toBe("completed");
+  expect(exported.outputs.artifacts.map(a => a.kind)).toEqual(expect.arrayContaining(["pdf", "bom_csv", "cut_csv"]));
+});
 it("runs real Pi for a drawing-only open spool and exports the authoritative saved outputs", async () => {
   const t = setup(),
     s = await create(t, 2, true);
