@@ -38,7 +38,8 @@ describe("fixed-end draft accounting", () => {
     const delta = compareWorkPackages(deriveWorkPackage(f.input, f.catalog), result);
     expect(delta.jointCountDelta).toBe(3);
     expect(delta.centerlineDeltaM).toBeCloseTo(0, 12);
-    expect(delta.operationCountDelta).toBe(10);
+    expect(delta.operationCountDelta).toBe(9);
+    expect(result.operations.filter(o => o.code === "resolve_preparation")).toHaveLength(2);
     expect(delta.lineage[0].state).toBe("piece_split_or_merge");
     expect(f.input).toEqual(snapshot);
   });

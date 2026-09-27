@@ -12,9 +12,9 @@ export function spearsCatalog(configVersion: string): Catalog {
     products: [
       { id: PIPE_ID, kind: "pipe", label: "Spears FlameGuard CP-010 SDR 13.5 plain-end pipe",
         nominalSize: "NPS 1", outsideDiameter: { value: 1.315, unit: "in" },
-        connection: "cpvc_socket_solvent", sourceIds: [DIMENSIONS_SOURCE, PROCEDURE_SOURCE] },
+        connection: "cpvc_socket_solvent", preparation: "spears-fg3", sourceIds: [DIMENSIONS_SOURCE, PROCEDURE_SOURCE] },
       { id: ELBOW_ID, kind: "elbow_90", label: "Spears FlameGuard 4206-010S sweep 90 socket x socket",
-        nominalSize: "NPS 1", connection: "cpvc_socket_solvent", compatiblePipeIds: [PIPE_ID],
+        nominalSize: "NPS 1", connection: "cpvc_socket_solvent", procedureId: "spears-fg3-socket-1in", compatiblePipeIds: [PIPE_ID],
         centerToFace: { value: 2.375, unit: "in" }, centerToSocketBottom: { value: 1.3125, unit: "in" },
         publishedDimensionTolerance: { value: 0.03125, unit: "in" },
         sourceIds: [ELBOW_SOURCE, DIMENSIONS_SOURCE, PROCEDURE_SOURCE] },

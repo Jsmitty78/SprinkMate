@@ -46,10 +46,10 @@ All following geometry is invented. Neither case is FS-01 or a surveyed MSU bran
 
 | Input | Proposed piece centerlines | Full quantities | Delta against unsplit span |
 | --- | --- | --- | --- |
-| 3000 mm span, station 1000 mm | 1000 + 2000 mm | 2 pipes; 1 union assembly; included 1 gasket, 4 bolts; 5 modeled connections | +1 pipe, +1 union, +3 connections, +10 unresolved/review operations; 0 centerline change |
+| 3000 mm span, station 1000 mm | 1000 + 2000 mm | 2 pipes; 1 union assembly; included 1 gasket, 4 bolts; 5 modeled connections | +1 pipe, +1 union, +3 connections, +9 unresolved/review operations; 0 centerline change |
 | 4200 mm span, station 1700 mm | 1700 + 2500 mm | Same counts | Same count/operation delta; 0 centerline change |
 
-The 5 connections comprise 2 outer interfaces, 2 union threads and 1 gasket face. The 10 operation delta comprises 2 extra preparation tasks, 2 union-thread resolution tasks, 2 component-resolution tasks and 4 closure-review tasks. **Every cut length remains null.** This is a count/projection oracle, not the missing positive steel cut/closure oracle.
+The 5 connections comprise 2 outer interfaces, 2 union threads and 1 gasket face. The 9 operation delta comprises 1 extra product-specific preparation review task, 2 union-thread resolution tasks, 2 component-resolution tasks and 4 closure-review tasks. **Every cut length remains null.** This is a count/projection oracle, not the missing positive steel cut/closure oracle.
 
 Additional tests cover NPS 1's three bolts, translated/reversed local axes, ft/in inputs, adjacent elbows/accessory preservation, foreign projects, stale versions, product changes, CPVC refusal, unsupported station/frame and wrong-subject evidence.
 

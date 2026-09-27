@@ -49,7 +49,12 @@ export function toLocalPlanGeometry(input: FabricationInput, catalog: Catalog): 
         const t = output.cuts.find(c => c.pieceId === p.pieceId)!.takeouts[p.end === "start" ? 0 : 1];
         return { segmentId: p.pieceId, endpoint: p.end, nodeId: f.nodeId,
           centerToFace: fact(t.centerToFaceM === null ? null : { value: t.centerToFaceM, unit: "m" as const }, t.sourceIds),
-          insertionOrThreadMakeup: fact(t.insertionM === null ? null : { value: t.insertionM, unit: "m" as const }, t.sourceIds) };
+          insertionOrThreadMakeup: {
+            value: t.insertionM === null ? null : { value: t.insertionM, unit: "m" as const },
+            confirmed: t.insertionM !== null && t.netTakeout.basis === "confirmed_inputs",
+            evidenceIds: [...t.sourceIds, ...t.netTakeout.evidenceIds],
+            source: t.netTakeout.basis === "proposed_inputs" ? "model" as const : "manual" as const,
+          } };
       }) as [LocalPort, LocalPort] })),
     ducts: [],
   };

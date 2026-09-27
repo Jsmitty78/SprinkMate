@@ -1,4 +1,4 @@
-import type { WorkPackageSnapshot } from "@field-agent/core";
+import { adaptationFrame, type WorkPackageSnapshot } from "@field-agent/core";
 import type { FabricationOutput } from "@field-agent/fabrication";
 import {
   ExportError,
@@ -9,7 +9,7 @@ import {
 } from "../exports/types.js";
 import type { Detail, IntegratedState } from "./runtime.js";
 
-function view(d: Detail): PlanView {
+function view(d: Detail, s: WorkPackageSnapshot): PlanView {
   const point = (v: FabricationOutput["cuts"][number]["start"]) => {
     if (!v.value)
       throw new ExportError(
@@ -18,7 +18,9 @@ function view(d: Detail): PlanView {
       );
     const p = v.value,
       k = { m: 1000, mm: 1, ft: 304.8, in: 25.4 }[p.unit];
-    return [p.x * k, p.y * k, p.z * k] as [number, number, number];
+    const raw = { x: p.x * k, y: p.y * k, z: p.z * k };
+    const q = s.intent === "adapt_to_site" ? adaptationFrame(s).toDrawing(raw) : raw;
+    return [q.x, q.y, q.z] as [number, number, number];
   };
   return {
     id: d.plan.id,
@@ -30,6 +32,9 @@ function view(d: Detail): PlanView {
       from: point(c.start),
       to: point(c.end),
     })),
+    context: s.intent === "adapt_to_site" ? s.baselinePlan!.entities.filter(e => !s.changeRequest!.affectedEntityIds.includes(e.id)).map(e => ({
+      id: e.id, kind: e.kind, positions: e.ports.flatMap(p => p.position ? [[p.position.x, p.position.y, p.position.z] as [number, number, number]] : []),
+    })) : [],
     joints: d.fabrication.joints.map((j) => {
       const c = d.fabrication.cuts.find((c) => c.pieceId === j.pieceId)!;
       return { id: j.id, position: point(j.end === "start" ? c.start : c.end) };
@@ -74,6 +79,7 @@ export function exportSnapshot(
       },
     ]),
   );
+  for (const e of f.evidence) sources.set(e.id, { id: e.id, title: e.id, reference: e.description });
   for (const c of d.profile.checks)
     for (const ref of c.sourceRefs)
       if (!sources.has(ref))
@@ -149,13 +155,13 @@ export function exportSnapshot(
     derivedBinding: binding(f.inputRevision, f.configVersion, f.planId),
     intent: s.intent,
     title: s.title,
-    scope: `${s.scope?.includedEntityIds.join(", ") || "Scope unresolved"}; ${f.quantityBasis}; no construction approval`,
+    scope: `${(s.intent === "adapt_to_site" ? s.changeRequest?.affectedEntityIds : s.scope?.includedEntityIds)?.join(", ") || "Scope unresolved"}; ${f.quantityBasis}; no construction approval`,
     drawingReference: `${s.sourceDrawing.drawingId} revision ${s.sourceDrawing.revision}, ${s.sourceDrawing.approval}`,
-    selectedPlan: view(d),
-    ...(s.intent === "adapt_to_site" ? { baselinePlan: view(baseline) } : {}),
+    selectedPlan: view(d, s),
+    ...(s.intent === "adapt_to_site" ? { baselinePlan: view(baseline, s) } : {}),
     materials: f.materials.map((m) => ({
       id: m.id,
-      description: m.productId ?? m.id,
+      description: m.kind === "pipe" ? `${m.productId ?? "Unselected pipe"} (modeled spans; not purchasing stock)` : m.productId ?? m.id,
       quantity: m.quantity.value,
       unit: m.quantity.unit,
       status: m.quantity.value === null ? "unresolved" : "known",
@@ -176,7 +182,7 @@ export function exportSnapshot(
       length: c.cutLength.value,
       unit: "m",
       status: c.cutLength.value === null ? "unresolved" : "known",
-      sourceIds: [...new Set(c.takeouts.flatMap((t) => t.sourceIds))],
+      sourceIds: [...new Set([...c.centerline.evidenceIds, ...c.takeouts.flatMap(t => [...t.sourceIds, ...t.netTakeout.evidenceIds])])],
       unresolvedReason:
         c.cutLength.value === null
           ? reason(c.cutLength.reasons, "Cut unresolved")
@@ -208,6 +214,9 @@ export function exportSnapshot(
       sourceIds: c.sourceRefs,
     })),
     unresolvedItems: [
+      ...(s.intent === "adapt_to_site" ? ["Full quantities and delta cover only the active interval. Protected context is retained, excluded from purchase quantities, and not checked for clearance or constructability.", ...s.baselinePlan!.entities.filter(e => !s.changeRequest!.affectedEntityIds.includes(e.id) && !e.ports.some(p => p.position)).map(e => `Protected context ${e.id}: position unknown; retained in saved plan but cannot be drawn.`)] : []),
+      ...s.siteFacts.map(f => `${f.field}: ${f.value ?? "unknown"} ${f.unit ?? ""}; ${f.confirmation}; ${f.source.description}`),
+      ...s.detailing.filter(f => /fixture|fictional|invented|assum/i.test(f.source.description)).map(f => `${f.field}: ${f.source.description}`),
       ...f.gaps.map((g) => `${g.subjectId}: ${g.reason}`),
       ...(f.planRole === "candidate"
         ? [
