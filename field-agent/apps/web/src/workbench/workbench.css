@@ -485,3 +485,70 @@ html, body { margin: 0; background: var(--fa-bg); }
   .fa-navigation .fa-btn { flex: 1; }
   .fa-work { min-height: calc(100dvh - 100px); }
 }
+
+/* ---------- Ask Sprink: attachments, uploads, review and page viewer */
+.fa-ask-attach { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: -4px; }
+.fa-ask-attach small { margin-left: 4px; }
+.fa-only-touch { display: none; }
+@media (pointer: coarse) { .fa-only-touch { display: inline-flex; } }
+.fa-droparea { position: relative; }
+.fa-droparea.is-over { outline: 2px dashed var(--fa-blue); outline-offset: -6px; background: var(--fa-blue-tint); }
+.fa-droparea-hint { position: sticky; bottom: 12px; align-self: center; display: inline-flex; gap: 8px; align-items: center; padding: 8px 14px; border-radius: 20px; background: var(--fa-blue); color: #fff; font-weight: 600; pointer-events: none; }
+.fa-purpose { border: 1px solid var(--fa-blue); background: var(--fa-blue-tint); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.fa-purpose p { margin: 0; }
+.fa-purpose .fa-btn { justify-content: flex-start; text-align: left; height: auto; padding: 7px 10px; flex-direction: column; align-items: flex-start; gap: 1px; }
+.fa-purpose .fa-btn small { font-weight: 400; color: var(--fa-muted); font-size: 11.5px; }
+.fa-atts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.fa-att { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; border: 1px solid var(--fa-line); border-radius: 8px; padding: 5px 6px; background: var(--fa-surface); }
+.fa-att.is-failed { border-color: var(--fa-red); background: var(--fa-red-soft); }
+.fa-att-thumb { width: 40px; height: 40px; border-radius: 5px; overflow: hidden; background: var(--fa-sunken); display: grid; place-items: center; color: var(--fa-muted); }
+.fa-att-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.fa-att-text { display: flex; flex-direction: column; min-width: 0; }
+.fa-att-text b { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fa-att-text small { color: var(--fa-muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
+.fa-att.is-failed .fa-att-text small { color: var(--fa-red); white-space: normal; }
+.fa-claims li.is-quote q { quotes: "“" "”"; font-family: var(--fa-font); color: var(--fa-ink); }
+.fa-claim-label { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--fa-muted); font-weight: 600; }
+.fa-origin.o-photo { background: #fff; color: var(--fa-slate); border: 1px solid var(--fa-line-2); }
+.fa-photo-facts + .fa-photo-facts { margin-top: 10px; }
+.fa-photo-facts p { margin: 0 0 4px; }
+.fa-viewer-mode { margin: 8px 16px 0; align-self: flex-start; }
+.fa-page { position: relative; border: 1px solid var(--fa-line); background: #fff; line-height: 0; }
+.fa-page img { width: 100%; height: auto; display: block; }
+.fa-page-box { position: absolute; border: 2px solid var(--fa-blue); background: rgba(26, 111, 224, .12); border-radius: 3px; box-shadow: 0 0 0 3px rgba(26, 111, 224, .15); }
+.fa-page-box.is-flag { border-color: var(--fa-amber); background: rgba(217, 119, 6, .14); box-shadow: 0 0 0 3px rgba(217, 119, 6, .18); }
+.fa-review-head { display: flex; align-items: center; gap: 8px; }
+.fa-review-head strong { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fa-review-head .fa-link .fa-icon { transform: rotate(90deg); vertical-align: -2px; }
+.fa-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; counter-reset: step; }
+.fa-steps li { font-size: 11px; color: var(--fa-muted); border-top: 3px solid var(--fa-line); padding-top: 4px; }
+.fa-steps li.is-done { border-color: var(--fa-blue); color: var(--fa-ink-2); }
+.fa-steps li.is-now { border-color: var(--fa-amber); color: var(--fa-ink); font-weight: 600; }
+.fa-steps li.is-failed { border-color: var(--fa-red); color: var(--fa-red); font-weight: 600; }
+.fa-review-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.fa-review-items li { border: 1px solid var(--fa-line); border-radius: 7px; padding: 6px 8px; }
+.fa-review-items li.is-done { background: var(--fa-sunken); }
+.fa-review-item { all: unset; cursor: pointer; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; width: 100%; }
+.fa-review-item:focus-visible { outline: 2px solid var(--fa-blue); }
+.fa-review-msg { flex-basis: 100%; font-size: 12.5px; }
+.fa-review-item code { flex-basis: 100%; font: 12px/1.4 var(--fa-mono); white-space: pre-wrap; background: var(--fa-sunken); padding: 3px 6px; border-radius: 4px; }
+.fa-review-text { width: 100%; box-sizing: border-box; font: 12px/1.5 var(--fa-mono); border: 1px solid var(--fa-line-2); border-radius: 7px; padding: 8px; resize: vertical; }
+.fa-review-actions { position: sticky; bottom: -24px; background: var(--fa-surface); padding: 8px 0; border-top: 1px solid var(--fa-line); flex-wrap: wrap; }
+.fa-review-actions small { flex-basis: 100%; text-align: right; }
+@media (max-width: 900px) {
+  .fa-att { grid-template-columns: 36px minmax(0, 1fr) auto auto; }
+  .fa-att .fa-badge-pill, .fa-att > .fa-badge { display: none; }
+}
+/* The question stays reachable while a long answer scrolls under it. */
+.fa-ask-split { overflow: hidden; padding: 0; gap: 0; position: relative; }
+.fa-ask-compose { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 10px; background: var(--fa-surface); border-bottom: 1px solid var(--fa-line); }
+.fa-ask-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 12px; }
+.fa-ask-compose .fa-atts { max-height: 22vh; overflow-y: auto; }
+.fa-ask-split .fa-droparea-hint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); }
+.fa-viewer-head small { display: block; }
+@media (max-width: 900px) {
+  /* On a phone the whole column scrolls, so the answer is not squeezed under the question. */
+  .fa-ask-split { overflow-y: auto; }
+  .fa-ask-split .fa-ask-scroll { flex: none; overflow: visible; }
+  .fa-ask-compose .fa-atts { max-height: none; }
+}

@@ -1,45 +1,113 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Snapshot } from "../api.js";
-import { Badge, Button, Callout, Field } from "../ui.js";
-import { askApi, type SourceDocument } from "./askApi.js";
+import { Badge, Button, Callout, Field, Icon } from "../ui.js";
+import { askApi, type SourceDocument, type UploadRecord } from "./askApi.js";
+import { Review, TYPES, type PageFocus } from "./Review.js";
+import { DropArea, FileButtons, MAX_MB, StatusBadge, isBusy, sizeText, useUploadPoll } from "./uploads.js";
 
-const TYPES: Array<[string, string]> = [
-  ["published_code", "Published code or standard"],
-  ["local_amendment", "Local amendment or jurisdiction document"],
-  ["manufacturer", "Manufacturer installation instructions"],
-  ["project_document", "Project specification or approved drawing"],
-  ["company_procedure", "Company procedure"],
-];
 const TYPE_LABEL = Object.fromEntries(TYPES);
 
-/** The project's source library: what is loaded, and importing documents the team is authorized to use. */
-export function Library({ s, docs, onChanged }: { s: Snapshot; docs: SourceDocument[] | null; onChanged: () => void }) {
+/**
+ * The project's source library: uploaded documents moving through reading, review and indexing,
+ * the searchable documents, and the labelled demonstration set.
+ */
+export function Library({ s, docs, onChanged, incoming, onIncomingTaken, onShowPage }: {
+  s: Snapshot; docs: SourceDocument[] | null; onChanged: () => void;
+  incoming: File[]; onIncomingTaken: () => void; onShowPage: (p: PageFocus | null) => void;
+}) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [open, setOpen] = useState(false);
+  const [uploads, setUploads] = useState<UploadRecord[] | null>(null);
+  const [sending, setSending] = useState<Array<{ key: string; file: File; progress: number; error?: string }>>([]);
+  const [reviewing, setReviewing] = useState<string | null>(null);
+  const [textOpen, setTextOpen] = useState(false);
+
+  const refresh = () => askApi.uploads("reference").then(r => setUploads(r.uploads)).catch(() => setUploads([]));
+  useEffect(() => { void refresh(); }, []);
+  useEffect(() => { if (incoming.length) { onIncomingTaken(); void send(incoming); } }, [incoming]);
+
+  const send = async (files: File[]) => {
+    const items = files.map(file => ({ key: `${file.name}-${file.size}-${Math.random()}`, file, progress: 0 }));
+    setSending(x => [...x, ...items]);
+    for (const it of items) {
+      if (it.file.size > MAX_MB * 1048576) { setSending(x => x.map(y => y.key === it.key ? { ...y, error: `${sizeText(it.file.size)} is over the ${MAX_MB} MB limit.` } : y)); continue; }
+      try {
+        const u = await askApi.upload(it.file, { purpose: "reference", projectId: s.projectId, packageId: s.id }, p => setSending(x => x.map(y => y.key === it.key ? { ...y, progress: p } : y)));
+        setSending(x => x.filter(y => y.key !== it.key));
+        setUploads(x => [u, ...(x ?? [])]);
+        if (files.length === 1) setReviewing(u.id);
+      } catch (e) { setSending(x => x.map(y => y.key === it.key ? { ...y, error: e instanceof Error ? e.message : "Upload failed" } : y)); }
+    }
+  };
+  const retrySend = (key: string) => { const it = sending.find(x => x.key === key); if (!it) return; setSending(x => x.filter(y => y.key !== key)); void send([it.file]); };
   const loadDemo = async () => {
     setBusy("demo"); setError("");
     try { await askApi.loadDemo(s.projectId); onChanged(); } catch (e) { setError(e instanceof Error ? e.message : "Could not load"); } finally { setBusy(""); }
   };
-  return <div className="fa-ask-body">
-    <p className="fa-muted small">Only documents you are authorized to store, index and use with AI belong here. Source text is stored as imported and kept apart from Sprink's notes.</p>
-    {error && <Callout tone="red" title="Could not load">{error}</Callout>}
-    {docs === null ? <p className="fa-muted">Loading…</p> : docs.length === 0
-      ? <Callout tone="neutral" title="No documents yet">Import an authorized document, or load the demonstration set to try the flow. The demonstration set is invented text, labelled everywhere it appears.</Callout>
-      : <ul className="fa-docs">{docs.map(d => <li key={d.id}>
-        <div><strong>{d.title}</strong>{d.demonstration && <Badge tone="sample">Demonstration</Badge>}</div>
-        <small>{TYPE_LABEL[d.type] ?? d.type} · {d.edition} · {d.sectionCount} sections · {d.publisher}</small>
-        {d.flags.length > 0 && <small className="fa-warn">Flags: {d.flags.map(f => f.replace(/_/g, " ")).join(", ")}</small>}
-      </li>)}</ul>}
+
+  if (reviewing) return <Review s={s} uploadId={reviewing} onShowPage={onShowPage} onClose={() => { setReviewing(null); onShowPage(null); void refresh(); }} onIndexed={() => { onChanged(); void refresh(); }} />;
+
+  return <DropArea onFiles={f => void send(f)} hint="Drop to add to the source library" className="fa-ask-body">
+    <p className="fa-muted small">Add only documents you are authorized to store, index and use with AI. Sprink reads the text (OCR for scans and photos), you check it, and it becomes searchable when you index it.</p>
     <div className="fa-actions">
-      <Button busy={busy === "demo"} onClick={() => void loadDemo()}>Load demonstration sources</Button>
-      <Button variant={open ? "default" : "primary"} onClick={() => setOpen(!open)}>{open ? "Close import" : "Import a document"}</Button>
+      <FileButtons onFiles={f => void send(f)} label="Upload document" camera={false} />
+      <small className="fa-muted">PDF (text or scanned), JPEG, PNG, HEIC, WebP, TIFF, BMP or GIF, up to {MAX_MB} MB. You can also drop or paste files here.</small>
     </div>
-    {open && <ImportForm s={s} onDone={() => { setOpen(false); onChanged(); }} />}
-  </div>;
+    {error && <Callout tone="red" title="Could not load">{error}</Callout>}
+
+    {(sending.length > 0 || (uploads?.length ?? 0) > 0) && <section className="fa-ask-block">
+      <h3>Uploads</h3>
+      <ul className="fa-docs">
+        {sending.map(it => <li key={it.key}>
+          <div><strong>{it.file.name}</strong>{it.error ? <Badge tone="red">Failed</Badge> : <Badge tone="blue">Uploading {Math.round(it.progress * 100)}%</Badge>}</div>
+          {it.error && <><small className="fa-warn">{it.error}</small><div className="fa-actions"><Button onClick={() => retrySend(it.key)}>Retry upload</Button><Button variant="quiet" onClick={() => setSending(x => x.filter(y => y.key !== it.key))}>Dismiss</Button></div></>}
+        </li>)}
+        {uploads?.map(u => <UploadRow key={u.id} u={u} onOpen={() => setReviewing(u.id)} onChange={n => setUploads(x => x?.map(y => y.id === n.id ? n : y) ?? null)} onRemoved={() => { setUploads(x => x?.filter(y => y.id !== u.id) ?? null); onChanged(); }} />)}
+      </ul>
+    </section>}
+
+    <section className="fa-ask-block">
+      <h3>Searchable documents<small>{docs?.length ?? ""}</small></h3>
+      {docs === null ? <p className="fa-muted">Loading…</p> : docs.length === 0
+        ? <Callout tone="neutral" title="No documents yet">Upload an authorized document, or load the demonstration set to try the flow. The demonstration set is invented text, labelled everywhere it appears.</Callout>
+        : <ul className="fa-docs">{docs.map(d => <li key={d.id}>
+          <div><strong>{d.title}</strong>{d.demonstration && <Badge tone="sample">Demonstration</Badge>}</div>
+          <small>{TYPE_LABEL[d.type] ?? d.type} · {d.edition} · {d.sectionCount} sections · {d.publisher}{d.upload ? ` · revision ${d.upload.revision}${d.upload.basis === "corrected" ? " (corrected)" : ""}` : ""}</small>
+          {d.flags.length > 0 && <small className="fa-warn">Flags: {d.flags.map(f => f.replace(/_/g, " ")).join(", ")}</small>}
+        </li>)}</ul>}
+      <div className="fa-actions">
+        <Button busy={busy === "demo"} onClick={() => void loadDemo()}>Load demonstration sources</Button>
+        <Button variant="quiet" onClick={() => setTextOpen(!textOpen)}>{textOpen ? "Close text import" : "Import prepared text"}</Button>
+      </div>
+    </section>
+    {textOpen && <TextImportForm s={s} onDone={() => { setTextOpen(false); onChanged(); }} />}
+  </DropArea>;
 }
 
-function ImportForm({ s, onDone }: { s: Snapshot; onDone: () => void }) {
+function UploadRow({ u, onOpen, onChange, onRemoved }: { u: UploadRecord; onOpen: () => void; onChange: (u: UploadRecord) => void; onRemoved: () => void }) {
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  useUploadPoll(u, onChange);
+  const act = async (what: "retry" | "remove") => {
+    setBusy(what); setError("");
+    try { if (what === "retry") onChange(await askApi.retryUpload(u.id)); else { await askApi.removeUpload(u.id); onRemoved(); } }
+    catch (e) { setError(e instanceof Error ? e.message : "Failed"); } finally { setBusy(""); }
+  };
+  return <li>
+    <div><strong>{u.filename}</strong><StatusBadge u={u} /></div>
+    <small>{u.kindLabel} · {sizeText(u.size)}{u.pageCount ? ` · ${u.pageCount} page${u.pageCount === 1 ? "" : "s"}` : ""}{u.review.blocking ? ` · ${u.review.blocking} to check` : ""}{u.indexedRevision ? ` · revision ${u.indexedRevision} indexed` : ""}</small>
+    {u.status === "failed" && <small className="fa-warn">{u.error?.message}</small>}
+    {error && <small className="fa-warn">{error}</small>}
+    <div className="fa-actions">
+      {(u.status === "review" || u.status === "ready" || (u.status === "failed" && u.failedStage === "indexing")) && <Button variant={u.status === "review" ? "primary" : "default"} onClick={onOpen}>{u.status === "review" ? "Review" : "Open"}</Button>}
+      {u.status === "failed" && <Button busy={busy === "retry"} onClick={() => void act("retry")}>Retry</Button>}
+      {!isBusy(u.status) && <Button variant="quiet" busy={busy === "remove"} onClick={() => void act("remove")}>Remove</Button>}
+    </div>
+  </li>;
+}
+
+/** Import of already-prepared text or Markdown, kept for documents extracted elsewhere. */
+function TextImportForm({ s, onDone }: { s: Snapshot; onDone: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [f, setF] = useState({ title: "", publisher: "", type: "published_code", edition: "", standard: "nfpa13", jurisdiction: "", amendsEdition: "", productIds: "", url: "",
     extraction: "text", basis: "", store: false, ai: false, display: "excerpt", maxQuoteChars: "400", demonstration: false });
@@ -67,7 +135,7 @@ function ImportForm({ s, onDone }: { s: Snapshot; onDone: () => void }) {
     } catch (e) { setError(e instanceof Error ? e.message : "Import failed"); } finally { setBusy(false); }
   };
   return <form className="fa-import" onSubmit={e => { e.preventDefault(); void submit(); }}>
-    <Field label="Text or Markdown file" hint="Use headings like “## 8.2 Title” and page markers “<!-- page: 41 -->”. Extract PDF text first.">
+    <Field label="Text or Markdown file" hint="Use headings like “## 8.2 Title” and page markers “<!-- page: 41 -->”.">
       <input type="file" accept=".md,.markdown,.txt,text/plain,text/markdown" onChange={e => setFile(e.target.files?.[0] ?? null)} />
     </Field>
     <div className="fa-import-grid">
@@ -84,7 +152,7 @@ function ImportForm({ s, onDone }: { s: Snapshot; onDone: () => void }) {
     </div>
     <fieldset className="fa-import-auth">
       <legend>Authorization</legend>
-      <Field label="Who authorized this, and on what basis" hint="For example a licence number, company ownership or a public-domain statement. A subscription alone is not assumed to allow this use.">
+      <Field label="Who authorized this, and on what basis" hint="A licence, company ownership or a public-domain statement. A subscription alone is not assumed to allow this use.">
         <textarea rows={2} value={f.basis} onChange={e => set("basis", e.target.value)} />
       </Field>
       <label className="fa-check"><input type="checkbox" checked={f.store} onChange={e => set("store", e.target.checked)} />We may store and index this document</label>
@@ -96,6 +164,6 @@ function ImportForm({ s, onDone }: { s: Snapshot; onDone: () => void }) {
       <label className="fa-check"><input type="checkbox" checked={f.demonstration} onChange={e => set("demonstration", e.target.checked)} />This is a demonstration document, not a real source</label>
     </fieldset>
     {error && <Callout tone="red" title="Not imported">{error}</Callout>}
-    <div className="fa-actions end"><Button variant="primary" busy={busy} disabled={!file || !f.title || !f.edition || !f.basis} onClick={() => void submit()}>Import</Button></div>
+    <div className="fa-actions end"><Button variant="primary" busy={busy} disabled={!file || !f.title || !f.edition || !f.basis} onClick={() => void submit()}><Icon name="upload" size={16} />Import</Button></div>
   </form>;
 }

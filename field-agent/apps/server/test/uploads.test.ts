@@ -128,6 +128,14 @@ describe('upload formats (real decoders)', () => {
       expect(u.error?.message).toMatch(message);
     }
   }, 60_000);
+
+  it('refuses the same reference file twice, so answers do not repeat', async () => {
+    const first = await uploadAndSettle('label.png', 'reference');
+    const again = await upload('label.png', 'reference', 'copy-of-label.png');
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatch(/already in the library as "label.png"/);
+    await uploads.remove(first.id);
+  }, 60_000);
 });
 
 describe('reference documents: extract, review, index, answer', () => {
@@ -231,6 +239,8 @@ describe('reference documents: extract, review, index, answer', () => {
   }, 120_000);
 
   it('does not put an uploaded code edition in place of the project edition', async () => {
+    // The same bytes are indexed again under different metadata, so the earlier copy goes first.
+    for (const x of uploads.list({ purpose: 'reference' }).filter(x => x.filename === 'native-text-manual.pdf')) await uploads.remove(x.id);
     const u = await uploadAndSettle('native-text-manual.pdf', 'reference', 'manual-as-code.pdf');
     const review = await (await app.request(`/api/uploads/${u.id}/review`, { headers: auth })).json();
     await app.request(`/api/uploads/${u.id}/review`, json('PUT', { acknowledged: review.items.map((i: { id: string }) => i.id) }));
@@ -300,6 +310,7 @@ describe('recovery', () => {
     expect(res.status).toBe(202);
     expect((await uploads.settle(u.id)).status).toBe('review');
     await restarted.ocr.close();
+    await uploads.remove(u.id);
   }, 120_000);
 
   it('keeps an upload in review when index metadata is invalid, then indexes after it is fixed', async () => {

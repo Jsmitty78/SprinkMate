@@ -121,12 +121,18 @@ export class UploadService {
     if (bytes.length > LIMITS.maxBytes) throw new UploadError(413, 'file_too_large', `The file is ${(bytes.length / 1048576).toFixed(1)} MB. The limit is ${LIMITS.maxBytes / 1048576} MB.`);
     const kind = sniff(bytes);
     if (!kind) throw new UploadError(415, 'unsupported_format', `This file type is not supported. Upload ${SUPPORTED_TEXT}. (The file's contents were checked, not its name.)`);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    if (input.purpose === 'reference') {
+      // The same reference file twice would repeat every quote in answers; point at the copy already there.
+      const same = this.list({ purpose: 'reference' }).find(u => u.sha256 === sha256 && u.status !== 'failed' && (u.projectId ?? null) === (input.projectId ?? null));
+      if (same) throw new UploadError(409, 'duplicate_upload', `This file is already in the library as "${same.filename}". Open that copy to review or correct it.`);
+    }
     const id = randomUUID(), now = new Date().toISOString();
     await mkdir(join(this.dir, id), { recursive: true, mode: 0o700 });
     await writeAtomic(this.path(id, 'original'), bytes);
     const record: UploadRecord = {
       id, purpose: input.purpose, filename: cleanName(input.filename), kind, kindLabel: KIND_LABEL[kind], mime: KIND_MIME[kind], size: bytes.length,
-      sha256: createHash('sha256').update(bytes).digest('hex'), status: 'uploaded',
+      sha256, status: 'uploaded',
       projectId: input.projectId ?? null, packageId: input.packageId ?? null, pageCount: null, pages: [], notes: [], review: { items: 0, blocking: 0 },
       revision: 0, indexedRevision: null, docId: null, metadata: null, timings: { uploadMs: input.uploadMs }, createdAt: now, updatedAt: now,
     };
