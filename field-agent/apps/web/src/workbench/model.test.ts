@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WorkPackageSnapshot } from "@field-agent/core";
 import { countText, feetInches, lengthInput, lengthText, parseLength } from "./format.js";
-import { buildRun, callouts, findFact, groupChecks, requirements, routeOptions, runBlockers, runNodes, upsertFacts } from "./model.js";
+import { buildRun, callouts, dropOrphanFacts, findFact, groupChecks, requirements, routeOptions, runBlockers, runChanged, runNodes, upsertFacts, type RunNode } from "./model.js";
 import { sampleInputs } from "./sample.js";
 
 describe("display formatting", () => {
@@ -138,5 +138,30 @@ describe("routes and checks", () => {
     if ("problems" in built) throw new Error();
     const c = callouts(built.plan, { cuts: [{ pieceId: "p2", callout: 7 }], fittings: [{ id: "f1", callout: "F9" }] });
     expect([c.piece.get("p1"), c.piece.get("p2"), c.fitting.get("f1")]).toEqual(["1", "7", "F9"]);
+  });
+});
+
+describe("run edits", () => {
+  const three: RunNode[] = [{ kind: "open_end", x: 0, y: 0 }, { kind: "elbow", x: 609.6, y: 0 }, { kind: "open_end", x: 609.6, y: 457.2 }];
+  const two: RunNode[] = [{ kind: "open_end", x: 0, y: 0 }, { kind: "open_end", x: 609.6, y: 0 }];
+
+  it("drops facts for entities removed from a shortened run", () => {
+    const long = buildRun(three, "baseline", "test");
+    const short = buildRun(two, "baseline", "test");
+    if ("problems" in long || "problems" in short) throw new Error("bad run");
+    const before = upsertFacts({ detailing: [], siteFacts: [] }, long.datums.map(d => ({ ...d, confirmation: "confirmed" as const, source: "test" })));
+    expect(before.detailing.some(f => f.subjectIds.includes("p2"))).toBe(true);
+    const after = dropOrphanFacts(before, short.plan);
+    const ids = new Set(short.plan.entities.map(e => e.id));
+    expect(after.detailing.length).toBeGreaterThan(0);
+    expect(after.detailing.every(f => f.subjectIds.every(id => ids.has(id)))).toBe(true);
+  });
+
+  it("treats a moved point as an unsaved change but ignores ft-in display rounding", () => {
+    expect(runChanged(three, three)).toBe(false);
+    expect(runChanged(three.map(n => ({ ...n, x: n.x === null ? null : n.x + 0.7 })), three)).toBe(false);
+    expect(runChanged(three.map((n, i) => i === 2 ? { ...n, y: 500 } : n), three)).toBe(true);
+    expect(runChanged(two, three)).toBe(true);
+    expect(runChanged(three, null)).toBe(true);
   });
 });

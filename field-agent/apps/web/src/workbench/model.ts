@@ -60,6 +60,20 @@ export function upsertFacts(s: Pick<WorkPackageSnapshot, "detailing" | "siteFact
   return { detailing, siteFacts };
 }
 
+/** Drops facts tied to entities that are no longer in the plan, so a shortened run does not leave facts the server rejects as unknown_subject. */
+export function dropOrphanFacts<T extends Pick<PackageInputs, "detailing" | "siteFacts">>(facts: T, plan: Pick<Plan, "entities">): T {
+  const ids = new Set(plan.entities.map(e => e.id));
+  const live = (f: Fact) => f.subjectIds.every(id => ids.has(id));
+  return { ...facts, detailing: facts.detailing.filter(live), siteFacts: facts.siteFacts.filter(live) };
+}
+
+/** True when two runs differ by more than display rounding (ft-in shows the nearest 1/16 in, under 1 mm off). */
+export function runChanged(a: RunNode[], b: RunNode[] | null): boolean {
+  if (!b || a.length !== b.length) return true;
+  const off = (p: number | null, q: number | null) => p === null || q === null ? p !== q : Math.abs(p - q) >= 1;
+  return a.some((n, i) => n.kind !== b[i].kind || off(n.x, b[i].x) || off(n.y, b[i].y));
+}
+
 /** A 6-number box fact (duct.min.x … duct.max.z) in mm, or null for each missing coordinate. */
 export const BOX_KEYS = ["min.x", "min.y", "min.z", "max.x", "max.y", "max.z"] as const;
 export interface Box { min: Point & { z: number }; max: Point & { z: number } }

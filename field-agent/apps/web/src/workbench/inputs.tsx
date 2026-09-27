@@ -3,7 +3,7 @@ import type { PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "./api.js";
 import { lengthInput, lengthText, parseLength, toMetres } from "./format.js";
 import {
-  BOX_KEYS, buildRun, findFact, isConfirmed, PROJECT_BASIS, readBox, runNodes, upsertFacts,
+  BOX_KEYS, buildRun, dropOrphanFacts, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
   type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
 } from "./model.js";
 import { Badge, Button, Callout, Field, Icon, Section } from "./ui.js";
@@ -123,11 +123,12 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
   const nodes: RunNode[] = rows.map(r => ({ kind: r.kind, x: parseLength(r.x, unit), y: parseLength(r.y, unit) }));
   const built = buildRun(nodes, s.baselinePlan?.id ?? "baseline");
   const problems = "problems" in built ? built.problems : [];
+  const dirty = runChanged(nodes, saved);
 
   const save = () => act("run", async cur => {
     if ("problems" in built) return;
     const keep = built.datums.filter(d => findFact(cur, d.field, d.subjectIds![0])?.value !== d.value);
-    await patchClearing(cur, { baselinePlan: built.plan, scope: built.scope, ...upsertFacts(cur, keep) }, setNotice);
+    await patchClearing(cur, { baselinePlan: built.plan, scope: built.scope, ...dropOrphanFacts(upsertFacts(cur, keep), built.plan) }, setNotice);
   });
   const confirm = () => {
     if (!s.baselinePlan) return;
@@ -184,8 +185,9 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
       {problems.length > 0 && <ul className="fa-problems">{problems.map(p => <li key={p}>{p}</li>)}</ul>}
       <div className="fa-actions">
         <Button busy={busy === "run"} disabled={!!busy || problems.length > 0} onClick={() => void save()}>Save run</Button>
-        <Button variant="primary" busy={busy === "confirm-run"} disabled={!!busy || !s.baselinePlan || !saved || problems.length > 0} onClick={confirm}>Confirm dimensions</Button>
+        <Button variant="primary" busy={busy === "confirm-run"} disabled={!!busy || !s.baselinePlan || !saved || dirty || problems.length > 0} onClick={confirm}>Confirm dimensions</Button>
       </div>
+      {s.baselinePlan && saved && dirty && problems.length === 0 && <p className="fa-muted small">Save the run first. Confirming freezes the saved run, not unsaved edits.</p>}
     </>}
   </div>;
 }
