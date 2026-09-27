@@ -21,6 +21,8 @@ export interface Segment {
   startNodeId: string;
   endNodeId: string;
   outsideDiameter: Fact<Length>;
+  cutEndDatumAtStart: Fact<"center_to_center" | "physical_pipe_end">;
+  cutEndDatumAtEnd: Fact<"center_to_center" | "physical_pipe_end">;
   productId?: string;
   sourceSegmentIds?: readonly string[];
 }

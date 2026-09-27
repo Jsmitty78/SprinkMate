@@ -35,13 +35,13 @@ export class WorkflowRunner {
         !Number.isSafeInteger(this.maxSteps) || this.maxSteps < 1) throw new Error('Invalid workflow configuration');
     options.store.interruptRunning();
   }
-  start(packageId: string, goal: Goal, expected: Version): RunHandle {
+  start(packageId: string, goal: Goal, expected: Version, runId: string = randomUUID()): RunHandle {
     const existing = this.active.get(packageId);
     if (existing) return existing.handle;
     const snapshot = this.options.domain.read(packageId);
     if (!sameVersion(snapshot, expected) || snapshot.configVersion !== this.options.configVersion) throw new Error('input_or_config_conflict');
     if (goal !== 'export_selected_package' && goal !== snapshot.intent) throw new Error('goal_intent_mismatch');
-    const run: RunRecord = { id: randomUUID(), packageId, goal, inputRevision: snapshot.inputRevision,
+    const run: RunRecord = { id: runId, packageId, goal, inputRevision: snapshot.inputRevision,
       configVersion: snapshot.configVersion, status: 'running', steps: 0, startedAt: new Date().toISOString() };
     this.options.store.save(run);
     const active: ActiveRun = { controller: new AbortController(), handle: { id: run.id, done: Promise.resolve(run) } };

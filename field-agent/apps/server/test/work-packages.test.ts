@@ -158,8 +158,9 @@ describe('revision-bound outputs and explicit human decisions', () => {
     const candidates = s.packages.get(context.snapshot.id).outputs.candidates!;
     candidates.candidates[0].plan.confirmation = 'confirmed';
     expect(() => context.publish({ candidates })).toThrow('candidate_cannot_confirm');
+    expect(() => context.publish({ results: [{ ...output, id: 'bad-assembly', assembly: output.assembly.map(step => ({ ...step, pieceIds: ['missing-piece'] })) }] })).toThrow('assembly_unknown_reference');
     context.publish({ results: [output] });
-    expect(() => context.publish({ results: [{ ...output, cuts: [] }] })).toThrow('output_id_reused');
+    expect(() => context.publish({ results: [{ ...output, materials: output.materials.map(m => ({ ...m, description: 'changed description' })) }] })).toThrow('output_id_reused');
     expect(s.packages.get(context.snapshot.id).outputs.results[0]).toEqual(output);
   });
   it('persists a question and unavailable answer without inventing or confirming a value', async () => {

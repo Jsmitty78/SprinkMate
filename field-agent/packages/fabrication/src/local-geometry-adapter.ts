@@ -14,7 +14,7 @@ export interface LocalGeometryPort {
   id: string;
   coordinateFrame: LocalFact<{ id: string; lengthUnit: FabricationInput["frame"]["lengthUnit"] }>;
   nodes: { id: string; kind: "fitting_center" | "tie_in" | "other"; position: LocalFact<Point3>; fittingId?: string; tieInNetCutOffset?: LocalFact<Length> }[];
-  segments: { id: string; startNodeId: string; endNodeId: string; outsideDiameter: LocalFact<Length> }[];
+  segments: { id: string; startNodeId: string; endNodeId: string; outsideDiameter: LocalFact<Length>; cutEndDatumAtStart: LocalFact<"center_to_center" | "physical_pipe_end">; cutEndDatumAtEnd: LocalFact<"center_to_center" | "physical_pipe_end"> }[];
   fittings: { id: string; kind: LocalFact<"elbow_90" | "unsupported">; centerNodeId: string; ports: readonly [LocalPort, LocalPort] }[];
   ducts: [];
 }
@@ -38,6 +38,8 @@ export function toLocalPlanGeometry(input: FabricationInput, catalog: Catalog): 
     segments: input.pieces.map(p => {
       const product = catalog.products.find(c => c.id === p.productId);
       return { id: p.id, startNodeId: p.startNodeId, endNodeId: p.endNodeId,
+        cutEndDatumAtStart: fact(input.nodes.find(n => n.id === p.startNodeId)!.datum === "physical_pipe_end" ? "physical_pipe_end" : "center_to_center", [`datum:${p.startNodeId}`]),
+        cutEndDatumAtEnd: fact(input.nodes.find(n => n.id === p.endNodeId)!.datum === "physical_pipe_end" ? "physical_pipe_end" : "center_to_center", [`datum:${p.endNodeId}`]),
         outsideDiameter: fact(product?.kind === "pipe" ? product.outsideDiameter : null, product?.sourceIds ?? []) };
     }),
     fittings: input.fittings.map(f => ({ id: f.id, centerNodeId: f.nodeId,

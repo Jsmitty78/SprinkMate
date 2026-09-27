@@ -17,7 +17,7 @@ export function defaultWorkPackages(store: Store) {
 }
 
 /** Mount only under the existing authenticated /api middleware. */
-export function workPackageRouter(service: WorkPackageService) {
+export function workPackageRouter(service: WorkPackageService, loadDetails?: (id: string) => unknown) {
   const app = new Hono();
   app.onError((error, c) => {
     if (error instanceof PackageError) return c.json({ error: error.message, code: error.code }, error.status as ContentfulStatusCode);
@@ -40,6 +40,7 @@ export function workPackageRouter(service: WorkPackageService) {
     c.header('Content-Security-Policy', "default-src 'none'; sandbox");
     return c.body(new Uint8Array(asset.bytes));
   });
+  if (loadDetails) app.get('/:id/detail', c => c.json(loadDetails(c.req.param('id'))));
   app.get('/:id/candidates', c => {
     const s = service.get(c.req.param('id'));
     return c.json({ candidates: s.outputs.candidates, current: s.freshness.candidates, selectedPlan: s.selectedPlan });

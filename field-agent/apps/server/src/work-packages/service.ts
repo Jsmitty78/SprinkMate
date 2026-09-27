@@ -169,7 +169,10 @@ export class WorkPackageService {
     const data = parse(StartPackageRunSchema, input), snapshot = this.snapshot(id);
     this.expected(snapshot, data.expectedRevision);
     ensure(data.goal === snapshot.intent || data.goal === 'export_selected_package', 'goal_intent_mismatch');
-    if (snapshot.run?.status === 'running') return { run: snapshot.run, reused: true };
+    if (snapshot.run?.status === 'running') {
+      if (snapshot.run.goal !== data.goal) throw new PackageError(409, 'active_run_goal_conflict');
+      return { run: snapshot.run, reused: true };
+    }
     if (!this.runner) throw new PackageError(503, 'runner_unavailable');
     const run: PackageRun = {
       id: randomUUID(), goal: data.goal, inputRevision: snapshot.inputRevision, configVersion: this.configVersion,
@@ -216,6 +219,8 @@ export class WorkPackageService {
       ensure(plan, 'result_plan_not_found');
       const entities = new Set(plan.entities.map(e => e.id));
       ensure([...result.materials.flatMap(m => m.entityIds), ...result.cuts.flatMap(c => c.sourceEntityIds), ...result.evaluations.flatMap(e => e.subjectIds), ...result.gaps.flatMap(g => g.subjectIds)].every(id => entities.has(id)), 'result_unknown_subject');
+      const pieces = new Set(result.cuts.map(c => c.pieceId)), joints = new Set(plan.connections.map(c => c.id));
+      ensure(result.assembly.every(step => step.pieceIds.every(id => pieces.has(id)) && step.jointIds.every(id => joints.has(id))), 'assembly_unknown_reference');
     }
     for (const request of outputs.requests ?? []) {
       checkBinding(request);
