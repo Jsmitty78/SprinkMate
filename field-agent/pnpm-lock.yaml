@@ -79,6 +79,8 @@ importers:
 
   packages/fabrication: {}
 
+  packages/planning: {}
+
 packages:
 
   '@babel/code-frame@7.29.7':
