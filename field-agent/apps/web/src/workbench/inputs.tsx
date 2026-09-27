@@ -3,7 +3,7 @@ import type { PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "./api.js";
 import { lengthInput, lengthText, parseLength, toMetres } from "./format.js";
 import {
-  reopenSiteGeometry, showCpvcInputs, showSfInputs, activeDetailingPlan, BOX_KEYS, buildRun, ELBOW, inScope, PIPE, runEditPatch, findFact, isConfirmed, projectBasis, readBox, runChanged, runNodes, upsertFacts,
+  reopenSiteGeometry, showCpvcInputs, showSfInputs, activeDetailingPlan, buildRun, ELBOW, inScope, PIPE, runEditPatch, findFact, isConfirmed, projectBasis, runChanged, runNodes, upsertFacts,
   syncRunDraft, type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
 } from "./model.js";
 import { Badge, Button, Callout, Field, Icon, Section } from "./ui.js";
