@@ -1,3 +1,4 @@
+import type { PdfExcerpt } from './pdf-excerpts.js';
 /**
  * Ask Sprink source library contracts.
  *
@@ -74,6 +75,7 @@ export interface SourceDocumentInput {
 }
 
 export interface SourceDocument extends Omit<SourceDocumentInput, 'content'> {
+  pdf?: { sha256: string; pageCount: number; excerpts?: PdfExcerpt[] };
   sha256: string;
   importedAt: string;
   sectionCount: number;
@@ -81,6 +83,7 @@ export interface SourceDocument extends Omit<SourceDocumentInput, 'content'> {
 }
 
 export interface SourceSection {
+  pdfExcerpt?: PdfExcerpt;
   key: string;            // stable storage key: `${docId}#${n}`
   docId: string;
   sectionId: string;      // identifier as printed in the document, e.g. "DEMO-8.2" or "DEMO-8.2 Exception No. 1"

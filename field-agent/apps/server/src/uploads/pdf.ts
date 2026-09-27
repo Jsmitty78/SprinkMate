@@ -24,7 +24,7 @@ export interface OpenPdf {
   close(): Promise<void>;
 }
 
-export async function openPdf(bytes: Buffer): Promise<OpenPdf> {
+export async function openPdf(bytes: Buffer, maxPages: number = LIMITS.maxPages): Promise<OpenPdf> {
   const lib = await load();
   let doc: Awaited<ReturnType<PdfJs['getDocument']>['promise']>;
   const task = lib.getDocument({
@@ -42,9 +42,9 @@ export async function openPdf(bytes: Buffer): Promise<OpenPdf> {
     if (name === 'InvalidPDFException') throw new UploadError(422, 'corrupt_pdf', 'This PDF is damaged or incomplete and could not be opened. Upload the original file again.');
     throw new UploadError(422, 'corrupt_pdf', 'This PDF could not be opened.');
   }
-  if (doc.numPages > LIMITS.maxPages) {
+  if (doc.numPages > maxPages) {
     await task.destroy();
-    throw new UploadError(413, 'too_many_pages', `The PDF has ${doc.numPages} pages. The limit is ${LIMITS.maxPages}; upload the chapters you need as separate files.`);
+    throw new UploadError(413, 'too_many_pages', `The PDF has ${doc.numPages} pages. The limit is ${maxPages}; upload the chapters you need as separate files.`);
   }
   return {
     pageCount: doc.numPages,
