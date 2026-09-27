@@ -6,7 +6,7 @@ import { timingSafeEqual, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import { RULE } from '@field-agent/core';
+import { RULE, ADOPTED_RULES, SfProjectFactsSchema, RuleContextSchema, checkSchema, resolveSfNfpa13Edition, evaluateProject } from '@field-agent/core';
 import { AppError, type Observation } from './models.js';
 import { FieldService, safeId } from './service.js';
 import { defaultWorkPackages, workPackageRouter } from './work-packages/router.js';
@@ -33,7 +33,22 @@ export function createApp(service:FieldService,options:{token:string;webDir?:str
   app.use('/api/*',bodyLimit({maxSize:21*1024*1024,onError:c=>c.json({error:'送信データが大きすぎます'},413)}));
   const op=(header:string|undefined)=>safeId(header??randomUUID());
   app.get('/api/health',c=>c.json({ok:true,ruleId:RULE.id}));
-  app.get('/api/rules',c=>c.json([RULE]));
+  app.get('/api/rules',c=>c.json(ADOPTED_RULES));
+  app.post('/api/rules/evaluate',async c=>{
+    const input=await c.req.json();
+    try { return c.json(evaluateProject(input)); }
+    catch(error) {
+      if(error instanceof Error&&error.name==='ProjectInputError')throw new AppError(400,error.message);
+      throw error;
+    }
+  });
+  // Stateless edition lookup; it neither sets a task's adopted code nor returns compliance.
+  app.post('/api/rules/san-francisco/resolve-edition',async c=>{
+    const input=await c.req.json();
+    if(!input||!checkSchema(SfProjectFactsSchema,input.facts)||!checkSchema(RuleContextSchema,input.context))
+      throw new AppError(400,'許可情報と根拠の形式が不正です');
+    return c.json(resolveSfNfpa13Edition(input.facts,input.context));
+  });
   app.get('/api/tasks',c=>c.json(service.listTasks()));
   app.post('/api/tasks',async c=>{
     const body=await c.req.json();
