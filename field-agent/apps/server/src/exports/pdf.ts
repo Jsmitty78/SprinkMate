@@ -1,0 +1,162 @@
+import PDFDocument from 'pdfkit';
+import { ExportError, type ExportSnapshot, type PlanView } from './types.js';
+import { unresolved } from './snapshot.js';
+
+export interface PdfOptions { /** Use a Unicode TTF/OTF for non-ASCII project text. */ fontPath?: string }
+export async function renderPdf(s: ExportSnapshot, options: PdfOptions = {}): Promise<Buffer> {
+  if (!options.fontPath && /[^\x20-\x7e\r\n\t]/u.test(JSON.stringify(s))) {
+    throw new ExportError(422, 'Non-ASCII text requires a configured Unicode PDF font. No text was replaced or discarded.');
+  }
+  const doc = new PDFDocument({ size: 'A4', margin: 42, bufferPages: true, autoFirstPage: false,
+    info: { Title: s.title, Author: 'Field Agent', Subject: 'Draft work package. Export does not establish construction approval.' } });
+  const chunks: Buffer[] = [];
+  const finished = new Promise<Buffer>((resolve, reject) => {
+    doc.on('data', chunk => chunks.push(Buffer.from(chunk)));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+  });
+  const font = options.fontPath ?? 'Helvetica';
+  let y = 100;
+  const left = 42, width = 511, bottom = 776;
+  const clean = (text: string) => text.replace(/[\r\t]/g, ' ');
+  const at = (text: string, x: number, top: number, size = 9, color = '#243447') => {
+    doc.font(font).fontSize(size).fillColor(color).text(clean(text), x, top, { lineBreak: false });
+  };
+  const wrap = (text: string, maxWidth: number, size = 9): string[] => {
+    doc.font(font).fontSize(size);
+    const lines: string[] = [];
+    for (const paragraph of clean(text).split('\n')) {
+      let line = '';
+      for (const word of paragraph.split(/(\s+)/)) {
+        if (line && doc.widthOfString(line + word) > maxWidth) { lines.push(line.trimEnd()); line = ''; }
+        const token = line ? word : word.trimStart();
+        for (const char of token) {
+          if (line && doc.widthOfString(line + char) > maxWidth) { lines.push(line); line = ''; }
+          line += char;
+        }
+      }
+      lines.push(line);
+    }
+    return lines;
+  };
+  const page = () => {
+    doc.addPage(); y = 100;
+    at('FIELD AGENT / WORK PACKAGE', left, 30, 10, '#235B67');
+    at('DRAFT - human review required', left, 50, 17);
+    at(`Revision ${s.binding.inputRevision} | ${s.intent === 'adapt_to_site' ? 'Site adaptation' : 'Drawing preparation'}`, left, 76, 9);
+    doc.moveTo(left, 93).lineTo(left + width, 93).strokeColor('#CDD9DF').stroke();
+  };
+  const need = (height: number) => { if (y + height > bottom) page(); };
+  const paragraph = (text: string, size = 10) => {
+    for (const line of wrap(text, width, size)) { need(15); at(line, left, y, size); y += 15; }
+    y += 6;
+  };
+  const heading = (text: string) => {
+    need(90); y += 10;
+    for (const line of wrap(text, width, 13)) { need(18); at(line, left, y, 13, '#235B67'); y += 18; }
+    y += 7;
+  };
+  const table = (headers: string[], widths: number[], rows: string[][]) => {
+    const header = () => {
+      need(35); doc.rect(left, y, width, 24).fill('#EAF0F3');
+      let x = left;
+      headers.forEach((h, i) => { at(h, x + 5, y + 7, 8); x += widths[i]; });
+      y += 24;
+    };
+    const firstHeight = rows.length ? Math.max(...rows[0].map((cell, i) => wrap(cell, widths[i] - 10, 8).length)) * 11 + 10 : 30;
+    need(24 + Math.min(firstHeight, 180));
+    header();
+    for (const row of rows) {
+      const lines = row.map((cell, i) => wrap(cell, widths[i] - 10, 8));
+      const count = Math.max(...lines.map(l => l.length));
+      if (count * 11 + 10 <= 180 && y + count * 11 + 10 > bottom) { page(); header(); }
+      let offset = 0;
+      while (offset < count) {
+        if (bottom - y < 26) { page(); header(); }
+        const take = Math.min(count - offset, Math.floor((bottom - y - 10) / 11));
+        const height = take * 11 + 10;
+        let x = left;
+        lines.forEach((cell, i) => {
+          doc.rect(x, y, widths[i], height).lineWidth(0.4).strokeColor('#CDD9DF').stroke();
+          const visible = cell.slice(offset, offset + take);
+          if (i === 0 && offset > 0 && !visible.length) visible.push((cell[0] ?? '') + ' (cont.)');
+          visible.forEach((line, j) => at(line, x + 5, y + 5 + j * 11, 8));
+          x += widths[i];
+        });
+        y += height; offset += take;
+        if (offset < count) { page(); at('Table row continued from previous page', left, y, 8); y += 16; header(); }
+      }
+    }
+    if (!rows.length) paragraph('No rows supplied. See unresolved items.');
+    y += 10;
+  };
+  const plan = (view: PlanView, label: string) => {
+    need(300);
+    heading(label + ': ' + view.title);
+    paragraph(`Plan ${view.id} | coordinate unit: ${view.unit}. Schematic projections, not a scale template. Labels match piece/joint tables.`);
+    // Two projections preserve elevation changes that a plan-only view would hide.
+    for (const axes of [[0, 1, 'Plan X/Y'], [0, 2, 'Elevation X/Z']] as const) {
+      need(235);
+      const top = y;
+      doc.rect(left, top, width, 220).lineWidth(0.6).strokeColor('#CDD9DF').stroke();
+      at(axes[2], left + 10, top + 8, 9);
+      const points = [...view.segments.flatMap(r => [r.from, r.to]), ...view.joints.map(r => r.position)];
+      if (!points.length) { at('Geometry unavailable', left + 10, top + 40); y += 230; continue; }
+      const a = axes[0], b = axes[1];
+      const minA = Math.min(...points.map(p => p[a])), maxA = Math.max(...points.map(p => p[a]));
+      const minB = Math.min(...points.map(p => p[b])), maxB = Math.max(...points.map(p => p[b]));
+      const scale = Math.min(420 / Math.max(maxA - minA, 1), 130 / Math.max(maxB - minB, 1));
+      const xy = (p: number[]): [number, number] => [left + 40 + (p[a] - minA) * scale, top + 175 - (p[b] - minB) * scale];
+      view.segments.forEach((r, index) => {
+        const [x1, y1] = xy(r.from), [x2, y2] = xy(r.to);
+        doc.moveTo(x1, y1).lineTo(x2, y2).lineWidth(2).strokeColor('#235B67').stroke();
+        // Numbered callouts avoid unbounded user IDs overflowing the drawing.
+        at(String(index + 1), (x1 + x2) / 2 + 4, (y1 + y2) / 2 - 13, 8);
+      });
+      const jointLanes = new Map<string, number>();
+      view.joints.forEach((r, index) => {
+        const [x, cy] = xy(r.position);
+        const key = `${x.toFixed(1)}:${cy.toFixed(1)}`, lane = jointLanes.get(key) ?? 0;
+        jointLanes.set(key, lane + 1);
+        doc.circle(x, cy, 3).fill('#E4A03B'); at(`J${index + 1}`, x + 5, cy + 4 + lane * 10, 7);
+      });
+      y += 230;
+    }
+    table(['Callout', 'Segment / pieces', 'Coordinates (' + view.unit + ')'], [55, 220, 236], view.segments.map((r, i) => [String(i + 1), `${r.id}\nPieces: ${r.pieceIds.join(', ') || 'unresolved'}`, `${r.from.join(', ')} -> ${r.to.join(', ')}`]));
+    table(['Callout', 'Joint', 'Coordinates (' + view.unit + ')'], [55, 220, 236], view.joints.map((r, i) => [`J${i + 1}`, r.id, r.position.join(', ')]));
+  };
+  try {
+    page(); heading(s.title); paragraph(s.scope);
+    paragraph('Construction approval: not established by this export. Selection, successful calculations and available files do not constitute approval.');
+    paragraph('Drawing: ' + s.drawingReference);
+    table(['Binding', 'Value'], [150, 361], Object.entries(s.binding).map(([key, value]) => [key, String(value)]));
+    const gaps = unresolved(s);
+    heading('Unresolved items and review conditions');
+    if (!gaps.length) paragraph('No unresolved items reported by the supplied outputs. This is not a compliance or constructability certification.');
+    gaps.forEach((gap, i) => paragraph(`${i + 1}. ${gap}`));
+    if (s.baselinePlan) plan(s.baselinePlan, 'Before / unchanged baseline');
+    plan(s.selectedPlan, s.intent === 'adapt_to_site' ? 'After / selected proposal' : 'Numbered work plan');
+    heading('Material quantities');
+    paragraph('Installed quantities from the selected plan. Purchasing stock and allowances are not inferred. Numeric values are preserved without added rounding.');
+    table(['Material / subjects', 'Quantity / unit', 'Status / sources / notes'], [205, 100, 206], s.materials.map(r => [`${r.id}: ${r.description}\nSubjects: ${r.subjectIds.join(', ')}`, r.quantity === null ? `UNRESOLVED\n${r.unit}` : `${r.quantity}\n${r.unit}`, `${r.status}\nSources: ${r.sourceIds.join(', ') || 'none'}\n${r.unresolvedReason ?? ''}`]));
+    heading('Cut list');
+    table(['Piece / segments / joints', 'Cut / unit', 'Status / sources / notes'], [205, 100, 206], s.cuts.map(r => [`${r.pieceId}\nSegments: ${r.segmentIds.join(', ')}\nJoints: ${r.jointIds.join(', ')}`, r.length === null ? `UNRESOLVED\n${r.unit}` : `${r.length}\n${r.unit}`, `${r.status}\nSources: ${r.sourceIds.join(', ') || 'none'}\n${r.unresolvedReason ?? ''}`]));
+    heading('Assembly sequence and joint references');
+    table(['Operation / references', 'Instruction / evidence / conditions'], [160, 351], s.assembly.map((r, i) => [`${i + 1}. ${r.id}\nPieces: ${r.pieceIds.join(', ')}\nJoints: ${r.jointIds.join(', ')}`, `${r.instruction}\nStatus: ${r.status}\nSources: ${r.sourceIds.join(', ') || 'none'}\n${r.unresolvedReason ?? ''}`]));
+    if (s.intent === 'adapt_to_site') {
+      heading('Change summary');
+      paragraph('Proposed reuse is not permission to reuse. Baseline facts remain unchanged.');
+      table(['Category / subjects', 'Before -> after / description / evidence'], [160, 351], s.changes.map(r => [`${r.kind} / ${r.entityType}\n${r.id}\n${r.subjectIds.join(', ')}`, `${r.before ?? 'not supplied'} -> ${r.after ?? 'not supplied'}\n${r.description}\nSources: ${r.sourceIds.join(', ') || 'none'}`]));
+    }
+    heading('Rule findings');
+    table(['Finding / status', 'Subjects / finding / sources'], [150, 361], s.findings.map(r => [`${r.id}\n${r.status}`, `${r.subjectIds.join(', ')}\n${r.description}\nSources: ${r.sourceIds.join(', ') || 'none'}`]));
+    heading('Source references');
+    table(['Source ID', 'Document / reference'], [110, 401], s.sources.map(r => [r.id, `${r.title}\n${r.reference}`]));
+    const range = doc.bufferedPageRange();
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i); at(`DRAFT | Revision ${s.binding.inputRevision} | Page ${i + 1} of ${range.count}`, left, 806, 8, '#647684');
+    }
+    doc.end();
+  } catch (error) { doc.destroy(); throw error; }
+  return finished;
+}

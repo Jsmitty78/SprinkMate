@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { exportRoutes } from './exports/routes.js';
+import type { WorkPackageExports } from './exports/service.js';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -21,7 +23,7 @@ class TaskCommands {
     try {return await next;} finally {if(this.tails.get(id)===next)this.tails.delete(id);}
   }
 }
-export function createApp(service:FieldService,options:{token:string;webDir?:string;workPackages?:WorkPackageService}) {
+export function createApp(service:FieldService,options:{token:string;webDir?:string;workPackages?:WorkPackageService;workPackageExports?:WorkPackageExports}) {
   if(options.token.length<16) throw new Error('Application token must contain at least 16 characters');
   const app=new Hono(), commands=new TaskCommands();
   app.use('*',async(c,next)=>{await next();c.header('X-Content-Type-Options','nosniff');c.header('Referrer-Policy','no-referrer');});
@@ -120,6 +122,7 @@ export function createApp(service:FieldService,options:{token:string;webDir?:str
     });
   });
   app.route('/api/work-packages',workPackageRouter(options.workPackages??defaultWorkPackages(service.store)));
+  if(options.workPackageExports) app.route('/api/work-packages',exportRoutes(options.workPackageExports));
   app.all('/api/*',c=>c.json({error:'APIが見つかりません'},404));
   app.onError((error,c)=>{
     if(error instanceof AppError)return c.json({error:error.message},error.status as ContentfulStatusCode);
