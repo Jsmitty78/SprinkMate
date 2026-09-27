@@ -1,4 +1,3 @@
-import { DIMENSIONS_SOURCE, ELBOW_ID, PIPE_ID, PROCEDURE_SOURCE, ELBOW_SOURCE } from "./catalog.js";
 import { toMeters } from "./engine.js";
 import type { Catalog, Length } from "./types.js";
 
@@ -9,23 +8,27 @@ export interface PlanningProductPort {
   centerToFace: Fact<Length>;
   insertionOrThreadMakeup: Fact<Length>;
 }
-export function toPlanningProduct(catalog: Catalog): PlanningProductPort {
-  const pipe = catalog.products.find(p => p.id === PIPE_ID);
-  const elbow = catalog.products.find(p => p.id === ELBOW_ID);
-  const sourceIds = [DIMENSIONS_SOURCE, ELBOW_SOURCE, PROCEDURE_SOURCE];
-  const sourceBacked = catalog.evidenceClass === "manufacturer_document" && sourceIds.every(id => catalog.sources.some(s => s.id === id));
+/** A one-pair catalog remains convenient for controls; an aggregate requires selection. */
+export function toPlanningProduct(catalog: Catalog, pipeProductId?: string | null, elbowProductId?: string | null): PlanningProductPort {
+  const pipes = catalog.products.filter(p => p.kind === "pipe");
+  const pipe = pipeProductId === undefined && pipes.length === 1 ? pipes[0] : pipes.find(p => p.id === pipeProductId);
+  const elbows = catalog.products.filter(p => p.kind === "elbow_90" && pipe && p.compatiblePipeIds.includes(pipe.id));
+  const elbow = elbowProductId === undefined && elbows.length === 1 ? elbows[0] : elbows.find(p => p.id === elbowProductId);
+  const sourceIds = [...new Set([...(pipe?.sourceIds ?? []), ...(elbow?.sourceIds ?? [])])];
+  const sourceBacked = sourceIds.length > 0 && catalog.evidenceClass === "manufacturer_document"
+    && sourceIds.every(id => catalog.sources.some(s => s.id === id));
   const compatible = sourceBacked && pipe?.kind === "pipe" && elbow?.kind === "elbow_90"
     && elbow.compatiblePipeIds.includes(pipe.id) && pipe.nominalSize === elbow.nominalSize
-    && pipe.connection === elbow.connection;
+    && pipe.connection === elbow.connection && pipe.connection !== "unsupported";
   const fact = <T>(value: T | null): Fact<T> => ({ value, confirmed: value !== null,
     evidenceIds: value === null ? [] : sourceIds, source: "manual" });
   const h = compatible && elbow.centerToFace ? toMeters(elbow.centerToFace) : null;
-  const g = compatible && elbow.centerToSocketBottom ? toMeters(elbow.centerToSocketBottom) : null;
+  const g = compatible && elbow.connection === "cpvc_socket_solvent" && elbow.centerToSocketBottom ? toMeters(elbow.centerToSocketBottom) : null;
   if (g !== null && h !== null && h <= g) throw new Error("Socket H must exceed G");
   return {
-    compatibility: fact(compatible ? { pipeProductId: PIPE_ID, elbowProductId: ELBOW_ID, connectionMethod: "cpvc_socket_solvent" } : null),
+    compatibility: fact(compatible ? { pipeProductId: pipe.id, elbowProductId: elbow.id, connectionMethod: pipe.connection } : null),
     centerToFace: fact(h === null ? null : { value: h, unit: "m" }),
-    // Full insertion to the socket bottom: H - G. This is not thread makeup.
+    // A catalog never supplies field thread engagement to a newly generated joint.
     insertionOrThreadMakeup: fact(h === null || g === null ? null : { value: h - g, unit: "m" }),
   };
 }

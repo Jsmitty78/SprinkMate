@@ -1,3 +1,4 @@
+import { adaptationFrame } from "@field-agent/core";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, type Snapshot } from "./api.js";
 import { dateTime } from "./format.js";
@@ -52,6 +53,9 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
   const missing = reqs.filter(r => !r.done);
   const blockers = runBlockers(s);
   const canRun = blockers.length === 0;
+  let toDrawing: ((p: { x: number; y: number; z: number }) => { x: number; y: number; z: number }) | undefined;
+  let frameError: string | null = null;
+  try { toDrawing = adaptationFrame(s).toDrawing; } catch (e) { frameError = e instanceof Error ? e.message : String(e); }
   const duct = readBox(s, "duct").box, envelope = readBox(s, "workEnvelope").box;
   const sample = hasSampleData(s);
   const openRequests = s.outputs.requests.filter(r => s.freshness.requests.find(f => f.id === r.id && f.current && !f.answered) && !SELECT_QUESTION.test(r.question));
@@ -128,7 +132,7 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
         <DetailingInputs {...common} callouts={baseCallouts} />
       </>;
       case "materials": return <MaterialsCuts result={base.result} current={base.current} revision={s.inputRevision} plan={baseline} callouts={baseCallouts} detail={detailFor(baseline?.id)} selectedPiece={piece} onSelectPiece={setPiece} sources={sources} />;
-      case "assembly": return <Assembly result={base.result} callouts={baseCallouts} sources={sources} />;
+      case "assembly": return <Assembly result={base.result} callouts={baseCallouts} sources={sources} selectedPiece={piece} onSelectPiece={setPiece} />;
       case "checks": return <Checks result={workResult} sources={sources} callouts={workCallouts} />;
       case "routes": return <RouteComparison routes={routes} baseline={baseline} baselineResult={base.result} focusId={focusId} selectedId={selectedId} current={candidatesCurrent} appliedAt={selectedId && selectedResult.current ? s.inputRevision : null}
         rejected={s.outputs.candidates?.rejected ?? []} searchDescription={s.outputs.candidates?.searchDescription ?? null}
@@ -147,7 +151,7 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
             : <Callout tone="neutral" title={`Preview of Route ${shown?.letter ?? ""}`}>Not selected. Choose this route to build its revised package and the change from the original.</Callout>}
           {isSelected && <PackageDelta detail={detailCurrent ? detailFor(selectedId!) : undefined} callouts={workCallouts} baselineResult={base.result} />}
           <MaterialsCuts result={res.result} current={res.current} revision={s.inputRevision} plan={shown?.plan ?? null} callouts={workCallouts} detail={detailFor(shown?.plan.id)} selectedPiece={piece} onSelectPiece={setPiece} sources={sources} label={isSelected ? "Full revised quantities" : "Route quantities"} />
-          <Section title="Assembly" defaultOpen={false}><Assembly result={res.result} callouts={workCallouts} sources={sources} /></Section>
+          <Section title="Assembly" defaultOpen={false}><Assembly result={res.result} callouts={workCallouts} sources={sources} selectedPiece={piece} onSelectPiece={setPiece} /></Section>
         </>;
       }
     }
@@ -178,13 +182,17 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
             <Badge title="The server reports construction approval as not assessed">Not construction approved</Badge>
           </div>
         </div>
+        {mode === "adapt" && baseline && <Callout tone="neutral" title={`Active interval: ${s.changeRequest?.affectedEntityIds.join(", ") || "not selected"}`}>
+          Full quantities and delta cover this interval. Other drawing elements are retained context, not purchase items. Scope interfaces do not establish physical joints. Context clearance, closure, supports and hydraulics remain unresolved.
+          {frameError && <p>{frameError}</p>}
+        </Callout>}
         <RunBanner s={s} busy={pkg.busy} onCancel={() => run && void pkg.act("cancel", cur => api.cancel(cur.id, run.id))} />
         {pkg.error && <div className="fa-toast tone-red" role="alert"><Icon name="alert" size={16} />{pkg.error}<button type="button" onClick={pkg.clearError} aria-label="Dismiss"><Icon name="x" size={14} /></button></div>}
         {pkg.notice && <div className="fa-toast tone-blue" role="status">{pkg.notice}<button type="button" onClick={() => pkg.setNotice("")} aria-label="Dismiss"><Icon name="x" size={14} /></button></div>}
         {openRequests.map(r => <RequestCallout key={r.id} s={s} request={r} act={pkg.act} busy={pkg.busy} onGoToInputs={() => setTab(mode === "prepare" ? "inputs" : "site")} />)}
         <div className="fa-stage">
           {view === "drawing" && d ? <DrawingView s={s} /> :
-            <PlanCanvas mode={mode} baseline={baseline} routes={mode === "adapt" ? routes : []} staleRoutes={!candidatesCurrent && !(selectedId && selectedResult.current)} focusRouteId={focusId} selectedRouteId={selectedId} duct={duct} envelope={envelope}
+            <PlanCanvas mode={mode} baseline={baseline} routes={mode === "adapt" ? routes : []} staleRoutes={!candidatesCurrent && !(selectedId && selectedResult.current)} focusRouteId={focusId} selectedRouteId={selectedId} duct={frameError ? null : duct} envelope={frameError ? null : envelope} boxToDrawing={toDrawing}
               affectedIds={s.changeRequest?.affectedEntityIds ?? []} cuts={cuts} calloutsFor={calloutsFor} selectedPiece={piece} onSelectPiece={p => { setPiece(p); if (p) { setTab(mode === "prepare" ? "materials" : "package"); setSheetOpen(true); } }}
               onSelectRoute={id => { setPreview(id); setTab("routes"); }} tool={tool}
               empty={<div className="fa-empty big"><Icon name="layers" size={32} /><p>{mode === "adapt" ? "Enter the existing run and what you measured on site." : "Upload a drawing and enter the run to prepare."}</p>

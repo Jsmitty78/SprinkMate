@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   evaluateLocalPlanGeometry,
+  adaptationInterval,
   type WorkPackageSnapshot,
   type PackageResult,
   type PackagePlan,
@@ -11,7 +12,7 @@ import {
 import {
   deriveWorkPackage,
   compareWorkPackages,
-  spearsCatalog,
+  fabricationCatalog,
   type FabricationOutput,
   type FabricationInput,
 } from "@field-agent/fabrication";
@@ -43,14 +44,14 @@ import {
   planningPlan,
   generationInput,
   apiCandidate,
-  packagePlan,
+  candidatePackage,
   safe,
   value,
 } from "./model.js";
 import { evaluateProfile, type ProfileOutput } from "./profiles.js";
 import { exportSnapshot } from "./snapshot.js";
 
-export const INTEGRATION_VERSION = "scenario-integration-1";
+export const INTEGRATION_VERSION = "scenario-integration-3-steel-interval";
 export interface Detail {
   id: string;
   input: FabricationInput;
@@ -131,7 +132,7 @@ function summary(d: Detail, api: PackagePlan): PackageResult {
     materials: f.materials.map((m) => ({
       id: safe(m.id),
       entityIds: subjects(m.entityIds),
-      description: m.productId ?? m.kind,
+      description: m.kind === "pipe" ? `${m.productId ?? "Unselected pipe"} (modeled spans; not purchasing stock)` : m.productId ?? m.kind,
       quantity: q(m.quantity),
     })),
     cuts: f.cuts.map((c) => ({
@@ -156,11 +157,11 @@ function summary(d: Detail, api: PackagePlan): PackageResult {
       reason: c.reason,
       sourceRefs: c.sourceRefs,
     })),
-    gaps: f.gaps.map((g, i) => ({
+    gaps: [...(f.intent === "adapt_to_site" ? [{ id: "protected-context", subjectIds: [], reason: "Quantities cover only the active interval. Remaining source geometry is retained context, not purchase material. Context clearance, support adequacy, fixed-end closure, physical dimensions and hydraulics remain unresolved." }] : []), ...f.gaps.map((g, i) => ({
       id: `gap-${i}`,
       subjectIds: subjects([g.subjectId]),
       reason: g.reason,
-    })),
+    }))],
   };
 }
 function derive(
@@ -168,7 +169,7 @@ function derive(
   input: FabricationInput,
   plan: Plan,
 ): Detail {
-  const fabrication = deriveWorkPackage(input, spearsCatalog(s.configVersion));
+  const fabrication = deriveWorkPackage(input, fabricationCatalog(s.configVersion));
   const calculated = geometry({
     plan,
     proposedNodeIds: input.nodes
@@ -339,6 +340,11 @@ export function createIntegratedServices(
                 "Supply the source drawing, structured run and work area",
               blocks: ["prepare_drawing_model"],
             });
+          if (s.intent === "adapt_to_site" && base && s.scope) {
+            try { adaptationInterval(s); } catch (error) {
+              gaps.push({ id: "unsupported-interval", description: error instanceof Error ? error.message : String(error), blocks: ["prepare_drawing_model", "generate_change_candidates"] });
+            }
+          }
           const addQuestion = (key: string, text: string, order: number) => {
             const answered = s.outputs.requests.find(
               (r) => r.id === requestId(key),
@@ -371,6 +377,7 @@ export function createIntegratedServices(
               1,
             ],
           ] as const) {
+            if (key === "curePlan" && !base?.entities.some(e => fabricationCatalog(s.configVersion).products.some(p => p.id === e.productId && p.connection === "cpvc_socket_solvent"))) continue;
             if (
               value(s, key).status === "unknown" &&
               !state.acknowledgedQuestions?.includes(key) &&
@@ -437,7 +444,7 @@ export function createIntegratedServices(
             for (const original of wanted ?? []) {
               const c = structuredClone(original);
               c.plan.ducts = generationInput(s).baseline.ducts;
-              const input = toFabricationInput(
+              const input: FabricationInput = toFabricationInput(
                 { ...s, packageId: s.id, plan: c.plan, status: "proposed" },
                 {
                   baselinePlanId: s.baselinePlan!.id,
@@ -451,6 +458,11 @@ export function createIntegratedServices(
                   assemblyConditions: baseInput.assemblyConditions,
                 },
               );
+              // Retain source-only station semantics; a generated route cannot confirm a physical end.
+              for (const node of input.nodes) if (baseInput.nodes.some(n => n.id === node.id && n.datum === "scope_interface")) {
+                node.datum = "scope_interface";
+                delete node.netCutOffset;
+              }
               const d = derive(s, input, c.plan);
               d.delta = compareWorkPackages(base.fabrication, d.fabrication);
               details.push(d);
@@ -516,7 +528,7 @@ export function createIntegratedServices(
               baselinePlanId: s.baselinePlan!.id,
               searchDescription: state.candidates.searchCoverage,
               candidates: state.candidates.candidates.map((c) => ({
-                plan: packagePlan(c.plan, s.baselinePlan!),
+                plan: candidatePackage(c.plan, s),
                 metrics: [
                   {
                     name: "centerline_delta",
@@ -560,7 +572,7 @@ export function createIntegratedServices(
                   ? s.baselinePlan!
                   : s.selectedPlan?.id === d.plan.id
                     ? s.selectedPlan
-                    : packagePlan(d.plan, s.baselinePlan!),
+                    : candidatePackage(d.plan, s),
               ),
             );
             context.publish({ results });
