@@ -3,8 +3,8 @@ import type { PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "./api.js";
 import { lengthInput, lengthText, millimetres, parseLength, toMetres, UNKNOWN } from "./format.js";
 import {
-  showCpvcInputs, showSfInputs, activeDetailingPlan, BOX_KEYS, buildRun, inScope, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
-  alignedFrameInputs, exactFrameLengthInput, evidenceSpec, factProvenance, PROVENANCE_LABELS, type Provenance, syncRunDraft, type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
+  reopenSiteGeometry, showCpvcInputs, showSfInputs, activeDetailingPlan, buildRun, ELBOW, inScope, runEditPatch, findFact, isConfirmed, projectBasis, runChanged, runNodes, upsertFacts,
+  evidenceSpec, factProvenance, PROVENANCE_LABELS, type Provenance, syncRunDraft, type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
 } from "./model.js";
 import { PRODUCT_SETS, productSetOf } from "./products.js";
 import { Badge, Button, Callout, Field, Icon, Section } from "./ui.js";
@@ -193,11 +193,12 @@ export function DetailingInputs(props: Common & { callouts: Callouts }) {
     ...ties.map(t => ({ field: "netCutOffset", subject: t.id, label: `${callouts.tieIn.get(t.id)} net cut offset`, kind: { type: "length" } as Kind, help: "Deducted at the tie-in, as measured for this connection." })),
   ];
   const assembly: RowSpec[] = [
-    ...fits.flatMap(f => f.ports.map(port => ({ field: `movement.${port.id}`, subject: f.id, label: `${callouts.fitting.get(f.id)}/${port.id}: full insertion and quarter turn possible`, kind: { type: "bool", yes: "Yes, confirmed", no: "No" } as Kind }))),
+    // Insertion, quarter-turn and cure questions belong to solvent-cement joints only.
+    ...fits.filter(f => f.productId === ELBOW).flatMap(f => f.ports.map(port => ({ field: `movement.${port.id}`, subject: f.id, label: `${callouts.fitting.get(f.id)}/${port.id}: full insertion and quarter turn possible`, kind: { type: "bool", yes: "Yes, confirmed", no: "No" } as Kind }))),
     { field: "workAreaAccess", label: "Work-area access", kind: { type: "bool", yes: "Access confirmed", no: "No access" } },
     ...(showCpvcInputs(s) ? [{ field: "curePlan", label: "Set and cure plan (temperature, fit, test pressure)", kind: { type: "text" } as Kind }] : []),
   ];
-  const project: RowSpec[] = (showSfInputs(s) ? PROJECT_BASIS : []).map(b => ({ field: b.field, label: b.label, kind: b.options.length ? { type: "choice", options: b.options } : { type: "text" } }));
+  const project: RowSpec[] = projectBasis(s).map(b => ({ field: b.field, label: b.label, kind: b.options.length ? { type: "choice", options: b.options } : { type: "text" } }));
   return <>
     {plan && <Section title="Dimensions" count={`${dims.filter(r => isConfirmed(findFact(s, r.field, r.subject))).length}/${dims.length}`} defaultOpen={!done(dims)}>{dims.map(r => <FactRow key={`${r.field}.${r.subject}`} {...props} spec={r} />)}</Section>}
     <Section title="Assembly conditions" count={`${assembly.filter(r => isConfirmed(findFact(s, r.field, r.subject))).length}/${assembly.length}`} defaultOpen={!done(assembly)}>{assembly.map(r => <FactRow key={`${r.field}.${r.subject}`} {...props} spec={r} />)}</Section>
@@ -207,42 +208,22 @@ export function DetailingInputs(props: Common & { callouts: Callouts }) {
 
 // ---------------------------------------------------------------- site conditions
 
-const AXIS_LABEL = ["West (min X)", "South (min Y)", "Bottom (min Z)", "East (max X)", "North (max Y)", "Top (max Z)"];
-
-export function BoxInputs({ s, act, busy, unit, setNotice, prefix, title, help }: Common & { prefix: "duct" | "workEnvelope"; title: string; help: string }) {
-  const box = readBox(s, prefix);
-  const [vals, setVals] = useState(() => box.values.map(v => lengthInput(v, unit)));
-  useEffect(() => { setVals(box.values.map(v => lengthInput(v, unit))); }, [box.values.join(","), unit]);
-  const parsed = vals.map(v => v.trim() ? parseLength(v, unit) : null);
-  const invalid = vals.some((v, i) => v.trim() && parsed[i] === null);
-  const firstFact = BOX_KEYS.map(k => findFact(s, `${prefix}.${k}`)).find(Boolean);
-  const syntheticLocked = BOX_KEYS.some(k => { const f = findFact(s, `${prefix}.${k}`); return !!f && factProvenance(f) === "synthetic_assumption"; });
-  const [provenance, setProvenance] = useState<Provenance>(() => factProvenance(firstFact));
-  const [source, setSource] = useState(firstFact?.source.description ?? "");
-  useEffect(() => { setProvenance(factProvenance(firstFact)); setSource(firstFact?.source.description ?? ""); }, [JSON.stringify(firstFact)]);
-  const save = () => act(prefix, async cur => {
-    const facts = upsertFacts(cur, BOX_KEYS.map((k, i) => ({ field: `${prefix}.${k}`, value: parsed[i], unit: "mm", ...evidenceSpec(findFact(cur, `${prefix}.${k}`), syntheticLocked ? "synthetic_assumption" : provenance, source), context: syntheticLocked || provenance === "synthetic_assumption" ? "detailing" : "observed", unknownReason: "Not measured yet" })));
-    const patch: Partial<PackageInputs> = { ...facts };
-    if (prefix === "duct" && cur.changeRequest) patch.changeRequest = { ...cur.changeRequest, factIds: [...facts.detailing, ...facts.siteFacts].filter(f => f.field.startsWith("duct.")).map(f => f.id) };
-    await patchClearing(cur, patch, setNotice);
-  });
-  return <div className="fa-stack">
-    <div className="fa-fact-head"><span className="fa-muted">{help}</span>{factStatus(firstFact)}</div>
-    <SourceEvidenceInputs provenance={provenance} setProvenance={setProvenance} source={source} setSource={setSource} syntheticLocked={syntheticLocked} />
-    <div className="fa-grid3">{AXIS_LABEL.map((l, i) => <Field key={l} label={l}><input className={`mono ${vals[i].trim() && parsed[i] === null ? "is-invalid" : ""}`} value={vals[i]} placeholder="Unknown" onChange={e => setVals(vals.map((v, j) => j === i ? e.target.value : v))} /></Field>)}</div>
-    {parsed.some(v => v === null) && <small className="fa-warn">Empty faces are saved as unknown, not zero. Routes cannot be generated around an incomplete {title.toLowerCase()}.</small>}
-    <div className="fa-actions"><Button variant="primary" busy={busy === prefix} disabled={!!busy || invalid || !source.trim()} onClick={() => void save()}>Save site geometry</Button></div>
-  </div>;
-}
-
 export function ChangeInputs({ s, act, busy, setNotice, callouts }: Common & { callouts: Callouts }) {
   const pipes = s.baselinePlan?.entities.filter(e => e.kind === "pipe" && inScope(s)(e.id)) ?? [];
   const [desc, setDesc] = useState(s.changeRequest?.description ?? "");
   const [ids, setIds] = useState<string[]>(s.changeRequest?.affectedEntityIds ?? []);
   useEffect(() => { setDesc(s.changeRequest?.description ?? ""); setIds(s.changeRequest?.affectedEntityIds ?? []); }, [s.changeRequest]);
-  const save = () => act("change", cur => patchClearing(cur, {
-    changeRequest: { id: cur.changeRequest?.id ?? "site-change", description: desc.trim(), affectedEntityIds: ids, factIds: [...cur.detailing, ...cur.siteFacts].filter(f => f.field.startsWith("duct.")).map(f => f.id) },
-  }, setNotice));
+  const save = () => act("change", async cur => {
+    // Site geometry is read along the affected span; a different span needs it confirmed again.
+    const moved = (cur.changeRequest?.affectedEntityIds ?? []).join(",") !== ids.join(",") && !!cur.changeRequest;
+    const reopened = moved ? reopenSiteGeometry(cur) : {};
+    await patchClearing(cur, {
+      ...reopened,
+      changeRequest: { id: cur.changeRequest?.id ?? "site-change", description: desc.trim(), affectedEntityIds: ids, factIds: [...cur.detailing, ...cur.siteFacts].filter(f => f.field.startsWith("duct.")).map(f => f.id) },
+    }, setNotice);
+    if (moved && [...cur.detailing, ...cur.siteFacts].some(f => /^(adaptationFrame|duct|workEnvelope)\./.test(f.field) && f.confirmation === "confirmed"))
+      setNotice("The affected span changed. Save the site frame on the new span, then confirm the obstacle and work boundary again.");
+  });
   if (!pipes.length) return <p className="fa-muted">Enter the existing run first, then choose the piece the obstacle blocks.</p>;
   return <div className="fa-stack">
     <Field label="What did you find on site?"><textarea rows={2} value={desc} onChange={e => setDesc(e.target.value)} placeholder="e.g. Duct installed where the branch should run" /></Field>
@@ -285,11 +266,6 @@ function Thumb({ packageId, assetId, caption }: { packageId: string; assetId: st
   }, [packageId, assetId]);
   return <figure className="fa-thumb">{url ? <img src={url} alt={caption} /> : <div className="fa-thumb-ph" />}<figcaption>{caption}</figcaption></figure>;
 }
-
-export function ClearanceInput(props: Common) {
-  return <FactRow {...props} spec={{ field: "requiredPipeClearance", label: "Required clearance from pipe to obstacle", kind: { type: "length" }, context: "observed", help: "The planner keeps every route at least this far from the measured duct box." }} />;
-}
-
 function SourceEvidenceInputs({ provenance, setProvenance, source, setSource, syntheticLocked = false }: {
   provenance: Provenance; setProvenance: (v: Provenance) => void; source: string; setSource: (v: string) => void; syntheticLocked?: boolean;
 }) {
@@ -300,46 +276,5 @@ function SourceEvidenceInputs({ provenance, setProvenance, source, setSource, sy
     <Field label="Source / measurement description"><textarea rows={2} value={source} onChange={e => setSource(e.target.value)} placeholder="Describe the measurement, document, proposal or test assumption" /></Field>
     {(syntheticLocked || provenance === "synthetic_assumption") && <small className="fa-warn">Software test assumption only. Saving or confirming keeps this synthetic; it is not field evidence or construction approval.</small>}
     {provenance === "confirmed_evidence" && !syntheticLocked && <small className="fa-muted">Choose only after checking the value against the evidence described above.</small>}
-  </div>;
-}
-
-const FRAME_FIELDS = ["adaptationFrame.origin.x", "adaptationFrame.origin.y", "adaptationFrame.origin.z", "adaptationFrame.yaw"] as const;
-
-export function AdaptationFrameInputs({ s, act, busy, unit, setNotice }: Common) {
-  const facts = FRAME_FIELDS.map(field => findFact(s, field));
-  const saved = facts.map((f, i) => typeof f?.value === "number" ? i === 3 ? String(f.value) : exactFrameLengthInput(f.unit === "mm" ? f.value : (toMetres(f.value, f.unit ?? "mm") ?? 0) * 1000, unit) : "");
-  const signature = JSON.stringify(facts);
-  const [values, setValues] = useState(saved);
-  const firstFact = facts.find(Boolean);
-  const [provenance, setProvenance] = useState<Provenance>(() => factProvenance(firstFact));
-  const [source, setSource] = useState(firstFact?.source.description ?? "");
-  useEffect(() => { setValues(saved); setProvenance(factProvenance(firstFact)); setSource(firstFact?.source.description ?? ""); }, [signature, unit]);
-  const syntheticLocked = facts.some(f => !!f && factProvenance(f) === "synthetic_assumption");
-  const parsed = values.map((v, i) => i === 3 ? v.trim() && Number.isFinite(Number(v)) ? Number(v) : null : parseLength(v, unit));
-  const selected = s.baselinePlan?.entities.find(e => e.kind === "pipe" && s.changeRequest?.affectedEntityIds.includes(e.id));
-  const align = () => {
-    const aligned = alignedFrameInputs(s, unit);
-    if (!aligned) return;
-    setValues(aligned);
-    setProvenance("synthetic_assumption");
-    setSource(`Synthetic local frame aligned to drawing span ${selected!.id}; drawing Z is an assumed horizontal test plane, not a measured site elevation. Source geometry is unchanged.`);
-  };
-  const save = () => act("adaptation-frame", cur => patchClearing(cur, upsertFacts(cur, FRAME_FIELDS.map((field, i) => ({
-    field, value: parsed[i], unit: i === 3 ? "deg" : "mm", context: "detailing" as const,
-    ...evidenceSpec(findFact(cur, field), syntheticLocked ? "synthetic_assumption" : provenance, source),
-    unknownReason: "Local frame coordinate not supplied",
-  }))), setNotice));
-  const clear = () => act("adaptation-frame", cur => patchClearing(cur, {
-    detailing: cur.detailing.filter(f => !f.field.startsWith("adaptationFrame.")),
-    siteFacts: cur.siteFacts.filter(f => !f.field.startsWith("adaptationFrame.")),
-  }, setNotice));
-  return <div className="fa-stack">
-    <p className="fa-muted">Obstacle and work bounds use this local coordinate frame. Origin is in the saved drawing frame; yaw turns local X counterclockwise about Z. With no saved frame, they use drawing coordinates.</p>
-    <Button disabled={!!busy || !selected} onClick={align}>Align local X to selected span</Button>
-    <SourceEvidenceInputs provenance={provenance} setProvenance={setProvenance} source={source} setSource={setSource} syntheticLocked={syntheticLocked} />
-    <div className="fa-grid3">{["Origin X", "Origin Y", "Origin Z", "Yaw (degrees)"].map((label, i) => <Field key={label} label={label}><input aria-label={label} className="mono" value={values[i]} placeholder={i === 3 ? "degrees" : unit} onChange={e => setValues(values.map((v, j) => i === j ? e.target.value : v))} /></Field>)}</div>
-    <div className="fa-actions"><Button variant="primary" busy={busy === "adaptation-frame"} disabled={!!busy || parsed.some(v => v === null) || !source.trim()} onClick={() => void save()}>Save local frame</Button>
-      <Button disabled={!!busy || !firstFact} onClick={() => void clear()}>Use drawing coordinates</Button></div>
-    <small className="fa-muted">The frame changes interpretation of site coordinates only. Original pipe and endpoint geometry remains unchanged. Photos remain evidence attachments; no dimensions are inferred from them.</small>
   </div>;
 }

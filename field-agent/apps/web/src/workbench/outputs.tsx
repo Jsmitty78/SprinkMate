@@ -1,6 +1,6 @@
 import type { PackageResult } from "@field-agent/core";
 import type { DetailPlan } from "./api.js";
-import { countText, DISPLAY_ROUNDING, lengthText, metresText, productCode, productName, signedCount, type Quantity } from "./format.js";
+import { countText, DISPLAY_ROUNDING, lengthText, metresText, unknownReason, productCode, productName, signedCount, type Quantity } from "./format.js";
 import { checkCounts, groupChecks, labelFor, ROUTE_ORDER_NOTE, sourceTitle, sourceUrl, type Callouts, type CheckGroup, type Plan, type RouteOption } from "./model.js";
 import { Badge, Button, Callout, Icon, Length, Section } from "./ui.js";
 
@@ -35,9 +35,14 @@ export function Freshness({ current, revision, resultRevision }: { current: bool
   return <Badge tone="amber" title="Inputs changed after these results were generated">Stale: from rev {resultRevision ?? "?"}, inputs now rev {revision}</Badge>;
 }
 
-export function MaterialsCuts({ result, current, revision, plan, callouts, detail, selectedPiece, onSelectPiece, sources, label }: {
+export interface ContextItem { id: string; kind: string; label: string | null }
+export function MaterialsCuts({ result, current, revision, plan, callouts, detail, selectedPiece, onSelectPiece, sources, label, context = [], projected = false }: {
   result: PackageResult | undefined; current: boolean; revision: number; plan: Plan | null; callouts: Callouts; detail?: DetailPlan;
   selectedPiece: string | null; onSelectPiece: (id: string | null) => void; sources: Sources; label?: string;
+  /** Retained context outside the work: listed, never counted. */
+  context?: ContextItem[];
+  /** The run was traced on a drawing, so centerlines are plan projections. */
+  projected?: boolean;
 }) {
   if (!result) return <div className="fa-empty"><Icon name="layers" size={28} /><p>No materials yet.</p><small>Generate from your inputs to see the materials, cut list and assembly for this run.</small></div>;
   const cutDetail = new Map(detail?.fabrication?.cuts.map(c => [c.pieceId, c]) ?? []);
@@ -48,21 +53,23 @@ export function MaterialsCuts({ result, current, revision, plan, callouts, detai
     <Section title="Materials" count={result.materials.length}>
       <table className="fa-table"><thead><tr><th>Item</th><th className="num">Modeled qty</th></tr></thead>
         <tbody>{result.materials.map(m => <tr key={m.id}>
-          <td><strong>{productName(m.description)}</strong><small className="mono">{productCode(m.description)}</small><div className="fa-steptags">{m.entityIds.map(id => <button type="button" key={id} className="fa-tagbox small" aria-pressed={selectedPiece === id} onClick={() => onSelectPiece(selectedPiece === id ? null : id)}>{labelFor(callouts, id)}</button>)}</div></td>
+          <td>{isProduct(m.description) ? <><strong>{productName(m.description)}</strong><small className="mono">{productCode(m.description)}</small></>
+            : <><strong>{m.description.split("; ")[0]}</strong>{m.description.split("; ").slice(1).map(p => <small key={p}>{p}</small>)}</>}<div className="fa-steptags">{m.entityIds.map(id => <button type="button" key={id} className="fa-tagbox small" aria-pressed={selectedPiece === id} onClick={() => onSelectPiece(selectedPiece === id ? null : id)}>{labelFor(callouts, id)}</button>)}</div></td>
           <td className="num">{m.quantity.value === null ? <span className="fa-unknown" title={m.quantity.reason}>Unknown<small>{m.quantity.reason}</small></span> : countText(m.quantity)}</td>
         </tr>)}</tbody></table>
     </Section>
     <Section title="Cut list" count={result.cuts.length}>
-      <table className="fa-table fa-cuts"><thead><tr><th>Piece</th><th className="num">Center to center</th><th className="num">Cut length</th></tr></thead>
+      <table className="fa-table fa-cuts"><thead><tr><th>Piece</th><th className="num">{projected ? "Projected centerline" : "Center to center"}</th><th className="num">Cut length</th></tr></thead>
         <tbody>{result.cuts.map(c => {
           const d = cutDetail.get(c.pieceId);
           const on = c.pieceId === selectedPiece;
           return [
             <tr key={c.id} className={`fa-selectable ${on ? "is-on" : ""}`} onClick={() => onSelectPiece(on ? null : c.pieceId)} tabIndex={0} onKeyDown={e => { if (e.key === "Enter") onSelectPiece(on ? null : c.pieceId); }} aria-selected={on}>
-              <td><span className={`fa-tagbox ${lengthText(c.length).known ? "" : "is-unknown"}`}>{callouts.piece.get(c.pieceId) ?? "?"}</span><small>{productCode(plan?.entities.find(e => e.id === c.pieceId)?.productId)}</small></td>
+              <td><span className={`fa-tagbox ${lengthText(c.length).known ? "" : "is-unknown"}`}>{callouts.piece.get(c.pieceId) ?? "?"}</span><small>{plan?.entities.find(e => e.id === c.pieceId)?.productId ? productCode(plan?.entities.find(e => e.id === c.pieceId)?.productId) : "Product not selected"}</small></td>
               <td className="num">{d ? <Length q={d.centerline as Quantity} /> : <span className="fa-muted">—</span>}</td>
-              <td className="num strong"><Length q={c.length} /></td>
+              <td className="num strong">{lengthText(c.length).known ? <Length q={c.length} /> : <span className="fa-unknown">Unknown</span>}</td>
             </tr>,
+            !lengthText(c.length).known && <tr key={`${c.id}-why`} className="fa-rowwhy"><td colSpan={3}><ul>{unknownReason(c.length).split("; ").map(r => <li key={r}>{r}</li>)}</ul></td></tr>,
             on && <tr key={`${c.id}-d`} className="fa-rowdetail"><td colSpan={3}>
               {d?.takeouts.length ? <div className="fa-takeouts"><span className="fa-muted">Deductions (server)</span>{d.takeouts.map((t, i) => <span key={i}>{t.fittingId ? callouts.fitting.get(t.fittingId) ?? "fitting" : t.datum === "tie_in" ? "Tie-in" : t.datum.replace(/_/g, " ")}: <b className="mono">{lengthText(t.netTakeout as Quantity).primary}</b></span>)}</div> : null}
               {d?.formula && <p className="fa-muted small mono">{d.formula}</p>}
@@ -71,13 +78,20 @@ export function MaterialsCuts({ result, current, revision, plan, callouts, detai
           ];
         })}</tbody></table>
       {fittings.length > 0 && <p className="fa-muted small">Fittings: {fittings.map(f => `${callouts.fitting.get(f.id)} ${productCode(f.productId)}`).join(" · ")}</p>}
+      {projected && <p className="fa-muted small">Centerlines are plan lengths measured on the drawing. They are not a purchased stock length, and the physical length and elevation are not verified.</p>}
       <p className="fa-muted small">{DISPLAY_ROUNDING}</p>
     </Section>
+    {context.length > 0 && <Section title="Retained context" count={context.length}>
+      <p className="fa-muted small">On the drawing for traceability. Outside this work: not detailed, not connected, not purchased.</p>
+      <ul className="fa-context-items">{context.map(c => <li key={c.id}><span className="fa-tagbox small is-context">{c.label ?? c.id}</span>{c.kind === "head" ? "Sprinkler head" : c.kind === "pipe" ? "Adjacent pipe" : c.kind}<small className="mono">{c.id}</small></li>)}</ul>
+    </Section>}
     {result.gaps.length > 0 && <Section title="Still missing" count={result.gaps.length} defaultOpen={false}>
       <ul className="fa-list">{[...new Set(result.gaps.map(g => g.reason))].map(r => <li key={r}>{r}</li>)}</ul>
     </Section>}
   </div>;
 }
+
+const isProduct = (description: string) => !description.includes(";") && !/^(Pipe|Fitting), product not selected/.test(description);
 
 export function Assembly({ result, callouts, sources, selectedPiece, onSelectPiece }: { result: PackageResult | undefined; callouts: Callouts; sources: Sources; selectedPiece?: string | null; onSelectPiece?: (id: string | null) => void }) {
   if (!result) return <div className="fa-empty"><p>No assembly steps yet.</p></div>;

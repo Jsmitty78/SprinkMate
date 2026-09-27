@@ -1,4 +1,4 @@
-import { adaptationInterval, confirmedPackageEvidence, geometryFactUsable, isSyntheticPackageFact } from "@field-agent/core";
+import { adaptationFrame, adaptationInterval, confirmedPackageEvidence, geometryFactUsable, isSyntheticPackageFact } from "@field-agent/core";
 import type { PackageInputs, PackagePlan, PackageResult, WorkPackageSnapshot } from "@field-agent/core";
 import { lengthInput, parseLength } from "./format.js";
 
@@ -37,7 +37,7 @@ export const PROVENANCE_LABELS: Record<Provenance, string> = {
 };
 export function factProvenance(f: Fact | undefined): Provenance {
   if (f?.provenance) return f.provenance;
-  if (/SAMPLE|SYNTHETIC|FICTIONAL|not measured on site/i.test(f?.source.description ?? "")) return "synthetic_assumption";
+  if (/SAMPLE|SYNTHETIC|FICTIONAL|ASSUMPTION:|not measured on site/i.test(f?.source.description ?? "")) return "synthetic_assumption";
   return f?.confirmation === "confirmed" ? "confirmed_evidence" : "user_entered";
 }
 /** Editing or confirming a test assumption must not turn it into field evidence. */
@@ -121,7 +121,47 @@ export function readBox(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">,
     box: complete ? { min: { x: values[0]!, y: values[1]!, z: values[2]! }, max: { x: values[3]!, y: values[4]!, z: values[5]! } } : null,
   };
 }
-function toMm(value: number, unit: string | null): number | null {
+/** Source prefix for fictional values entered to exercise the software. Confirming never removes it. */
+export const ASSUMPTION_PREFIX = "ASSUMPTION:";
+export const FRAME_FIELDS = ["origin.x", "origin.y", "origin.z", "yaw"].map(k => `adaptationFrame.${k}`);
+/**
+ * The explicit local frame (docs/contracts/adaptation-interval.md), or null when boxes are in the
+ * drawing frame. `reason` is set when the saved facts are partial or unconfirmed.
+ */
+export function siteFrameOf(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">) {
+  const facts = FRAME_FIELDS.map(f => findFact(s, f));
+  if (facts.every(f => !f)) return null;
+  try {
+    const t = adaptationFrame(s);
+    const yaw = facts[3]!.value as number;
+    return { facts, yaw, origin: { x: t.toDrawing({ x: 0, y: 0, z: 0 }).x, y: t.toDrawing({ x: 0, y: 0, z: 0 }).y, z: t.toDrawing({ x: 0, y: 0, z: 0 }).z }, toLocal: t.toLocal, toDrawing: t.toDrawing, reason: null as string | null };
+  } catch (e) {
+    return { facts, yaw: null, origin: null, toLocal: null, toDrawing: null, reason: e instanceof Error ? e.message : String(e) };
+  }
+}
+/**
+ * Reopens measured inputs and clears synthetic values (which remain usable while proposed): they were read along a
+ * span that is no longer the affected one, so they must be confirmed again before routing.
+ */
+export function reopenSiteGeometry(cur: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">) {
+  const reopen = (f: Fact): Fact => /^(adaptationFrame|duct|workEnvelope)\./.test(f.field)
+    ? isSyntheticPackageFact(f) ? { ...f, value: null, confirmation: "proposed", unknownReason: "Re-enter geometry for the changed span" } : { ...f, confirmation: "proposed" }
+    : f;
+  return { detailing: cur.detailing.map(reopen), siteFacts: cur.siteFacts.map(reopen) };
+}
+/** Which faces a box still needs, in words a fitter would use. */
+export function boxGaps(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">, prefix: string, local: boolean): string[] {
+  const v = readBox(s, prefix).values;
+  const names = local ? ["along the span (X)", "across the span (Y)", "height (Z)"] : ["east-west (X)", "north-south (Y)", "height (Z)"];
+  const out: string[] = [];
+  names.forEach((n, i) => {
+    if (v[i] === null || v[i + 3] === null) out.push(`${n}: ${v[i] === null && v[i + 3] === null ? "both faces" : v[i] === null ? "the low face" : "the high face"} missing`);
+    else if (v[i]! >= v[i + 3]!) out.push(`${n}: the low face must be less than the high face`);
+  });
+  return out;
+}
+export const isTestAssumption = isSyntheticPackageFact;
+export function toMm(value: number, unit: string | null): number | null {
   const factor: Record<string, number> = { mm: 1, m: 1000, cm: 10, in: 25.4, ft: 304.8 };
   const f = factor[unit ?? "mm"];
   return f === undefined ? null : value * f;
@@ -312,7 +352,7 @@ function topologySignature(plan: Plan): string {
 export interface Requirement { id: string; group: "Drawing" | "Run" | "Dimensions" | "Assembly" | "Project" | "Site"; label: string; done: boolean; hint?: string }
 
 export const PROJECT_BASIS: Array<{ field: string; label: string; options: Array<[string, string]> }> = [
-  { field: "jurisdiction", label: "Jurisdiction", options: [["san_francisco", "San Francisco (SFFD)"]] },
+  { field: "jurisdiction", label: "Jurisdiction", options: [["san_francisco", "San Francisco (SFFD)"], ["other", "Another jurisdiction (no rule pack in Sprink)"]] },
   { field: "standard", label: "Standard", options: [["nfpa13", "NFPA 13"]] },
   { field: "permitKind", label: "Permit kind", options: [["revision", "Revision"], ["new", "New"]] },
   { field: "originalNfpa13Edition", label: "NFPA 13 edition of the original permit", options: [["2025", "2025"], ["2022", "2022"], ["2019", "2019"]] },
@@ -322,6 +362,17 @@ export const PROJECT_BASIS: Array<{ field: string; label: string; options: Array
   { field: "storage", label: "Occupancy storage", options: [["non_storage", "Non-storage"], ["storage", "Storage"]] },
 ];
 
+/** The basis questions still asked: after "another jurisdiction", the San Francisco questions do not apply. */
+export function projectBasis(s: WorkPackageSnapshot) {
+  if (!showSfInputs(s)) return [];
+  const j = findFact(s, "jurisdiction");
+  return isConfirmed(j) && j!.value !== "san_francisco" ? PROJECT_BASIS.slice(0, 1) : PROJECT_BASIS;
+}
+/** Sheet label (P27, H1) when the intake saved one. */
+export function sourceLabel(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">, id: string): string | null {
+  const v = findFact(s, "sourceLabel", id)?.value;
+  return typeof v === "string" && v ? v : null;
+}
 /** Entities outside the scope are retained context: shown, never part of the work. */
 export const contextIds = (s: Pick<WorkPackageSnapshot, "scope">): Set<string> => new Set(s.scope?.excludedEntityIds ?? []);
 export const inScope = (s: Pick<WorkPackageSnapshot, "scope">) => { const c = contextIds(s); return (id: string) => !c.has(id); };
@@ -354,21 +405,25 @@ export function requirements(s: WorkPackageSnapshot): Requirement[] {
         add({ id: `datum.${end}.${pipe.id}`, group: "Dimensions", label: `How the ${end} of ${pipe.id} is dimensioned`, done: isConfirmed(findFact(s, `datum.${end}`, pipe.id)) });
     for (const tie of plan.entities.filter(e => e.kind === "tie_in" && work(e.id)))
       add({ id: `netCutOffset.${tie.id}`, group: "Dimensions", label: `Net cut offset at tie-in ${tie.id}`, done: isConfirmed(findFact(s, "netCutOffset", tie.id)) });
-    for (const fit of plan.entities.filter(e => e.kind === "fitting" && work(e.id)))
+    for (const fit of plan.entities.filter(e => e.kind === "fitting" && work(e.id) && e.productId === ELBOW))
       for (const port of fit.ports)
         add({ id: `movement.${port.id}.${fit.id}`, group: "Assembly", label: `Joint movement at ${fit.id}/${port.id} can be made`, done: isConfirmed(findFact(s, `movement.${port.id}`, fit.id)) });
   }
   add({ id: "workAreaAccess", group: "Assembly", label: "Work-area access confirmed", done: isConfirmed(findFact(s, "workAreaAccess")) });
   if (showCpvcInputs(s)) add({ id: "curePlan", group: "Assembly", label: "Cement set and cure plan", done: isConfirmed(findFact(s, "curePlan")) });
-  for (const b of showSfInputs(s) ? PROJECT_BASIS : []) add({ id: b.field, group: "Project", label: b.label, done: isConfirmed(findFact(s, b.field)) });
+  for (const b of projectBasis(s)) add({ id: b.field, group: "Project", label: b.label, done: isConfirmed(findFact(s, b.field)) });
   if (s.intent === "adapt_to_site") {
     add({ id: "change", group: "Site", label: "Affected pipe chosen", done: !!s.changeRequest?.affectedEntityIds.length });
+    const site = siteFrameOf(s);
+    if (site) add({ id: "siteFrame", group: "Site", label: "Local frame along the span confirmed", done: !site.reason, hint: site.reason ?? undefined });
     for (const [id, label, fields] of [
       ["duct", "Obstacle geometry (all six faces)", BOX_KEYS.map(k => `duct.${k}`)],
       ["workEnvelope", "Work boundary geometry", BOX_KEYS.map(k => `workEnvelope.${k}`)],
       ["requiredPipeClearance", "Required pipe clearance", ["requiredPipeClearance"]],
     ] as const) {
       const facts = fields.map(field => findFact(s, field));
+      const gaps = id === "duct" || id === "workEnvelope" ? boxGaps(s, id, !!site) : [];
+      for (const gap of gaps) add({ id: `${id}.${gap}`, group: "Site", label: `${id === "duct" ? "Obstacle" : "Work boundary"} ${gap}`, done: false });
       const synthetic = facts.some(isSyntheticPackageFact);
       add({ id, group: "Site", label: `${label}${synthetic ? " — synthetic test input" : ""}`, done: facts.every(f => geometryFactUsable(f) && typeof f?.value === "number"), hint: synthetic ? "Usable for software route testing; field measurement remains unverified." : undefined });
     }

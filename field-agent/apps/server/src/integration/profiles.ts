@@ -36,9 +36,13 @@ export function evaluateProfile(
 ): ProfileOutput {
   const adaptation = s.intent === "adapt_to_site" && plan.id !== baseline.id;
   const profile = !adaptation ? "drawing_preparation" : "site_adaptation";
-  const heads = s.baselinePlan!.entities.filter((e) => e.kind === "head");
+  // Retained context (outside the scope) is shown, never checked as part of the work.
+  const context = new Set(s.scope?.excludedEntityIds ?? []);
+  const heads = s.baselinePlan!.entities.filter(
+    (e) => e.kind === "head" && !context.has(e.id),
+  );
   const tyco = heads.filter((e) => e.productId === "TY3231");
-  const supports = s.baselinePlan!.entities.filter((e) => e.kind === "support");
+  const supports = s.baselinePlan!.entities.filter((e) => e.kind === "support" && !context.has(e.id));
   const jurisdiction = fact<string>(s, "jurisdiction");
   const sfApplicable = jurisdiction.confirmed && jurisdiction.value === "san_francisco" && jurisdiction.evidenceIds.length > 0;
   const request: ProjectEvaluationRequest = {
@@ -192,7 +196,10 @@ export function evaluateProfile(
             : "unknown",
       state:
         project.basis?.status === "resolved" ? "verified" : "input_missing",
-      reason: project.basis?.reason ?? "Project basis unresolved",
+      reason:
+        jurisdiction.confirmed && jurisdiction.value !== "san_francisco"
+          ? `No executable rule pack for jurisdiction "${jurisdiction.value}"; Sprink's code rule packs are for San Francisco only, so code rules are not evaluated.`
+          : (project.basis?.reason ?? "Project basis unresolved"),
       sourceRefs: project.basis?.sourceRefs.map((r) => r.url) ?? [],
     },
     ...output.selectedProducts.filter(p => p.limitations?.length).map(p => ({

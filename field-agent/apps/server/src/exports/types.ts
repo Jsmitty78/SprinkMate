@@ -31,6 +31,8 @@ export interface CutRow {
   status: ValueStatus;
   sourceIds: string[];
   unresolvedReason: string | null;
+  /** Modeled centerline in the same unit; for a traced drawing, a plan projection. */
+  centerline?: number | null;
 }
 export interface AssemblyStep {
   id: string;
@@ -82,6 +84,21 @@ export interface ExportSnapshot {
   findings: { id: string; status: 'pass' | 'fail' | 'unknown' | 'not_applicable'; description: string; subjectIds: string[]; sourceIds: string[] }[];
   unresolvedItems: string[];
   sources: { id: string; title: string; reference: string }[];
+  /** Saved inputs as entered, with their basis, so a test assumption is never read as a measurement. */
+  inputs?: InputRow[];
+  /** Entities outside the scope: shown for traceability, never part of the work or a purchase. */
+  retainedContext?: { id: string; kind: string; label: string | null }[];
+}
+export interface InputRow {
+  id: string;
+  field: string;
+  subjectIds: string[];
+  value: string | number | boolean | null;
+  unit: string | null;
+  status: 'confirmed' | 'proposed' | 'unknown';
+  basis: 'test_assumption' | 'sample' | 'recorded';
+  source: string;
+  evidenceAssetId: string | null;
 }
 export type ExportFileName = 'work-package.pdf' | 'bom.csv' | 'cut-list.csv' | 'manifest.json';
 export interface ExportManifest {

@@ -1,4 +1,5 @@
 import { deriveFixedEndClosure, spearsCatalog } from "@field-agent/fabrication";
+import { fs01View, MM_PER_PT } from "./fs01-fixture.js";
 import { fs01Adaptation } from "./fixtures/fs01-adaptation.js";
 import { adaptationFixture } from "./fixtures/adaptation-package.js";
 import { exportSnapshot } from "../src/integration/snapshot.js";
@@ -486,4 +487,42 @@ it("exports closure component identities and unresolved specifications even when
   expect(snapshot.materials.find(m => m.id === "closure/bolts")).toMatchObject({ quantity: 4, status: "known" });
   expect(snapshot.cuts.filter(c => c.pieceId.includes("closure")).every(c => c.length === null)).toBe(true);
   expect(snapshot.assembly.filter(o => o.instruction.startsWith("Review")).every(o => o.status === "unresolved")).toBe(true);
+});
+
+
+it("does not request CPVC cure for a steel interval with CPVC retained elsewhere in scope", async () => {
+  const t = setup(), s = await create(t, 3, false, input => {
+    const access = input.detailing.find(f => f.field === "workAreaAccess")!;
+    const cpvc = input.baselinePlan!.entities.find(e => e.kind === "pipe")!.productId;
+    Object.assign(input, fs01Adaptation(input.sourceDrawing!.assetId));
+    input.detailing.push(access);
+    input.baselinePlan!.entities.find(e => e.id === "P28")!.productId = cpvc;
+    input.scope!.excludedEntityIds = input.scope!.excludedEntityIds.filter(id => id !== "P28");
+    input.scope!.includedEntityIds.push("P28");
+  });
+  const result = await run(t, s.id);
+  expect(result.outputs.candidates?.candidates).toHaveLength(2);
+  t.packages.select(s.id, { expectedRevision: result.inputRevision, planId: result.outputs.candidates!.candidates[0].plan.id });
+  const selected = await run(t, s.id);
+  expect(selected.outputs.requests.some(r => /cure/i.test(r.question))).toBe(false);
+});
+
+it("labels only baseline cuts as drawing projections, not generated alternatives", async () => {
+  const t = setup(), s = await create(t, 3, false, input => {
+    Object.assign(input, fs01Adaptation(input.sourceDrawing!.assetId));
+    input.sourceDrawing!.view = fs01View;
+    input.sourceDrawing!.scale.value = MM_PER_PT;
+  });
+  await run(t, s.id);
+  const details = t.detailStore.get(s.id)!.details;
+  expect(details).toHaveLength(3);
+  const projection = "Projected plan length from the drawing, so physical length and elevation are not verified";
+  expect(details[0].fabrication.cuts[0].cutLength.reasons).toContain(projection);
+  for (const d of details.slice(1)) {
+    expect(d.fabrication.cuts.length).toBeGreaterThan(0);
+    for (const c of d.fabrication.cuts) {
+      expect(c.cutLength.value).toBeNull();
+      expect(c.cutLength.reasons).not.toContain(projection);
+    }
+  }
 });

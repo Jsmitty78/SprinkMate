@@ -22,12 +22,13 @@ export function csvFiles(s: ExportSnapshot): { bom: Buffer; cuts: Buffer } {
       [...packageMetadata, 'package_metadata', '', '', null, '', '', '[]', '[]', '', 'draft'],
       ...s.materials.map(r => [...metadata, 'material', r.id, r.description, r.quantity, r.unit, r.status, JSON.stringify(r.subjectIds), JSON.stringify(r.sourceIds), r.unresolvedReason, 'draft']),
       ...(s.materials.length ? [] : [[...metadata, 'package_status', '', '', null, '', 'unresolved', '[]', '[]', 'No material output supplied.', 'draft']]),
+      ...(s.retainedContext ?? []).map(r => [...metadata, 'retained_context', r.id, `${r.kind}${r.label ? ` ${r.label}` : ''}: retained context, not part of this work`, null, '', 'not_purchased', JSON.stringify([r.id]), '[]', null, 'draft']),
     ]),
     cuts: table([
-      [...headings, 'record_type', 'piece_id', 'segment_ids', 'joint_ids', 'cut_length', 'unit', 'status', 'source_ids', 'unresolved_reason', 'document_status'],
-      [...packageMetadata, 'package_metadata', '', '[]', '[]', null, '', '', '[]', '', 'draft'],
-      ...s.cuts.map(r => [...metadata, 'cut', r.pieceId, JSON.stringify(r.segmentIds), JSON.stringify(r.jointIds), r.length, r.unit, r.status, JSON.stringify(r.sourceIds), r.unresolvedReason, 'draft']),
-      ...(s.cuts.length ? [] : [[...metadata, 'package_status', '', '[]', '[]', null, '', 'unresolved', '[]', 'No cut output supplied.', 'draft']]),
+      [...headings, 'record_type', 'piece_id', 'segment_ids', 'joint_ids', 'cut_length', 'unit', 'status', 'source_ids', 'unresolved_reason', 'document_status', 'centerline_length'],
+      [...packageMetadata, 'package_metadata', '', '[]', '[]', null, '', '', '[]', '', 'draft', null],
+      ...s.cuts.map(r => [...metadata, 'cut', r.pieceId, JSON.stringify(r.segmentIds), JSON.stringify(r.jointIds), r.length, r.unit, r.status, JSON.stringify(r.sourceIds), r.unresolvedReason, 'draft', r.centerline ?? null]),
+      ...(s.cuts.length ? [] : [[...metadata, 'package_status', '', '[]', '[]', null, '', 'unresolved', '[]', 'No cut output supplied.', 'draft', null]]),
     ]),
   };
 }

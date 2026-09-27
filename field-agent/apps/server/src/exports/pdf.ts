@@ -178,7 +178,12 @@ export async function renderPdf(s: ExportSnapshot, options: PdfOptions = {}): Pr
     paragraph('Modeled quantities from the selected plan; physical fabrication splits may remain unresolved. Purchasing stock and allowances are not inferred. Numeric values are preserved without added rounding.');
     table(['Material / subjects', 'Quantity / unit', 'Status / sources / notes'], [205, 100, 206], s.materials.map(r => [`${r.id}: ${r.description}\nSubjects: ${r.subjectIds.join(', ')}`, r.quantity === null ? `UNRESOLVED\n${r.unit}` : `${r.quantity}\n${r.unit}`, `${r.status}\nSources: ${r.sourceIds.join(', ') || 'none'}\n${r.unresolvedReason ?? ''}`]));
     heading('Cut list');
-    table(['Piece / segments / joints', 'Cut / unit', 'Status / sources / notes'], [205, 100, 206], s.cuts.map(r => [`${r.pieceId}\nSegments: ${r.segmentIds.join(', ')}\nJoints: ${r.jointIds.join(', ')}`, r.length === null ? `UNRESOLVED\n${r.unit}` : `${r.length}\n${r.unit}`, `${r.status}\nSources: ${r.sourceIds.join(', ') || 'none'}\n${r.unresolvedReason ?? ''}`]));
+    table(['Piece / segments / joints', 'Cut / unit', 'Status / sources / notes'], [205, 100, 206], s.cuts.map(r => [`${r.pieceId}\nSegments: ${r.segmentIds.join(', ')}\nJoints: ${r.jointIds.join(', ')}`, `${r.length === null ? 'UNRESOLVED' : r.length}\n${r.unit}${r.centerline != null ? `\nCenterline: ${r.centerline} ${r.unit}` : ''}`, `${r.status}\nSources: ${r.sourceIds.join(', ') || 'none'}\n${r.unresolvedReason ?? ''}`]));
+    if (s.retainedContext?.length) {
+      heading('Retained context');
+      paragraph('Shown on the drawing for traceability. Outside this work: not detailed, not connected and not purchased.');
+      table(['Entity', 'Kind', 'Drawing label'], [150, 150, 211], s.retainedContext.map(r => [r.id, r.kind, r.label ?? 'not labelled']));
+    }
     heading('Assembly sequence and joint references');
     table(['Operation / references', 'Instruction / evidence / conditions'], [160, 351], s.assembly.map((r, i) => [`${i + 1}. ${r.id}\nPieces: ${r.pieceIds.join(', ')}\nJoints: ${r.jointIds.join(', ')}`, `${r.instruction}\nStatus: ${r.status}\nSources: ${r.sourceIds.join(', ') || 'none'}\n${r.unresolvedReason ?? ''}`]));
     if (s.intent === 'adapt_to_site') {
@@ -188,6 +193,16 @@ export async function renderPdf(s: ExportSnapshot, options: PdfOptions = {}): Pr
     }
     heading('Rule findings');
     table(['Finding / status', 'Subjects / finding / sources'], [150, 361], s.findings.map(r => [`${r.id}\n${r.status}`, `${r.subjectIds.join(', ')}\n${r.description}\nSources: ${r.sourceIds.join(', ') || 'none'}`]));
+    if (s.inputs?.length) {
+      heading('Recorded inputs and provenance');
+      paragraph('Values as saved in the work package. TEST ASSUMPTION rows are fictional values for exercising the software, not field observations; confirming them does not change that.');
+      const basis = { test_assumption: 'TEST ASSUMPTION', sample: 'SAMPLE', recorded: 'Recorded' } as const;
+      table(['Input / subjects', 'Value / unit', 'Basis / status / source'], [205, 100, 206], s.inputs.map(r => [
+        `${r.field}\n${r.subjectIds.length ? `Subjects: ${r.subjectIds.join(', ')}` : 'Package-wide'}`,
+        r.value === null ? 'UNKNOWN' : `${r.value}${r.unit ? ` ${r.unit}` : ''}`,
+        `${basis[r.basis]} | ${r.status}\n${r.source}${r.evidenceAssetId ? `\nEvidence file: ${r.evidenceAssetId}` : ''}`,
+      ]));
+    }
     heading('Source references');
     table(['Source ID', 'Document / reference'], [110, 401], s.sources.map(r => [r.id, `${r.title}\n${r.reference}`]));
     const range = doc.bufferedPageRange();

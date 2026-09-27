@@ -2,43 +2,14 @@ import { afterEach, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { PackagePlan, PackageInputs } from "@field-agent/core";
 import { FieldService } from "../src/service.js";
 import { createApp } from "../src/api.js";
 import { WorkPackageStore } from "../src/work-packages/store.js";
 import { createIntegratedServices } from "../src/integration/runtime.js";
-
-// FS-01 P27 as the browser intake saves it: PDF points (Y down) mapped to a right-handed plan frame,
-// N27 (12544.2133, 9620.5040) and N28 (12544.2133, 12668.1653) mm in the crop frame; heads H1/H3 and the
-// adjacent pipes are unconnected context outside the scope.
-const MM_PER_PT = 33.8666666667;
-const frame = { id: "drawing-plan", lengthUnit: "mm" as const, axes: "right_handed_z_up" as const };
-const at = (x: number, y: number) => ({ x, y: -y, z: 0 });
-const N27 = at(12544.2133, 9620.504), N28 = at(12544.2133, 12668.1653);
-const port = (id: string, position: { x: number; y: number; z: number }) => ({ id, position, unknownReason: null });
-export function fs01Trace(): Pick<PackageInputs, "baselinePlan" | "scope"> {
-  const plan: PackagePlan = {
-    id: "baseline", coordinateFrame: frame, confirmation: "confirmed",
-    entities: [
-      { id: "p1", kind: "pipe", productId: null, ports: [port("start", N27), port("end", N28)] },
-      { id: "t1", kind: "tie_in", productId: null, ports: [port("socket", N27)] },
-      { id: "t2", kind: "tie_in", productId: null, ports: [port("socket", N28)] },
-      { id: "h1", kind: "head", productId: null, ports: [port("center", N27)] },
-      { id: "h2", kind: "head", productId: null, ports: [port("center", N28)] },
-      { id: "c1", kind: "pipe", productId: null, ports: [port("start", at(12544.2133, 9000)), port("end", at(12544.2133, 8000))] },
-    ],
-    connections: [
-      { id: "t1-joint", from: { entityId: "p1", portId: "start" }, to: { entityId: "t1", portId: "socket" } },
-      { id: "t2-joint", from: { entityId: "p1", portId: "end" }, to: { entityId: "t2", portId: "socket" } },
-    ],
-  };
-  return { baselinePlan: plan, scope: { coordinateFrame: frame, includedEntityIds: ["p1", "t1", "t2"], excludedEntityIds: ["h1", "h2", "c1"], tieInEntityIds: ["t1", "t2"] } };
-}
-export const fs01View = {
-  sheetUnit: "pdf_pt" as const, workArea: { x: 300, y: 230, width: 160, height: 190 },
-  calibration: { method: "printed_scale" as const, a: null, b: null, realDistance: null, printedScale: "1/8 in = 1 ft", reference: "Printed scale on FS-01", pointUncertaintyMm: 5 },
-  frame: { origin: { x: 0, y: 0 }, rotationDeg: 0 }, derivativeOf: "FM32361 FS-01 PDF crop (test copy)",
-};
+import { exportSnapshot } from "../src/integration/snapshot.js";
+import { renderPdf } from "../src/exports/pdf.js";
+import { csvFiles } from "../src/exports/csv.js";
+import { fs01Trace, fs01View, MM_PER_PT } from "./fs01-fixture.js";
 
 const cleanup: (() => void)[] = [];
 afterEach(() => cleanup.splice(0).forEach(f => f()));
@@ -206,4 +177,53 @@ it("keeps the selected interval and description when aligning or correcting the 
   const shifted = t.packages.edit(d.id, { expectedRevision: boxed.inputRevision, patch: { detailing: boxed.detailing.map(f => f.id === "x" ? { ...f, value: 100 } : f) } });
   expect(shifted.detailing.some(f => f.id === "duct")).toBe(false);
   expect(shifted.changeRequest).toEqual(changeRequest);
+});
+
+it("exports saved inputs with their basis, so a test assumption never reads as a measurement", async () => {
+  const t = setup(), d = await drawing(t);
+  const assumed = { id: "clearance", field: "requiredPipeClearance", value: 100, unit: "mm", subjectIds: [], unknownReason: null, confirmation: "confirmed" as const,
+    context: "observed" as const, source: { description: "ASSUMPTION: software-test parameter, not a regulation", assetId: null, page: null } };
+  t.packages.edit(d.id, { expectedRevision: 1, patch: { sourceDrawing: d.sourceDrawing, ...fs01Trace(), siteFacts: [assumed] } });
+  await run(t, d.id);
+  const snap = exportSnapshot(t.packages.get(d.id), t.detailStore.get(d.id)!)!;
+  expect(snap.inputs).toEqual([expect.objectContaining({ id: "clearance", value: 100, unit: "mm", status: "confirmed", basis: "test_assumption" })]);
+  expect((await renderPdf(snap)).subarray(0, 5).toString()).toBe("%PDF-");
+});
+
+// R2 of #1: source-only partial output. The source asks for 2" Schedule 40 steel; no product is selected.
+it("gives an honest R2 partial package: requirement not purchase, projected length, context, null cut with reasons", async () => {
+  const t = setup(), d = await drawing(t);
+  const detail = (id: string, field: string, value: string, subjectIds: string[] = [], source = "FM32361 FS-02 general notes") =>
+    ({ id, field, value, subjectIds, unit: null, unknownReason: null, confirmation: "confirmed" as const, context: "detailing" as const, source: { description: source, assetId: null, page: null } });
+  t.packages.edit(d.id, { expectedRevision: 1, patch: { sourceDrawing: d.sourceDrawing, ...fs01Trace(), detailing: [
+    detail("size", "nominalSize", '2"', ["p1"], "FS-01 pipe label"),
+    detail("req", "materialRequirement", "Schedule 40 black steel pipe with threaded cast-iron fittings"),
+    detail("p27", "sourceLabel", "P27", ["p1"], "FS-01"), detail("h1", "sourceLabel", "H1", ["h1"], "FS-01"), detail("h3", "sourceLabel", "H3", ["h2"], "FS-01"),
+    detail("j", "jurisdiction", "other", [], "Idaho project (test)"),
+  ] } });
+  const done = await run(t, d.id);
+  const result = done.outputs.results[0];
+  expect(result.materials).toHaveLength(1);
+  expect(result.materials[0].description).toMatch(/^Pipe, product not selected; nominal 2" \(as printed\); source requires: Schedule 40 black steel/);
+  expect(result.materials[0].quantity).toMatchObject({ value: null, basis: "unknown" });
+  expect(result.cuts[0].length.value).toBeNull();
+  for (const reason of ["Endpoint datum", "Pipe product not selected", "Projected plan length from the drawing"]) expect(result.cuts[0].length.reason).toContain(reason);
+  const text = result.assembly.map(a => a.instruction).join(" ");
+  expect(text).not.toMatch(/plastic|bevel|cement|FS-5|quarter/i);
+  expect(result.assembly[0].instruction).toBe("Detail cutting and end preparation for piece 1 once its product and connection are selected.");
+  // No San Francisco rules for another jurisdiction, and no product checks for retained context heads.
+  expect(result.evaluations.some(e => /NFPA 13-2025|head product/i.test(e.reason))).toBe(false);
+  expect(result.evaluations.find(e => /No executable rule pack/.test(e.reason))?.status).toBe("unknown");
+  // No CPVC cure question and no CPVC procedure cited for a product that is not selected.
+  expect(done.outputs.requests.some(r => /cure/i.test(r.question))).toBe(false);
+  expect(result.evaluations.find(e => /^Assembly has unresolved/.test(e.reason))?.sourceRefs).toEqual([]);
+
+  const snap = exportSnapshot(t.packages.get(d.id), t.detailStore.get(d.id)!)!;
+  expect(snap.cuts[0].centerline! * 1000).toBeCloseTo(3047.6613, 3);
+  expect(snap.retainedContext).toEqual([{ id: "h1", kind: "head", label: "H1" }, { id: "h2", kind: "head", label: "H3" }, { id: "c1", kind: "pipe", label: null }]);
+  expect(snap.materials[0]).toMatchObject({ quantity: null, status: "unresolved" });
+  const { bom, cuts } = csvFiles(snap);
+  expect(bom.toString()).toContain('"retained_context","h1","head H1: retained context, not part of this work","","","not_purchased"');
+  expect(cuts.toString()).toMatch(/"centerline_length"\r\n[\s\S]*"3\.04766/);
+  expect((await renderPdf(snap)).subarray(0, 5).toString()).toBe("%PDF-");
 });

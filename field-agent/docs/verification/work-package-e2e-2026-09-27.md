@@ -98,3 +98,17 @@ passes 41 files / 829 tests; typecheck and build also pass. A direct run from th
 actual requirements patch through profile evaluation and export confirmed no
 nominal-size conflict and preserved `synthetic_assumption` / `proposed` in the
 exported fact. Browser E2E was not repeated for this correction.
+
+## Main integration
+
+Merged main through `c860054` (PRs #35, #36 and #37). Conflict resolution retains
+preparation descriptions, projected centerline CSV values, retained-context rows
+and the span-pinned site frame / plan-elevation views, alongside the provenance
+and bounded CSV metadata fixes. Site editors now write explicit provenance;
+synthetic values stay proposed. Changing a span invalidates synthetic geometry,
+and changing its frame clears boxes whose coordinates would otherwise change
+meaning. Legacy `ASSUMPTION:` records are also treated as synthetic.
+
+The integrated tree passes 43 files / 843 tests, typecheck, build and diff checks.
+Browser E2E was not repeated during this conflict resolution. The existing Vite
+large-chunk warning remains.

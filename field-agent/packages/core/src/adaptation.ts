@@ -5,7 +5,7 @@ type Point = { x: number; y: number; z: number };
 type PackageFact = Inputs["detailing"][number];
 /** Legacy SAMPLE records remain test assumptions even if older clients marked them confirmed. */
 export function isSyntheticPackageFact(f: PackageFact | undefined): boolean {
-  return !!f && (f.provenance === "synthetic_assumption" || (!f.provenance && /SAMPLE|SYNTHETIC|FICTIONAL|not measured on site/i.test(f.source.description)));
+  return !!f && (f.provenance === "synthetic_assumption" || (!f.provenance && /SAMPLE|SYNTHETIC|FICTIONAL|ASSUMPTION:|not measured on site/i.test(f.source.description)));
 }
 export function confirmedPackageEvidence(f: PackageFact | undefined): boolean {
   return !!f && !isSyntheticPackageFact(f) && (!f.provenance || f.provenance === "confirmed_evidence") && f.confirmation === "confirmed" && f.value !== null;

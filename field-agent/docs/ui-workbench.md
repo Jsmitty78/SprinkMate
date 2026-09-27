@@ -55,6 +55,7 @@ The Field inspections navigation opens existing task records without conversion.
 
 - Supports and branch trees in the tracer. It handles one open run, with heads and adjacent pipe as context.
 - The route planner does not read photos. They are evidence only.
+- The obstacle is not drawn on the sheet view, only on the plan and in the site views.
 
 ## Drawing intake (issue #27)
 
@@ -72,6 +73,37 @@ The Inputs tab (and the Site evidence tab for adaptation) starts with **Drawing 
 The trace is kept in this browser until it is saved, so a reload before saving keeps clicked points. A trace cannot be saved without a scale, because plan positions are millimetres.
 
 Not in #27: automatic extraction. The FS-01 vector extraction (`packages/core/src/reference/itd-mezzanine.json`) stays an optional fixture and is not wired into the intake. Drawing rendering uses pdf.js in the browser; Ask Sprink parses reference documents separately on the server, and the two could share a PDF layer later.
+
+## Site geometry (issue #28)
+
+The Site evidence tab records a discrepancy as reviewed geometry, never as a reroute.
+
+1. **Site condition.** What was found and which in-scope span it blocks (`changeRequest`).
+2. **Site frame.** Pins the explicit local frame of `docs/contracts/adaptation-interval.md` to a span: the four detailing facts `adaptationFrame.origin.x/y/z` (mm) and `adaptationFrame.yaw` (degrees), origin at the span start and yaw along it. X runs along the span, Y is level to the left of the pipe (the frame is right-handed), Z is up with 0 at the pipe centerline. The panel prints the plan and drawing formulas. For FS-01 P27 on the intake frame it prints `Drawing XY = (12544.2133 + Y, 9620.504 + X)`. The #1 acceptance mapping `(12544.2133 − Y, 9620.504 + X)` puts Y to the right, a mirrored frame the contract does not accept yet, so a value given that way is entered with its Y sign flipped.
+3. **Obstacle and work boundary.** Six faces each, entered in mm or ft-in and stored in mm with full precision, in the local frame when one is saved (main's `adaptationFrame` maps them to the drawing), otherwise in the plan frame.
+4. **Basis.** Every value is either *Measured on site* or *Test assumption (fictional)*. A test assumption is stored with the `ASSUMPTION:` source prefix, shown with its own badge, and exported as `TEST ASSUMPTION`. *Save* stores the values as proposed; *Confirm* marks them confirmed and never changes the basis. An evidence photo can be linked; the numbers never come from it.
+5. **Clearance.** The required surface clearance is labelled a test parameter, not a regulation. Pipe OD comes from the catalog product and is never inferred from the nominal size.
+6. **Missing values.** Each missing face is listed by name (for example "Obstacle height (Z): both faces missing"). Changing the frame keeps the box numbers but sets them back to proposed, so they must be confirmed again; every edit also clears a route selection and makes candidates stale by revision.
+7. **Plan and elevation.** X-Y and X-Z views of the span, obstacle and work boundary as saved.
+
+![Site frame on FS-01 P27](ui/site-frame.png)
+
+![Obstacle entered as a test assumption](ui/site-duct-panel.png) ![Work boundary missing its height](ui/site-missing-height.png) ![Plan and elevation](ui/site-views.png)
+
+The export PDF now lists every saved input with its basis and status (`inputs` in the export snapshot). Generating routes around the box stays with #12: the planner still refuses a baseline with head entities, including retained context heads.
+
+## Preparation results (issue #11)
+
+What a drawing-only package (R2 in #1) now shows, in the browser and in the export:
+
+- **No product, no purchase.** A pipe with no selected product is described by what the source asks for (nominal size as printed, the material requirement and where it is stated) and the pieces it models. Its purchase quantity is unknown, not "1 each".
+- **No invented procedure.** Such a piece gets one step, "Detail cutting and end preparation once its product and connection are selected", instead of CPVC cutting, bevelling and cement steps. The cure-plan question and the joint-movement and cure inputs are asked only when the run uses the solvent-cement catalog.
+- **Projected length.** The cut list shows the projected centerline (3047.6613 mm for FS-01 P27) with the cut left unknown and each reason on its own line: tie-in offset, product, endpoint datum, and that a traced length is a plan projection.
+- **Retained context.** Heads and adjacent pipe outside the scope are listed with their sheet labels (H1, H3, P30, P28). They are not detailed, connected or purchased. The export PDF has a Retained context table and the BOM CSV has `retained_context` rows with status `not_purchased`.
+- **Cut CSV.** A `centerline_length` column is appended (same unit as `cut_length`).
+- **Rules that apply.** A jurisdiction other than San Francisco can be chosen; the San Francisco rule packs are then not run and the checks say no rule pack covers the project. Retained context heads get no head-product check, and the assembly check cites the CPVC procedure only when a step uses it.
+
+![Materials for FS-01 P27 with no product selected](ui/prep-materials.png) ![Retained context](ui/prep-context.png) ![Assembly without invented steps](ui/prep-assembly.png)
 
 ## Checks
 
