@@ -55,6 +55,7 @@ The Field inspections navigation opens existing task records without conversion.
 
 - Supports and branch trees in the tracer. It handles one open run, with heads and adjacent pipe as context.
 - The route planner does not read photos. They are evidence only.
+- The obstacle is not drawn on the sheet view, only on the plan and in the site views.
 
 ## Drawing intake (issue #27)
 
@@ -72,6 +73,24 @@ The Inputs tab (and the Site evidence tab for adaptation) starts with **Drawing 
 The trace is kept in this browser until it is saved, so a reload before saving keeps clicked points. A trace cannot be saved without a scale, because plan positions are millimetres.
 
 Not in #27: automatic extraction. The FS-01 vector extraction (`packages/core/src/reference/itd-mezzanine.json`) stays an optional fixture and is not wired into the intake. Drawing rendering uses pdf.js in the browser; Ask Sprink parses reference documents separately on the server, and the two could share a PDF layer later.
+
+## Site geometry (issue #28)
+
+The Site evidence tab records a discrepancy as reviewed geometry, never as a reroute.
+
+1. **Site condition.** What was found and which in-scope span it blocks (`changeRequest`).
+2. **Site frame.** A fact `siteFrame` with the span as its only subject and `left` or `right` as its value. X runs along the span from its start, Y is level to the chosen side (`right` is a mirrored frame), Z is up with 0 at the pipe centerline. The panel prints the plan and drawing formulas. For FS-01 P27 with Y to the right it prints `Drawing XY = (12544.2133 − Y, 9620.504 + X)`, the #1 acceptance mapping. The server validates the fact (`invalid_site_frame`, `duplicate_site_frame`).
+3. **Obstacle and work boundary.** Six faces each, entered in mm or ft-in and stored in mm with full precision. With a site frame the server maps them to the plan frame (`boxFact` in `apps/server/src/integration/model.ts`). A span that is not parallel to a plan axis gives unknown rather than an enlarged box; the fix is to pick plan X along that span. Without a site frame the boxes stay in the plan frame as before.
+4. **Basis.** Every value is either *Measured on site* or *Test assumption (fictional)*. A test assumption is stored with the `ASSUMPTION:` source prefix, shown with its own badge, and exported as `TEST ASSUMPTION`. *Save* stores the values as proposed; *Confirm* marks them confirmed and never changes the basis. An evidence photo can be linked; the numbers never come from it.
+5. **Clearance and pipe OD.** The required surface clearance is labelled a test parameter, not a regulation. Pipe OD is a separate fact (`pipeOutsideDiameter` on the span), used only when the piece has no catalog product, and never inferred from the nominal size.
+6. **Missing values.** Each missing face is listed by name (for example "Obstacle height (Z): both faces missing"). Changing the frame keeps the box numbers but sets them back to proposed, so they must be confirmed again; every edit also clears a route selection and makes candidates stale by revision.
+7. **Plan and elevation.** X-Y and X-Z views of the span, obstacle and work boundary as saved.
+
+![Site frame on FS-01 P27](ui/site-frame.png)
+
+![Obstacle entered as a test assumption](ui/site-duct-panel.png) ![Work boundary missing its height](ui/site-missing-height.png) ![Plan and elevation](ui/site-views.png)
+
+The export PDF now lists every saved input with its basis and status (`inputs` in the export snapshot). Generating routes around the box stays with #12: the planner still refuses a baseline with head entities, including retained context heads.
 
 ## Checks
 

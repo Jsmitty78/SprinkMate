@@ -68,7 +68,11 @@ export function validateInputs(inputs: PackageInputs, checkAsset: (id: string) =
     ensure(fact.value !== null || fact.confirmation === 'proposed', 'unknown_fact_cannot_be_confirmed');
     if (typeof fact.value === 'number') ensure(Number.isFinite(fact.value) && fact.unit, 'measurement_requires_unit');
     if (fact.source.assetId) checkAsset(fact.source.assetId);
+    // A site frame is pinned to exactly one pipe of the plan, with Y to its left or right.
+    if (fact.field === 'siteFrame') ensure(fact.subjectIds.length === 1 && plan?.entities.find(e => e.id === fact.subjectIds[0])?.kind === 'pipe'
+      && (fact.value === null || fact.value === 'left' || fact.value === 'right'), 'invalid_site_frame');
   }
+  ensure(facts.filter(f => f.field === 'siteFrame').length <= 1, 'duplicate_site_frame');
   if (inputs.changeRequest) {
     checkSubjects(inputs.changeRequest.affectedEntityIds);
     ensure(inputs.changeRequest.factIds.every(id => facts.some(f => f.id === id)), 'unknown_change_fact');

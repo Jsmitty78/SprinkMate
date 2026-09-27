@@ -1,4 +1,4 @@
-import type { WorkPackageSnapshot } from "@field-agent/core";
+import { isAssumption, type WorkPackageSnapshot } from "@field-agent/core";
 import type { FabricationOutput } from "@field-agent/fabrication";
 import {
   ExportError,
@@ -221,5 +221,20 @@ export function exportSnapshot(
         : []),
     ],
     sources: [...sources.values()],
+    inputs: [...s.siteFacts, ...s.detailing].map((x) => ({
+      id: x.id,
+      field: x.field,
+      subjectIds: x.subjectIds,
+      value: x.value,
+      unit: x.unit,
+      status: x.value === null ? "unknown" : x.confirmation,
+      basis: isAssumption(x.source.description)
+        ? "test_assumption"
+        : x.source.description.startsWith("SAMPLE")
+          ? "sample"
+          : "recorded",
+      source: x.source.description,
+      evidenceAssetId: x.source.assetId,
+    })),
   };
 }

@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import type { PackagePlan, WorkPackageSnapshot } from "@field-agent/core";
+import {
+  localBoxToPlan,
+  siteFrameFor,
+  SITE_FRAME_FIELD,
+  toMillimetres,
+  type PackagePlan,
+  type WorkPackageSnapshot,
+} from "@field-agent/core";
 import {
   spearsCatalog,
   toLocalPlanGeometry,
@@ -325,6 +332,9 @@ export function planningPlan(
       productId: input.pieces.find((p) => p.id === seg.id)!.productId,
       cutEndDatumAtStart: fact(s, "datum.start", seg.id),
       cutEndDatumAtEnd: fact(s, "datum.end", seg.id),
+      outsideDiameter: seg.outsideDiameter.value
+        ? seg.outsideDiameter
+        : enteredDiameter(s, seg.id) ?? seg.outsideDiameter,
     })),
     fittings: geometry.fittings.map((f) => ({
       ...f,
@@ -334,29 +344,61 @@ export function planningPlan(
     ducts: [],
   };
 }
-function boxFact(s: WorkPackageSnapshot, prefix: string): Fact<Box> {
+/** A pipe OD the user entered for a piece with no catalog product. Never inferred from nominal size. */
+function enteredDiameter(s: WorkPackageSnapshot, pieceId: string) {
+  const f = savedFact(s, "pipeOutsideDiameter", pieceId);
+  return f?.confirmation === "confirmed" &&
+    typeof f.value === "number" &&
+    f.value > 0 &&
+    ["mm", "m", "in", "ft"].includes(f.unit ?? "")
+    ? known({ value: f.value, unit: f.unit as Length["unit"] }, [f.id])
+    : null;
+}
+/**
+ * A confirmed six-face box in the plan frame. With a confirmed `siteFrame` fact the faces were
+ * entered along a span (local X, Y, Z) in any length unit, and are transformed here; otherwise they
+ * are plan-frame millimetres. Anything missing, unconfirmed or inverted is unknown.
+ */
+export function boxFact(s: WorkPackageSnapshot, prefix: string): Fact<Box> {
   const fields = ["min.x", "min.y", "min.z", "max.x", "max.y", "max.z"];
   const fs = fields.map((k) => savedFact(s, `${prefix}.${k}`));
-  if (
-    fs.some(
-      (f) =>
-        !f ||
-        f.confirmation !== "confirmed" ||
-        typeof f.value !== "number" ||
-        f.unit !== "mm",
+  const frameFacts = [...s.detailing, ...s.siteFacts].filter(
+    (f) => f.field === SITE_FRAME_FIELD,
+  );
+  if (frameFacts.length > 1) throw new Error("Ambiguous fact: siteFrame");
+  const frameFact = frameFacts[0];
+  const mm = fs.map((f) =>
+    f && f.confirmation === "confirmed" && typeof f.value === "number"
+      ? toMillimetres(f.value, frameFact ? f.unit : f.unit === "mm" ? "mm" : null)
+      : null,
+  );
+  if (mm.some((v) => v === null)) return unknown();
+  const [a, b] = [0, 3].map((o) => ({ x: mm[o]!, y: mm[o + 1]!, z: mm[o + 2]! }));
+  if (!(a.x < b.x && a.y < b.y && a.z < b.z)) return unknown();
+  let box = { min: a, max: b };
+  const evidence = fs.map((f) => f!.id);
+  if (frameFact) {
+    if (
+      frameFact.confirmation !== "confirmed" ||
+      frameFact.subjectIds.length !== 1 ||
+      (frameFact.value !== "left" && frameFact.value !== "right")
     )
-  )
-    return unknown();
-  const point = (offset: number) => ({
-    x: fs[offset]!.value as number,
-    y: fs[offset + 1]!.value as number,
-    z: fs[offset + 2]!.value as number,
+      return unknown();
+    const frame = siteFrameFor(s.baselinePlan!, frameFact.subjectIds[0], frameFact.value);
+    if ("reason" in frame) return unknown();
+    const planBox = localBoxToPlan(frame, a, b);
+    if ("reason" in planBox) return unknown();
+    box = planBox;
+    evidence.push(frameFact.id);
+  }
+  const point = (p: { x: number; y: number; z: number }) => ({
+    ...p,
     unit: "mm" as const,
     frameId: s.baselinePlan!.coordinateFrame.id,
   });
   return known(
-    { kind: "axis_aligned_box", min: point(0), max: point(3) },
-    fs.map((f) => f!.id),
+    { kind: "axis_aligned_box", min: point(box.min), max: point(box.max) },
+    evidence,
   );
 }
 export function generationInput(s: WorkPackageSnapshot): GenerateInput {

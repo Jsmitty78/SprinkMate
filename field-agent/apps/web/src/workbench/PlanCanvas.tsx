@@ -185,7 +185,7 @@ export function PlanCanvas(props: CanvasProps) {
           <span><i className="lg-existing" />Existing route</span>
         </> : <span><i className="lg-route" />Run</span>}
         {baseShape.markers.some(m => m.context) || baseShape.segments.some(s => s.context) ? <span><i className="lg-context" />Retained context</span> : null}
-        {duct && <span><i className="lg-duct" />Duct (measured)</span>}
+        {duct && <span><i className="lg-duct" />Obstacle box</span>}
         {envelope && <span><i className="lg-env" />Work boundary</span>}
       </div>
       <div className="fa-zoom" role="toolbar" aria-label="Zoom">

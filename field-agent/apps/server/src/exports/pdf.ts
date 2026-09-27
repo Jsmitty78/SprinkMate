@@ -150,6 +150,16 @@ export async function renderPdf(s: ExportSnapshot, options: PdfOptions = {}): Pr
     }
     heading('Rule findings');
     table(['Finding / status', 'Subjects / finding / sources'], [150, 361], s.findings.map(r => [`${r.id}\n${r.status}`, `${r.subjectIds.join(', ')}\n${r.description}\nSources: ${r.sourceIds.join(', ') || 'none'}`]));
+    if (s.inputs?.length) {
+      heading('Recorded inputs and provenance');
+      paragraph('Values as saved in the work package. TEST ASSUMPTION rows are fictional values for exercising the software, not field observations; confirming them does not change that.');
+      const basis = { test_assumption: 'TEST ASSUMPTION', sample: 'SAMPLE', recorded: 'Recorded' } as const;
+      table(['Input / subjects', 'Value / unit', 'Basis / status / source'], [205, 100, 206], s.inputs.map(r => [
+        `${r.field}\n${r.subjectIds.length ? `Subjects: ${r.subjectIds.join(', ')}` : 'Package-wide'}`,
+        r.value === null ? 'UNKNOWN' : `${r.value}${r.unit ? ` ${r.unit}` : ''}`,
+        `${basis[r.basis]} | ${r.status}\n${r.source}${r.evidenceAssetId ? `\nEvidence file: ${r.evidenceAssetId}` : ''}`,
+      ]));
+    }
     heading('Source references');
     table(['Source ID', 'Document / reference'], [110, 401], s.sources.map(r => [r.id, `${r.title}\n${r.reference}`]));
     const range = doc.bufferedPageRange();

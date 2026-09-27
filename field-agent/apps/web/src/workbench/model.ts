@@ -1,4 +1,7 @@
-import type { PackageInputs, PackagePlan, PackageResult, WorkPackageSnapshot } from "@field-agent/core";
+import {
+  isAssumption, localBoxToPlan, siteFrameFor, SITE_FRAME_FIELD,
+  type PackageInputs, type PackagePlan, type PackageResult, type SiteFrame, type WorkPackageSnapshot,
+} from "@field-agent/core";
 import { lengthInput, parseLength } from "./format.js";
 
 /**
@@ -98,6 +101,35 @@ export function readBox(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">,
     box: complete ? { min: { x: values[0]!, y: values[1]!, z: values[2]! }, max: { x: values[3]!, y: values[4]!, z: values[5]! } } : null,
   };
 }
+/** The saved site frame (a span and a Y side), or null when boxes are entered in the plan frame. */
+export function siteFrameOf(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts" | "baselinePlan">): { fact: Fact; frame: SiteFrame | null; reason: string | null } | null {
+  const fact = [...s.detailing, ...s.siteFacts].find(f => f.field === SITE_FRAME_FIELD);
+  if (!fact) return null;
+  if (!s.baselinePlan || (fact.value !== "left" && fact.value !== "right")) return { fact, frame: null, reason: "Choose the span and side again" };
+  const frame = siteFrameFor(s.baselinePlan, fact.subjectIds[0] ?? "", fact.value);
+  return "reason" in frame ? { fact, frame: null, reason: frame.reason } : { fact, frame, reason: null };
+}
+/** A box in the plan frame for drawing on the plan, whatever frame it was entered in. */
+export function planBox(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts" | "baselinePlan">, prefix: string): Box | null {
+  const box = readBox(s, prefix).box;
+  const site = siteFrameOf(s);
+  if (!box || !site) return box;
+  if (!site.frame) return null;
+  const b = localBoxToPlan(site.frame, box.min, box.max);
+  return "reason" in b ? null : b;
+}
+/** Which faces a box still needs, in words a fitter would use. */
+export function boxGaps(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">, prefix: string, local: boolean): string[] {
+  const v = readBox(s, prefix).values;
+  const names = local ? ["along the span (X)", "across the span (Y)", "height (Z)"] : ["east-west (X)", "north-south (Y)", "height (Z)"];
+  const out: string[] = [];
+  names.forEach((n, i) => {
+    if (v[i] === null || v[i + 3] === null) out.push(`${n}: ${v[i] === null && v[i + 3] === null ? "both faces" : v[i] === null ? "the low face" : "the high face"} missing`);
+    else if (v[i]! >= v[i + 3]!) out.push(`${n}: the low face must be less than the high face`);
+  });
+  return out;
+}
+export const isTestAssumption = (f: Fact | undefined) => isAssumption(f?.source.description);
 function toMm(value: number, unit: string | null): number | null {
   const factor: Record<string, number> = { mm: 1, m: 1000, cm: 10, in: 25.4, ft: 304.8 };
   const f = factor[unit ?? "mm"];
@@ -317,9 +349,14 @@ export function requirements(s: WorkPackageSnapshot): Requirement[] {
   for (const b of PROJECT_BASIS) add({ id: b.field, group: "Project", label: b.label, done: isConfirmed(findFact(s, b.field)) });
   if (s.intent === "adapt_to_site") {
     add({ id: "change", group: "Site", label: "Affected pipe chosen", done: !!s.changeRequest?.affectedEntityIds.length });
-    add({ id: "duct", group: "Site", label: "Obstacle measured (all six faces)", done: readBox(s, "duct").confirmed });
-    add({ id: "workEnvelope", group: "Site", label: "Work boundary measured", done: readBox(s, "workEnvelope").confirmed });
-    add({ id: "requiredPipeClearance", group: "Site", label: "Required pipe clearance", done: isConfirmed(findFact(s, "requiredPipeClearance")) });
+    const site = siteFrameOf(s);
+    if (site) add({ id: "siteFrame", group: "Site", label: "Site frame pinned to a span", done: isConfirmed(site.fact) && !!site.frame, hint: site.reason ?? undefined });
+    for (const [prefix, label] of [["duct", "Obstacle"], ["workEnvelope", "Work boundary"]] as const) {
+      const gaps = readBox(s, prefix).values.some(v => v !== null) ? boxGaps(s, prefix, !!site) : [];
+      if (gaps.length) for (const g of gaps) add({ id: `${prefix}.${g}`, group: "Site", label: `${label} ${g}`, done: false });
+      else add({ id: prefix, group: "Site", label: `${label} entered and confirmed (all six faces)`, done: readBox(s, prefix).confirmed });
+    }
+    add({ id: "requiredPipeClearance", group: "Site", label: "Required surface clearance", done: isConfirmed(findFact(s, "requiredPipeClearance")) });
   }
   return out;
 }
