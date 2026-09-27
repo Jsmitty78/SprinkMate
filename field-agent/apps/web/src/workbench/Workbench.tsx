@@ -23,7 +23,6 @@ const TABS: Record<"prepare" | "adapt", Array<[Tab, string]>> = {
   prepare: [["inputs", "Inputs"], ["materials", "Materials & cuts"], ["assembly", "Assembly"], ["checks", "Checks"]],
   adapt: [["site", "Site evidence"], ["routes", "Routes"], ["package", "Revised package"], ["checks", "Checks"]],
 };
-const SELECT_QUESTION = /^Which alternative/;
 
 export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; onHome: () => void; onAuthFailure: () => void; header: (right: ReactNode, crumbs: ReactNode) => ReactNode }) {
   const pkg = usePackage(id, onAuthFailure);
@@ -67,7 +66,8 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
   try { toDrawing = adaptationFrame(s).toDrawing; } catch (e) { frameError = e instanceof Error ? e.message : String(e); }
   const duct = readBox(s, "duct").box, envelope = readBox(s, "workEnvelope").box;
   const sample = hasSampleData(s);
-  const openRequests = s.outputs.requests.filter(r => s.freshness.requests.find(f => f.id === r.id && f.current && !f.answered) && !SELECT_QUESTION.test(r.question));
+  const workflowQuestion = pkg.detail?.state?.latestRun?.id === s.run?.id ? pkg.detail?.state?.latestRun?.question : undefined;
+  const openRequests = s.outputs.requests.filter(r => s.freshness.requests.find(f => f.id === r.id && f.current && !f.answered) && !(workflowQuestion?.kind === "candidate_selection" && workflowQuestion.text === r.question));
   const selectedResult = resultFor(s, selectedId ?? undefined);
   const detailCurrent = !!pkg.detail?.current && pkg.detail.state?.inputRevision === s.inputRevision;
   const artifactsCurrent = s.outputs.artifacts.filter(a => s.freshness.artifacts.find(f => f.id === a.id)?.current);
@@ -204,6 +204,7 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
           Full quantities and delta cover this interval. Other drawing elements are retained context, not purchase items. Scope interfaces do not establish physical joints. Context clearance, closure, supports and hydraulics remain unresolved.
           {frameError && <p>{frameError}</p>}
         </Callout>}
+        {pkg.detail?.state?.latestRun?.id === s.run?.id && pkg.detail?.state?.latestRun?.explanation && <details className="fa-toast"><summary>Work explanation{!pkg.detail?.current ? " (earlier inputs)" : ""}</summary><p style={{ whiteSpace: "pre-wrap" }}>{pkg.detail?.state?.latestRun?.explanation}</p></details>}
         <RunBanner s={s} busy={pkg.busy} onCancel={() => run && void pkg.act("cancel", cur => api.cancel(cur.id, run.id))} />
         {pkg.error && <div className="fa-toast tone-red" role="alert"><Icon name="alert" size={16} />{pkg.error}<button type="button" onClick={pkg.clearError} aria-label="Dismiss"><Icon name="x" size={14} /></button></div>}
         {pkg.notice && <div className="fa-toast tone-blue" role="status">{pkg.notice}<button type="button" onClick={() => pkg.setNotice("")} aria-label="Dismiss"><Icon name="x" size={14} /></button></div>}

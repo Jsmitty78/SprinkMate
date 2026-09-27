@@ -1,6 +1,6 @@
 # 現場カメラエージェント
 
-The independent [Pi + JEV workflow connection](packages/workflow/README.md) provides the new two-scenario runner and reproducible connection fixtures. It is not yet connected to this older camera-workflow server/UI or the pending work-package services.
+The integrated [Pi + Astra + JEV workflow](packages/workflow/README.md) connects both work-package flows to the existing server, saved source library and PDF/CSV output. See the [current execution design](docs/pi-rule-selection-design.md).
 
 配管1区間の図面と観測を照合し、追加撮影・計測・人による確認を経て、根拠と未解決事項を含む変更検討資料を作ります。
 
@@ -95,9 +95,9 @@ pnpm replay
 
 `.data/field.sqlite` が業務状態の正本で、画像は `.data/assets/` です。仕事、操作の応答、イベント、画像参照を保存します。既存の業務データは保持します。
 
-設定: `FIELD_AGENT_DATA_DIR`、`FIELD_AGENT_TOKEN`、`FIELD_AGENT_HOST`、`PORT`。起動時のモデル認証は不要です。
+設定: `FIELD_AGENT_DATA_DIR`、`FIELD_AGENT_TOKEN`、`FIELD_AGENT_HOST`、`PORT`。PiのモデルはGPT-6 Astra固定です。`field-agent/.env.local` の `OPENAI_API_KEY` と `TYPESAFE_API_KEY` が継承環境変数より優先されます。秘密値をGitへ保存しないでください。
 
-Pi実行基盤とiOSクライアントは削除しました。旧DB内の実行履歴や観測の取得元は保持しますが、実行キューは再開しません。Web・CLI・APIで確認済み入力を検証します。
+旧カメラ用実行キューは再開しません。ワークパッケージはPi標準Agentを使い、Astraがツールを選び、JEVが検証ルールを選択します。旧DB内の実行履歴や観測の取得元は保持します。
 
 ## サンフランシスコの規格版の照合
 

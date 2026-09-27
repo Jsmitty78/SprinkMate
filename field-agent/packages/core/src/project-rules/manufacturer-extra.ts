@@ -502,3 +502,10 @@ export function evaluateManufacturerExtraRules(input: {
     evaluateBodyFinishAvailability(RULES[4]!, facts, extraFacts, projectId, context, evidence),
   ];
 }
+
+export function evaluateManufacturerExtraRule(input: Parameters<typeof evaluateManufacturerExtraRules>[0], ruleId: string): ProjectRuleResult[] {
+  const index = RULES.findIndex(rule => rule.id === ruleId);
+  const evaluator = [evaluateWrench, evaluateInstallationSequence, evaluateRecessedDistance, evaluateTemperatureApproval, evaluateBodyFinishAvailability][index];
+  if (!evaluator) throw new Error(`Unknown manufacturer rule: ${ruleId}`);
+  return [evaluator(RULES[index]!, input.facts, input.extraFacts, input.projectId, input.context, input.evidence)];
+}

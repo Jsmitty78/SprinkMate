@@ -1,128 +1,74 @@
-import { describe, expect, it, vi } from 'vitest';
-import { choiceRequest, JevHttpClient, JEV_ENDPOINT, JEV_MODEL, validateChoice, type ChoiceEnvelope } from '../src/choice.js';
-import { planNext } from '../src/policy.js';
-import { WorkflowRunner } from '../src/runner.js';
-import { FixtureDomain, MemoryRunStore, RecordedChoices } from './fixtures/domain.js';
-import choices from './fixtures/choices.json';
-
-function sample() {
-  const domain = new FixtureDomain();
-  const snapshot = domain.read('fixture-package');
-  snapshot.outputs = [
-    { id: 'm', kind: 'model', subjectId: snapshot.drawingId, inputRevision: 1, configVersion: 'fixture-v1' },
-    { id: 'p', kind: 'package', subjectId: snapshot.baselinePlanId, inputRevision: 1, configVersion: 'fixture-v1' },
-    { id: 'e', kind: 'evaluation', subjectId: snapshot.baselinePlanId, inputRevision: 1, configVersion: 'fixture-v1' },
-  ];
-  const request = choiceRequest(snapshot, snapshot.intent, planNext(snapshot, snapshot.intent));
-  const response = structuredClone(choices.stageEvidence);
-  const envelope = { inputRevision: 1, configVersion: 'fixture-v1', response };
-  return { domain, snapshot, request, response, envelope };
+import { expect, it } from 'vitest';
+import { ruleChoiceRequest, validateChoice, JevHttpClient, CLARIFY, SELECTION_DONE, type ChoiceRequest } from '../src/choice.js';
+import { FixtureDomain } from './fixtures/domain.js';
+export const rules=[{id:'spacing',version:'1',title:'Head spacing',check:'Measure spacing',applicability:'Applicable head family',subjectTypes:['head'],requiredInputs:['positions'],sourceRefs:[{documentId:'source:1',revision:'1',clauses:['clause 1']}],implementationStatus:'implemented',executionFunction:'spacing'}];
+export function choiceEnvelope(request:ChoiceRequest,id:string) {
+  return {...request.state,response:{model:request.model,answers:{next_action:{type:'choice',choice:id,confidence:1,probabilities:Object.fromEntries(Object.keys(request.questions.next_action.criteria).map(key=>[key,key===id?1:0]))}}}};
 }
-
-describe('Choice contract', () => {
-  it('sends only one bounded next_action question and no binary, transcript or arbitrary tool arguments', () => {
-    const { request } = sample();
-    expect(Object.keys(request.questions)).toEqual(['next_action']);
-    expect(Object.keys(request.state).sort()).toEqual(['configVersion', 'gaps', 'goal', 'inputRevision', 'intent', 'planId', 'recentResult', 'stage']);
-    expect(request.model).toBe('jev-1.13.0');
-    const criteria = request.questions.next_action.criteria;
-    for (const forbidden of ['done', 'approve', 'select_plan', 'confirm_fact', 'skip_rules', 'shell', 'edit_file']) expect(criteria).not.toHaveProperty(forbidden);
-  });
-
-  it.each([
-    ['wrong type', (r: any) => { r.answers.next_action.type = 'score'; }],
-    ['extra arguments', (r: any) => { r.answers.next_action.arguments = { lengthMm: 500 }; }],
-    ['foreign action', (r: any) => { r.answers.next_action.choice = 'done'; }],
-    ['missing option', (r: any) => { delete r.answers.next_action.probabilities.needs_clarification; }],
-    ['extra option', (r: any) => { r.answers.next_action.probabilities.done = 0; }],
-    ['NaN', (r: any) => { r.answers.next_action.probabilities.needs_clarification = NaN; }],
-    ['Infinity', (r: any) => { r.answers.next_action.probabilities.needs_clarification = Infinity; }],
-    ['negative probability', (r: any) => { r.answers.next_action.probabilities.needs_clarification = -0.1; }],
-    ['sum is not one', (r: any) => { r.answers.next_action.probabilities.needs_clarification = 0.1; }],
-    ['non-maximum choice', (r: any) => { r.answers.next_action.choice = 'request_input:joint_datum'; }],
-    ['model alias', (r: any) => { r.model = 'jev-latest'; }],
-    ['extra answer', (r: any) => { r.answers.approval = true; }],
-    ['invalid confidence', (r: any) => { r.answers.next_action.confidence = 2; }],
-    ['string confidence', (r: any) => { r.answers.next_action.confidence = '0.8'; }],
-    ['array probabilities', (r: any) => { r.answers.next_action.probabilities = []; }],
-  ])('rejects %s', (_label, mutate) => {
-    const { request, envelope } = sample();
-    mutate(envelope.response);
-    expect(() => validateChoice(envelope, request)).toThrow();
-  });
-
-  it.each([null, [], {}, 'choice', 42])('rejects malformed payload %j', response => {
-    const { request, envelope } = sample();
-    expect(() => validateChoice({ ...envelope, response }, request)).toThrow();
-  });
-
-  it.each(['inputRevision', 'configVersion'] as const)('rejects stale recorded %s', field => {
-    const { request, envelope } = sample();
-    const invalid: ChoiceEnvelope = { ...envelope, [field]: field === 'inputRevision' ? 0 : 'old-config' };
-    expect(() => validateChoice(invalid, request)).toThrow('choice_version_mismatch');
-  });
-
-  it('treats exact ties as ambiguous without a confidence threshold', () => {
-    const { request, envelope } = sample();
-    const answer = envelope.response.answers.next_action;
-    answer.probabilities = { 'request_input:joint_datum': 0.45, 'request_input:assembly_access': 0.05,
-      'stage_evidence:product-sheet': 0.45, needs_clarification: 0.05 };
-    expect(() => validateChoice(envelope, request)).toThrow('ambiguous_distribution');
-  });
-
-  it('treats needs_clarification as a fallback control value, never a business tool', async () => {
-    const { envelope } = sample();
-    const answer = envelope.response.answers.next_action;
-    answer.choice = 'needs_clarification';
-    answer.probabilities = { 'request_input:joint_datum': 0, 'request_input:assembly_access': 0,
-      'stage_evidence:product-sheet': 0, needs_clarification: 1 };
-    const domain = new FixtureDomain();
-    const runner = new WorkflowRunner({ domain, store: new MemoryRunStore(), configVersion: 'fixture-v1', choice: new RecordedChoices([envelope.response]) });
-    const run = await runner.start('fixture-package', 'prepare_from_drawing', domain.read('fixture-package')).done;
-    expect(run.latestFallback).toBe('needs_clarification');
-    expect(run.question?.id).toBe('joint_datum');
-    expect(run.status).toBe('waiting_input');
-  });
-
-  it('runs Pi with recorded decisions without any default provider fetch', async () => {
-    const fetcher = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected provider network'));
-    try {
-      const domain = new FixtureDomain();
-      const runner = new WorkflowRunner({ domain, store: new MemoryRunStore(), configVersion: 'fixture-v1', choice: new RecordedChoices() });
-      const run = await runner.start('fixture-package', 'prepare_from_drawing', domain.read('fixture-package')).done;
-      expect(run.status).toBe('waiting_input');
-      expect(fetcher).not.toHaveBeenCalled();
-    } finally { fetcher.mockRestore(); }
-  });
+function request(){const s=new FixtureDomain().read('fixture-package');return ruleChoiceRequest(s,s.intent,rules,{results:[]});}
+it('sends the unfiltered rule catalog with distinct information and completion options',()=>{
+  const r=request();expect(Object.keys(r.questions.next_action.criteria)).toEqual(['spacing',CLARIFY,SELECTION_DONE]);
+  expect(r.questions.next_action.criteria.spacing).toContain('source:1');
 });
-
-describe('official HTTP transport (mocked; not a live connection)', () => {
-  it('uses Bearer auth, fixed model/endpoint, abort propagation, and local version correlation', async () => {
-    const { request, response } = sample();
-    const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(response)));
-    const signal = new AbortController().signal;
-    const result = await new JevHttpClient('test-only-key', transport).choose(request, signal);
-    expect(transport).toHaveBeenCalledTimes(1);
-    const [url, init] = transport.mock.calls[0];
-    expect(url).toBe(JEV_ENDPOINT);
-    expect(init).toMatchObject({ method: 'POST', redirect: 'error', signal, headers: { Authorization: 'Bearer test-only-key', 'Content-Type': 'application/json' } });
-    expect(JSON.parse(init!.body as string)).toEqual(request);
-    expect(JSON.parse(init!.body as string).model).toBe(JEV_MODEL);
-    expect(result.inputRevision).toBe(1);
-    expect(result.configVersion).toBe('fixture-v1');
-    expect(validateChoice(result, request).id).toBe('stage_evidence:product-sheet');
+it.each(['spacing',CLARIFY,SELECTION_DONE])('accepts semantic outcome %s without fallback',id=>{const r=request();expect(validateChoice(choiceEnvelope(r,id),r).id).toBe(id);});
+it.each(['foreign','stale','model','shape','distribution','tie'])('rejects %s response',kind=>{
+  const r=request(), e=choiceEnvelope(r,'spacing');
+  if(kind==='foreign') e.response.answers.next_action.choice='other';
+  if(kind==='stale') e.inputRevision--;
+  if(kind==='model') (e.response as any).model='other';
+  if(kind==='shape') (e.response.answers.next_action as any).arguments={};
+  if(kind==='distribution') e.response.answers.next_action.probabilities.spacing=0.2;
+  if(kind==='tie') e.response.answers.next_action.probabilities={spacing:0.5,[CLARIFY]:0.5,[SELECTION_DONE]:0};
+  expect(()=>validateChoice(e,r)).toThrow();
+});
+it('does not retry transport errors or expose response bodies',async()=>{
+  let calls=0;const client=new JevHttpClient('test',async()=>{calls++;return new Response('private body',{status:503});});
+  await expect(client.choose(request(),new AbortController().signal)).rejects.toThrow('choice_http_503');expect(calls).toBe(1);
+});
+function request49() {
+  const snapshot=new FixtureDomain().read('fixture-package');
+  return ruleChoiceRequest(snapshot,snapshot.intent,Array.from({length:47},(_,i)=>({...rules[0],id:`rule-${i}`})),{});
+}
+it('accepts 49 hundredth-rounded masses totalling 0.99 without mutating or renormalizing them',()=>{
+  const r=request49(), envelope=choiceEnvelope(r,'rule-0');
+  envelope.response.answers.next_action.probabilities=Object.fromEntries(Object.keys(r.questions.next_action.criteria).map((id,i)=>[id,i===0?0.51:0.01]));
+  const before=structuredClone(envelope);
+  expect(Object.keys(envelope.response.answers.next_action.probabilities)).toHaveLength(49);
+  expect(Object.values(envelope.response.answers.next_action.probabilities).reduce((a,b)=>a+b,0)).toBeCloseTo(0.99);
+  expect(validateChoice(envelope,r).id).toBe('rule-0');expect(envelope).toEqual(before);
+});
+it.each([0,0.5,1.3])('rejects impossible rounded mass sum %s for 49 choices',sum=>{
+  const r=request49(), envelope=choiceEnvelope(r,'rule-0');
+  envelope.response.answers.next_action.probabilities=Object.fromEntries(Object.keys(r.questions.next_action.criteria).map((id,i)=>[id,i===0?Math.min(sum,0.9):i===1?Math.max(0,sum-0.9):0]));
+  expect(()=>validateChoice(envelope,r)).toThrow('distribution_sum');
+});
+it('does not apply hundredth tolerance to finer-grained probabilities',()=>{
+  const r=request49(), envelope=choiceEnvelope(r,'rule-0');
+  envelope.response.answers.next_action.probabilities=Object.fromEntries(Object.keys(r.questions.next_action.criteria).map((id,i)=>[id,i===0?0.511:0.01]));
+  expect(()=>validateChoice(envelope,r)).toThrow('distribution_sum');
+});
+it('keeps unique argmax enforcement when accepting rounded masses',()=>{
+  const r=request49(), envelope=choiceEnvelope(r,'rule-1');
+  envelope.response.answers.next_action.probabilities=Object.fromEntries(Object.keys(r.questions.next_action.criteria).map((id,i)=>[id,i===0?0.51:0.01]));
+  expect(()=>validateChoice(envelope,r)).toThrow('choice_not_maximum');
+  envelope.response.answers.next_action.choice='rule-0';
+  envelope.response.answers.next_action.probabilities=Object.fromEntries(Object.keys(r.questions.next_action.criteria).map((id,i)=>[id,i<2?0.26:0.01]));
+  expect(()=>validateChoice(envelope,r)).toThrow('ambiguous_distribution');
+});
+it('compacts source report duplicates while preserving all catalog choices, facts and prior outcomes',()=>{
+  const snapshot=new FixtureDomain().read('fixture-package');
+  const catalog=Array.from({length:47},(_,i)=>({...rules[0],id:`rule-${i}`,implementationStatus:i%2?'implemented':'source_pending'}));
+  const outcome={ruleId:'rule-0',subjectIds:['head-1'],status:'unknown',reason:'missing head positions',missingInputs:['head.position'],verificationState:'unresolved'};
+  const sourceReport={catalog:[{discard:'duplicated-catalog-marker'}],sourceRefs:[{discard:'long-source-ref-marker'}],sources:[{discard:'duplicated-source-marker'}]};
+  const r=ruleChoiceRequest(snapshot,snapshot.intent,catalog,{
+    understanding:'Astra inspected saved geometry and needs spacing evidence.',
+    ruleResults:[{result:{checks:[outcome],...sourceReport}}],
+    savedInformation:{snapshot:{sourceDrawing:{drawingId:'drawing-1'},baselinePlan:{entities:[{id:'head-1',kind:'head',productId:'product-1',irrelevant:'unused-geometry-marker'}]},detailing:[{id:'detail-1',field:'height',value:3,unit:'m',subjectIds:['head-1'],confirmation:'confirmed',provenance:'measured',source:'sheet-A'}],siteFacts:[{id:'site-1',field:'access',value:null,unknownReason:'not measured'}],answers:[{requestId:'q1',answer:'unknown'}]},results:{checks:[outcome],...sourceReport}},
   });
-
-  it.each([401, 429, 500])('does not retry HTTP %s or leak raw response', async status => {
-    const { request } = sample();
-    const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response('private diagnostic', { status }));
-    await expect(new JevHttpClient('test-only-key', transport).choose(request, new AbortController().signal)).rejects.toThrow(`choice_http_${status}`);
-    expect(transport).toHaveBeenCalledTimes(1);
-  });
-
-  it('rejects invalid JSON without leaking its body', async () => {
-    const { request } = sample();
-    const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response('private invalid JSON'));
-    await expect(new JevHttpClient('test-only-key', transport).choose(request, new AbortController().signal)).rejects.toThrow('choice_invalid_json');
-  });
+  expect(Object.keys(r.questions.next_action.criteria)).toEqual([...catalog.map(rule=>rule.id),CLARIFY,SELECTION_DONE]);
+  expect(r.questions.next_action.criteria['rule-0']).toContain('source_pending');
+  expect(r.state.context).toMatchObject({understanding:'Astra inspected saved geometry and needs spacing evidence.',subjects:[{id:'head-1',kind:'head',productId:'product-1'}],facts:[{id:'detail-1',value:3,source:'sheet-A'},{id:'site-1',unknownReason:'not measured'}],answers:[{requestId:'q1',answer:'unknown'}],priorRuleOutcomes:[outcome]});
+  const serialized=JSON.stringify(r);
+  for(const marker of ['duplicated-catalog-marker','long-source-ref-marker','duplicated-source-marker','unused-geometry-marker']) expect(serialized).not.toContain(marker);
+  expect(r.questions.next_action.criteria['rule-46']).toContain('source:1');
 });

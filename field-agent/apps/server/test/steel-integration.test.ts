@@ -1,3 +1,4 @@
+import { integrationStream, integrationChoice } from "../../../packages/workflow/test/integration-stream.js";
 import { afterEach, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -5,7 +6,7 @@ import { join } from "node:path";
 import type { PackageInputs, WorkPackageSnapshot } from "@field-agent/core";
 import { deriveWorkPackage, fabricationCatalog, STEEL_PAIRS } from "@field-agent/fabrication";
 import { fabricationInput, generationInput, planningPlan } from "../src/integration/model.js";
-import { evaluateProfile } from "../src/integration/profiles.js";
+import { deriveFabricationProfile } from "../src/integration/profiles.js";
 import { integratedInput } from "./fixtures/integrated-package.js";
 import { FieldService } from "../src/service.js";
 import { WorkPackageStore } from "../src/work-packages/store.js";
@@ -60,10 +61,10 @@ it("carries scoped steel datums through production model, geometry and scenario 
   const output = deriveWorkPackage(input, catalog), plan = planningPlan(s, input);
   expect(output.cuts.map(c => c.cutLength.value)).toEqual([0.56445, 0.41505]);
   expect(plan.fittings[0].ports[1].insertionOrThreadMakeup.value?.value).toBe(0.015);
-  const profile = evaluateProfile(s, input, output, plan, plan);
+  const profile = deriveFabricationProfile(s, input, output, plan, plan);
   expect(profile.project.basis).toBeUndefined();
   expect(profile.checks.some(c => /2025/.test(c.reason))).toBe(false);
-  expect(profile.excluded.map(p => p.id)).toContain("sf-local-change-2025");
+  expect(profile.excluded).toEqual([]);
   expect(profile.checks.filter(c => c.id.startsWith("PRODUCT-SUITABILITY")).every(c => c.status === "unknown")).toBe(true);
   s.baselinePlan!.entities.forEach(e => e.productId = e.kind === "pipe" ? STEEL_PAIRS[1].pipeId : STEEL_PAIRS[1].elbowId);
   expect(deriveWorkPackage(fabricationInput(s, s.baselinePlan!), catalog).cuts.every(c => c.cutLength.value === null)).toBe(true);
@@ -96,7 +97,7 @@ it("retains R2 source-only span/context and reports an explicit CPVC material co
   expect(out.joints).toEqual([]); // Scope stations do not establish physical joint identities/counts.
   input.pieces[0].productId = "spears/CP-010";
   const changed = deriveWorkPackage(input, catalog), plan = planningPlan(s, input);
-  expect(evaluateProfile(s, input, changed, plan, plan).checks.find(c => c.id === "MATERIAL-CONFLICT-pipe")?.status).toBe("fail");
+  expect(deriveFabricationProfile(s, input, changed, plan, plan).checks.find(c => c.id === "MATERIAL-CONFLICT-pipe")?.status).toBe("fail");
 });
 
 it("uses selected target product for generation without inventing steel makeup", () => {
@@ -109,7 +110,7 @@ it("uses selected target product for generation without inventing steel makeup",
 
 it.each(["source-only", "synthetic-steel"])("runs and exports %s through real persisted services without SF or cure defaults", async kind => {
   const dir = mkdtempSync(join(tmpdir(), "steel-production-")), field = new FieldService(dir);
-  const t = createIntegratedServices(new WorkPackageStore(field.store.db), dir);
+  const t = createIntegratedServices(new WorkPackageStore(field.store.db), dir, {testStream:integrationStream, choice:integrationChoice});
   cleanup.push(() => { t.packages.close(); field.store.close(); rmSync(dir, { recursive: true, force: true }); });
   let s = t.packages.create({ projectId: "idaho", intent: "prepare_from_drawing", title: "Source-only API contract test" });
   const asset = await t.packages.upload(s.id, Buffer.from("%PDF-1.4\nfixture"), "application/pdf", "source.pdf");
@@ -137,6 +138,8 @@ it.each(["source-only", "synthetic-steel"])("runs and exports %s through real pe
   }
   expect(result.profile?.project.basis).toBeUndefined();
   expect(s.outputs.requests.some(r => /cure/i.test(r.question))).toBe(false);
+  const preview = (await import("../src/integration/snapshot.js")).exportSnapshot(s, t.detailStore.get(s.id)!)!;
+  (await import("../src/exports/snapshot.js")).validateSnapshot(preview);
   await run("export_selected_package");
   expect(s.run?.status, s.run?.stopReason ?? "").toBe("completed");
   expect(s.outputs.artifacts).toHaveLength(4);

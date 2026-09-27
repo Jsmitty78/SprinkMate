@@ -1,4 +1,4 @@
-import { ADOPTED_RULES, validateRules } from "./head-validator.js";
+import { ADOPTED_RULES, validateRule, validateRules } from "./head-validator.js";
 import { emptyFacts, type Evidence, type Fact, type HeadFacts, type RuleContext, type RuleResult, type SourceReference } from "./types.js";
 import { resolveSfNfpa13Edition, type SfProjectFacts } from "./sf-project-basis.js";
 import {
@@ -22,10 +22,10 @@ import {
 } from "./project-contract.js";
 import { ProjectEvaluationInputSchema } from "./project-schemas.js";
 import { Check, Errors } from "typebox/value";
-import { evaluateManufacturerExtraRules } from "./project-rules/manufacturer-extra.js";
-import { evaluateSfSupports2025 } from "./project-rules/sf-supports-2025.js";
-import { evaluateSfLocalChangeRecords } from "./project-rules/sf-local-change-records.js";
-import { evaluateLocalChange } from "./project-rules/local-change.js";
+import { evaluateManufacturerExtraRule, evaluateManufacturerExtraRules } from "./project-rules/manufacturer-extra.js";
+import { evaluateSfSupportRule, evaluateSfSupports2025 } from "./project-rules/sf-supports-2025.js";
+import { evaluateSfLocalChangeRecordRule, evaluateSfLocalChangeRecords } from "./project-rules/sf-local-change-records.js";
+import { localChangeRuleSources, evaluateLocalChangeRule, evaluateLocalChange } from "./project-rules/local-change.js";
 import { LocalGeometryInputError } from "./local-change-geometry.js";
 
 const SF_BASIS_SOURCE: ProjectSourceReference = {
@@ -577,5 +577,179 @@ export function evaluateProject(input: unknown): ProjectEvaluationOutput {
     coverage: coverageCatalog(selectedPacks),
     missingInputs: unique([...missingInputs, ...(selectedPacks.has("sf-local-change-2025") && !request.localChange ? ["localChange"] : []), ...rules.filter(rule => rule.packId === "sf-local-change-2025").flatMap(rule => rule.missingInputs)]),
     ...(localChangeReport ? { localChange: localChangeReport } : {}),
+  };
+}
+
+export interface ProjectRuleCatalogEntry {
+  id: string;
+  version: string;
+  title: string;
+  check: string;
+  applicability: string;
+  subjectTypes: string[];
+  requiredInputs: string[];
+  sourceRefs: ProjectSourceReference[];
+  implementationStatus: CoverageEntry["state"];
+  executionFunction: string | null;
+}
+
+const LOCAL_RULES = [
+  ["SFFD_LOCAL_CHANGE_SCOPE_V1", "San Francisco local-change scope", "scope", "changeRequest"],
+  ["SFFD_LOCAL_CHANGE_APPROVED_BASELINE_V1", "Approved baseline drawing revision", "plans", "approvedDrawing,baseline.sourceDrawing"],
+  ["SFFD_LOCAL_CHANGE_DRAWING_LINEAGE_V1", "Proposed drawing revision lineage", "plans", "approvedDrawing,proposed.sourceDrawing,revisedDrawing"],
+  ["SFFD_LOCAL_CHANGE_ROUTE_GEOMETRY_V1", "Straight-pipe cut lengths and geometry delta", "geometry", "baseline,proposed"],
+  ["LOCAL_CHANGE_STRAIGHT_PIPE_DUCT_ENVELOPE_V1", "Straight-pipe envelope versus modeled ducts", "geometry", "baseline,proposed,changeRequest.impactNeighborhood"],
+  ["LOCAL_CHANGE_CONFIRMED_INTERFACE_SCREEN_V1", "Nominal-size and connector interface mismatch screen", "geometry", "proposed"],
+  ["LOCAL_CHANGE_BOM_ACCOUNTING_V1", "Plan bill-of-material reconciliation", "geometry", "baseline,proposed"],
+  ["LOCAL_CHANGE_HEAD_NEIGHBORHOOD_V1", "Head positions and impact neighborhood", "plans", "baseline,proposed,changeRequest.impactNeighborhood"],
+  ["SFFD_AB204_HEAD_RELOCATION_I14C_V1", "Relocated head on approved revised plan", "plans", "baseline,proposed,revisedDrawing,changeRequest.impactNeighborhood"],
+  ["SFFD_AB204_HYDRAULIC_RECALC_I22A2_V1", "Existing-system hydraulic recalculation triggers and lineage", "hydraulic", "changeRequest,hydraulic"],
+  ["SFFD_AB204_FIELD_DEVIATION_I14E_V1", "Actual field deviation from approved plan", "plans", "changeRequest.fieldInstallationDeviationFromApprovedPlan"],
+  ["SFFD_AB204_NO_REINSTALL_REMOVED_OR_WELDED_SPRINKLER_I14D_V1", "Removed or welded threaded sprinkler reuse", "plans", "changeRequest,proposed"],
+  ["SFFD_AB204_REMOVE_UNUSED_EXCESS_PIPE_I14A_V1", "Unused excess piping in a modification", "plans", "changeRequest,baseline,proposed"],
+  ["SFFD_AB204_EXISTING_CONFIGURATION_RISER_FOR_ADDITIONS_I15_V1", "Existing configuration and riser connection for additions", "plans", "changeRequest,baseline,proposed"],
+] as const;
+const HEAD_INPUTS: Record<string, string[]> = {
+  TFP171_INSTALL_ORIENTATION_V2: ["orientation", "verticalReference"],
+  TFP171_RECESSED_ESCUTCHEON_V1: ["escutcheon"],
+  TFP171_INSTALLATION_WRENCH_V1: ["installationWrench"],
+  TFP171_NPT_INSTALLATION_TORQUE_V1: ["threadStandard", "installationTorque"],
+  TFP171_RETROFIT_ONLY_V1: ["threadStandard", "construction"],
+  TFP171_BULB_CONDITION_V1: ["bulbCondition"],
+  TFP171_FACTORY_FINISH_V1: ["fieldFinish"],
+  TFP171_LEAKAGE_V1: ["leakage"],
+  TFP171_VISIBLE_CORROSION_V1: ["corrosion"],
+  TFP171_WORKING_PRESSURE_V1: ["threadStandard", "workingPressure", "pressureBasis", "approvalBasis"],
+};
+
+const EXTRA_INPUTS: Record<string, string[]> = {
+  TFP171_INSTALLATION_WRENCH_FLATS_V1: ["installationWrenchEngagementArea"],
+  TFP171_INSTALL_SEALANT_HANDTIGHTEN_SEQUENCE_V1: ["pipeThreadSealantAppliedBeforeHandTightening", "headHandTightenedBeforeWrenchTightening", "mountingPlateInstalledBeforeHandTightening"],
+  TFP171_RECESSED_FITTING_SURFACE_DIMENSION_V1: ["recessedFittingFaceToMountingSurfaceInterval"],
+  TFP171_LISTED_TEMPERATURE_APPROVAL_COMBINATION_V1: ["manufacturerTemperatureRating", "manufacturerListedAgency"],
+  TFP171_SPRINKLER_BODY_FINISH_TEMPERATURE_AVAILABILITY_V1: ["manufacturerTemperatureRating", "sprinklerBodyFinish", "sprinklerSalesHemisphere"],
+};
+
+/** Full, unfiltered selection catalog. Applicability is checked by the chosen script. */
+export function getProjectRuleCatalog(): ProjectRuleCatalogEntry[] {
+  const entries = coverageCatalog(new Set()).filter(entry => entry.area !== "local-change" || entry.state !== "supported");
+  for (const rule of ADOPTED_RULES) if (!entries.some(entry => entry.id === rule.id)) entries.push({
+    id: rule.id, title: rule.title, area: "tfp171", state: "supported", reason: rule.scope,
+    sourceRefs: rule.sources.map(item => toProjectSourceReference(item, "TFP171")), packId: "tyco-tfp171-head", selected: false,
+  });
+  const catalog = entries.map((entry): ProjectRuleCatalogEntry => {
+    const head = entry.packId?.startsWith("tyco-");
+    const support = entry.packId === "sf-supports-2025";
+    const inputs = head ? ["heads[].facts.model", "heads[].facts.installation", "heads[].facts.mounting", ...(HEAD_INPUTS[entry.id] ?? []).map(key => `heads[].facts.${key}`), ...(EXTRA_INPUTS[entry.id] ?? []).map(key => `heads[].manufacturerExtra.${key}`)]
+      : support ? ["facts.sfNfpa13", "supports[].facts.use", ...(entry.id.includes("POWDER") ? ["supports[].facts.fastenerType", "supports[].facts.installationState", "supports[].facts.pipeMovedOrAltered", "supports[].facts.hangerHoldsProperly"] : ["supports[].facts.substrate", "supports[].facts.crackedConcreteQualification"])]
+      : entry.packId === "sf-project-basis" ? ["facts.sfNfpa13"] : [];
+    return {
+      id: entry.id, version: entry.id.match(/_V(\d+)$/)?.[1] ?? "1", title: entry.title,
+      check: entry.reason, applicability: entry.reason,
+      subjectTypes: [head ? "head" : support ? "support" : "project"],
+      requiredInputs: [...inputs, "evidence"], sourceRefs: [...entry.sourceRefs],
+      implementationStatus: entry.state,
+      executionFunction: entry.state === "supported" ? "executeProjectRule" : null,
+    };
+  });
+  for (const [id, title, , paths] of LOCAL_RULES) catalog.push({
+    id, version: "1", title, check: `${title}; bounded verification only, not design approval.`,
+    applicability: id.startsWith("SFFD_") ? "Confirmed San Francisco local-change scope and current revision-linked evidence; the selected script checks these conditions." : "A local-change baseline and proposed plan with confirmed facts and current revision-linked evidence. Geometry supports straight axis-parallel pipe and modeled duct boxes only.",
+    subjectTypes: ["local_change"], requiredInputs: [...paths.split(",").map(path => `localChange.${path}`), "evidence"],
+    sourceRefs: localChangeRuleSources(id),
+    implementationStatus: "supported", executionFunction: "executeProjectRule",
+  });
+  return catalog;
+}
+
+export interface ProjectRuleExecutionOutput extends ProjectEvaluationOutput {
+  requiredArtifacts: NonNullable<ProjectEvaluationOutput["localChange"]>["requiredArtifacts"];
+  ruleId: string;
+  implementationStatus: CoverageEntry["state"];
+  executionStatus: "executed" | "unimplemented" | "source_pending";
+  reason: string;
+}
+
+/** Execute exactly the chosen rule, without jurisdiction/product preselection or a pack-wide run. */
+export function executeProjectRule(input: unknown, ruleId: string): ProjectRuleExecutionOutput {
+  validateRequest(input);
+  const request = input;
+  const entry = getProjectRuleCatalog().find(item => item.id === ruleId);
+  if (!entry) throw new ProjectInputError("invalid_input", `Unknown rule: ${ruleId}.`, ["ruleId"]);
+  const rules: ProjectRuleResult[] = [];
+  const requiredArtifacts: ProjectRuleExecutionOutput["requiredArtifacts"] = [];
+  let basis: ProjectBasisResult | undefined;
+  const missingInputs: string[] = [];
+  if (entry.implementationStatus === "supported") {
+    if (ruleId === "N01_SF_EDITION_BASIS") basis = mapBasis(request);
+    else if (ADOPTED_RULES.some(rule => rule.id === ruleId)) {
+      if (!request.heads?.length) missingInputs.push("heads");
+      for (const head of request.heads ?? []) {
+        const normalized = normalizeHeadFacts(head.facts);
+        const evaluated = validateRule(ruleId, normalized.facts, evidenceContext(request, head.id));
+        const gated = withEvidenceKindGates(request, head, head.facts ?? {}, evaluated);
+        const trace = ruleId === "TFP171_NPT_INSTALLATION_TORQUE_V1" ? normalized.torque : ruleId === "TFP171_WORKING_PRESSURE_V1" ? normalized.pressure : undefined;
+        const reconciled = reconcileQuantityRule(gated, trace, head);
+        rules.push(mapHeadResult(reconciled.result, head.id, {
+          ...(ruleId === "TFP171_NPT_INSTALLATION_TORQUE_V1" && reconciled.trace ? { torque: reconciled.trace } : {}),
+          ...(ruleId === "TFP171_WORKING_PRESSURE_V1" && reconciled.trace ? { pressure: reconciled.trace } : {}),
+        }));
+      }
+    } else if (ruleId.startsWith("TFP171_")) {
+      if (!request.heads?.length) missingInputs.push("heads");
+      for (const head of request.heads ?? []) rules.push(...evaluateManufacturerExtraRule({
+        projectId: request.project.id, facts: normalizeHeadFacts(head.facts).facts, extraFacts: head.manufacturerExtra ?? {},
+        context: evidenceContext(request, head.id), evidence: request.evidence ?? [],
+      }, ruleId));
+    } else if (ruleId.startsWith("SFFD_AB415_")) {
+      if (!request.supports?.length) missingInputs.push("supports");
+      rules.push(...evaluateSfSupportRule(request, ruleId));
+    } else if (!request.localChange) missingInputs.push("localChange");
+    else {
+      try {
+        const recordIds = LOCAL_RULES.slice(-3).map(item => item[0]) as readonly string[];
+        if (recordIds.includes(ruleId)) {
+          const gate = evaluateLocalChangeRule(request, "SFFD_LOCAL_CHANGE_SCOPE_V1").rules[0]!;
+          if (gate.verificationState !== "verified") rules.push({ ...gate, ruleId, title: entry.title });
+          else rules.push(...evaluateSfLocalChangeRecordRule({ input: request.localChange, projectId: request.project.id, taskRevision: request.project.revision, evidence: request.evidence ?? [] }, ruleId));
+        } else {
+          const selected = evaluateLocalChangeRule(request, ruleId);
+          rules.push(...selected.rules);
+          requiredArtifacts.push(...selected.requiredArtifacts);
+        }
+      } catch (error) {
+        if (error instanceof LocalGeometryInputError) throw new ProjectInputError("invalid_input", error.message, [`localChange.${error.path}`]);
+        throw error;
+      }
+    }
+  }
+  if (entry.implementationStatus === "supported" && !rules.length && !basis) {
+    if (!missingInputs.length) missingInputs.push("selectedRule.enumeratedSubjects");
+    rules.push({
+      ruleId, title: entry.title, scope: entry.applicability,
+      packId: ruleId.startsWith("TFP171_") ? "tyco-tfp171-head" : ruleId.startsWith("SFFD_AB415_") ? "sf-supports-2025" : "sf-local-change-2025",
+      targetId: request.project.id, subjectIds: [request.project.id], requirementLevel: "requirement",
+      status: "unknown", applicability: "unknown", verificationState: "input_missing",
+      reason: "No subject result was established for the selected rule. Confirm the relevant targets and their applicability; an empty target list is not a pass.",
+      missingInputs: [...missingInputs], evidenceIds: [], sourceRefs: entry.sourceRefs,
+      versions: { taskRevision: request.project.revision, ruleVersion: entry.version, sourceRevision: entry.sourceRefs[0]?.revision ?? "unavailable" },
+    });
+  }
+  if (entry.implementationStatus !== "supported") rules.push({
+    ruleId, title: entry.title, scope: entry.applicability, packId: ruleId.startsWith("TFP171_") ? "tyco-tfp171-extra" : "sf-local-change-2025",
+    targetId: request.project.id, subjectIds: [request.project.id], requirementLevel: "requirement",
+    status: "unknown", applicability: "unknown", verificationState: entry.implementationStatus,
+    reason: entry.check, missingInputs: [entry.implementationStatus === "source_pending" ? "governingPrimarySource" : "ruleImplementation"],
+    evidenceIds: [], sourceRefs: entry.sourceRefs,
+    versions: { taskRevision: request.project.revision, ruleVersion: entry.version, sourceRevision: entry.sourceRefs[0]?.revision ?? "unavailable" },
+  });
+  return {
+    projectId: request.project.id, taskRevision: request.project.revision, asOf: request.project.asOf,
+    ruleId, requiredArtifacts, implementationStatus: entry.implementationStatus,
+    executionStatus: entry.implementationStatus === "supported" ? "executed" : entry.implementationStatus,
+    reason: entry.implementationStatus === "supported" ? "Only the selected bounded rule was evaluated. This is not a completeness or construction-approval determination." : entry.check,
+    rules, ...(basis ? { basis } : {}),
+    coverage: getProjectRuleCatalog().map(item => ({ id: item.id, title: item.title, area: item.id.startsWith("TFP171_") ? "tfp171" as const : /^N\d/.test(item.id) ? "nfpa13" as const : item.id.startsWith("SFFD_") ? "sf-admin" as const : "local-change" as const, state: item.implementationStatus, reason: item.check, sourceRefs: item.sourceRefs, selected: item.id === ruleId })),
+    missingInputs: unique([...missingInputs, ...(basis?.missingInputs ?? []), ...rules.flatMap(rule => rule.missingInputs)]),
   };
 }

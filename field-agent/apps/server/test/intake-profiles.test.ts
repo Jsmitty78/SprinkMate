@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import type { WorkPackageSnapshot } from "@field-agent/core";
 import { deriveWorkPackage, fabricationCatalog, STEEL_PAIRS } from "@field-agent/fabrication";
 import { fabricationInput, planningPlan } from "../src/integration/model.js";
-import { evaluateProfile } from "../src/integration/profiles.js";
+import { deriveFabricationProfile } from "../src/integration/profiles.js";
 
 async function saved() {
   return JSON.parse(await readFile(new URL("./fixtures/fs01-intake-snapshot.json", import.meta.url), "utf8")) as WorkPackageSnapshot;
@@ -13,7 +13,7 @@ function evaluate(s: WorkPackageSnapshot, product: string | null) {
   const input = fabricationInput(s, s.baselinePlan!);
   const output = deriveWorkPackage(input, fabricationCatalog(s.configVersion));
   const plan = planningPlan(s, input);
-  return evaluateProfile(s, input, output, plan, plan);
+  return deriveFabricationProfile(s, input, output, plan, plan);
 }
 it("uses actual intake steel requirement and scoped size rather than fixture-only aliases", async () => {
   const s = await saved();
@@ -85,4 +85,49 @@ it.each([true, false, 2, 0])("retains non-text source requirement %s as an actio
     });
     expect(profile.checks.find(c => c.id === `SOURCE-REQUIREMENT-p1-${field}`)?.reason).toContain(String(value));
   }
+});
+
+it("uses only scoped confirmed head observations, leaving another head unknown", async () => {
+  const { evaluateProfile } = await import("../src/integration/profiles.js");
+  const s = await saved();
+  s.scope!.excludedEntityIds = [];
+  s.scope!.includedEntityIds.push("h1", "h2");
+  const template = s.detailing[0];
+  const observations = {model:"TY3231",installation:"installed",mounting:"standard",orientation:"sideways",verticalReference:"gravity"};
+  s.detailing.push(...Object.entries(observations).map(([field,value]) => ({...template,id:`observed-${field}`,field,value,subjectIds:["h1"],provenance:"confirmed_evidence" as const,confirmation:"confirmed" as const,unit:null,source:{description:"Independent observed head record",assetId:null,page:null}})));
+  const input = fabricationInput(s,s.baselinePlan!), output = deriveWorkPackage(input,fabricationCatalog(s.configVersion)), plan = planningPlan(s,input);
+  const profile = evaluateProfile(s,input,output,plan,plan,"TFP171_INSTALL_ORIENTATION_V2");
+  expect(profile.project.rules.find(r=>r.subjectIds.includes("h1"))?.status).toBe("fail");
+  expect(profile.project.rules.find(r=>r.subjectIds.includes("h2"))?.status).toBe("unknown");
+  expect(profile.checks.filter(c=>c.id.startsWith("TFP171_INSTALL_ORIENTATION_V2")).map(c=>c.id)).toEqual(expect.arrayContaining(["TFP171_INSTALL_ORIENTATION_V2-h1","TFP171_INSTALL_ORIENTATION_V2-h2"]));
+  s.detailing.find(f=>f.id === "observed-model")!.provenance = "synthetic_assumption";
+  expect(evaluateProfile(s,fabricationInput(s,s.baselinePlan!),output,plan,plan,"TFP171_INSTALL_ORIENTATION_V2").project.rules.find(r=>r.subjectIds.includes("h1"))?.status).toBe("unknown");
+});
+
+it("publishes selected basis uncertainty, missing inputs and sources in UI and PDF findings without implicitly evaluating it for other rules", async () => {
+  const facts = {jurisdiction:"san_francisco",standard:"nfpa13",permitKind:"revision",originalNfpa13Edition:"2022",originalFirePermitNumber:"F-123"};
+  const { evaluateProfile } = await import("../src/integration/profiles.js");
+  const s = await saved();
+  const fields = ["jurisdiction","standard","permitKind","originalNfpa13Edition","originalFirePermitNumber"];
+  const template = s.detailing[0];
+  s.detailing = s.detailing.filter(f => !fields.includes(f.field));
+  s.siteFacts = s.siteFacts.filter(f => !fields.includes(f.field));
+  s.detailing.push(...Object.entries(facts).map(([field,value]) => ({...template,id:`basis-${field}`,field,value,subjectIds:[],unit:null,provenance:"confirmed_evidence" as const,confirmation:"confirmed" as const,source:{description:"Independent original permit record",assetId:null,page:null}})));
+  const input = fabricationInput(s,s.baselinePlan!), output = deriveWorkPackage(input,fabricationCatalog(s.configVersion)), plan = planningPlan(s,input);
+  const selected = evaluateProfile(s,input,output,plan,plan,"N01_SF_EDITION_BASIS");
+  const check = selected.checks.find(c=>c.id === "N01_SF_EDITION_BASIS")!;
+  expect(check.status).toBe("unknown");
+  expect(check.reason).toContain("sfNfpa13.evidenceKinds:permit");
+  expect(check.subjectIds).toEqual([s.projectId]);
+  expect(check.reason).toContain(selected.project.basis!.reason);
+  expect(check.sourceRefs).toEqual(selected.project.basis!.sourceRefs.map(r=>r.url));
+  expect(check.sourceRefs.length).toBeGreaterThan(0);
+  for (const missing of selected.project.basis!.missingInputs) expect(check.reason).toContain(missing);
+  expect(selected.required).toContainEqual({id:check.id,subjectIds:check.subjectIds});
+  const { exportSnapshot } = await import("../src/integration/snapshot.js");
+  const snapshot = exportSnapshot(s,{inputRevision:s.inputRevision,configVersion:s.configVersion,refs:[],details:[{id:"basis-check",input,fabrication:output,plan,profile:selected}]})!;
+  expect(snapshot.findings.find(f=>f.id === check.id)).toMatchObject({status:"unknown",description:expect.stringContaining(check.reason),sourceIds:check.sourceRefs});
+  const other = evaluateProfile(s,input,output,plan,plan,"TFP171_INSTALL_ORIENTATION_V2");
+  expect(other.project.basis).toBeUndefined();
+  expect(other.checks.some(c=>c.id === "N01_SF_EDITION_BASIS")).toBe(false);
 });

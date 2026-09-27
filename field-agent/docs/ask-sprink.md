@@ -13,7 +13,7 @@ It answers only from the project's source library. When nothing in the library s
 | Area | What the code has | Where |
 | --- | --- | --- |
 | Framework | Hono server on Node 22 (`tsx`), React 19 + Vite web client, pnpm workspace | `apps/server`, `apps/web` |
-| Model provider | JEV (TypeSafe) *choice* model only, used by the work-package runner to pick the next bounded action. No generative model and no embedding model. Nothing needs model credentials to start. | `packages/workflow/src/choice.ts` |
+| Model provider | GPT-6 Astra uses Pi standard Agent tools; JEV (TypeSafe) selects one verification rule. Startup requires OpenAI credentials; rule selection requires TypeSafe credentials. Project-local keys take precedence. | `packages/workflow/src/choice.ts` |
 | Document storage | One SQLite file (`.data/field.sqlite`, better-sqlite3, WAL) plus asset files. No searchable library of code text existed. | `apps/server/src/store.ts` |
 | Drawing context | Work packages: source drawing reference, confirmed baseline run (pipes, fittings, tie-ins in a mm frame), project-basis facts (jurisdiction, standard, permit kind, original edition), site facts (measured duct box, work boundary, clearance), the change request and the selected route. | `packages/core/src/work-package.ts` |
 | Calculation and rule scripts | `evaluateLocalPlanGeometry` (straight-pipe centerline, cut length from takeouts, pipe-envelope-to-duct-box clearance); `resolveSfNfpa13Edition` (SFFD AB 2.04 edition basis); `deriveWorkPackage` (fabrication cuts, materials, assembly); `evaluateProject` rule packs (TFP171, SFFD supports and local change); Spears FlameGuard catalog with source records. | `packages/core`, `packages/fabrication` |

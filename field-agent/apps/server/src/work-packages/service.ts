@@ -21,6 +21,7 @@ export interface PackageRunContext {
   registerArtifact(bytes: Buffer, mimeType: 'application/pdf' | 'text/csv' | 'application/json', filename: string): PackageAsset;
 }
 export interface WorkPackageRunner {
+  validateSelection?(snapshot: Readonly<WorkPackageSnapshot>): void;
   execute(context: PackageRunContext): Promise<{ status: Extract<PackageRunStatus, 'completed' | 'waiting_input' | 'blocked'>; stopReason: string }>;
 }
 
@@ -166,6 +167,7 @@ export class WorkPackageService {
       if (!candidates || !this.current(candidates, snapshot)) throw new PackageError(409, 'stale_candidates');
       const candidate = candidates.candidates.find(c => c.plan.id === data.planId);
       if (!candidate) throw new PackageError(404, 'candidate_not_found');
+      this.runner?.validateSelection?.(snapshot);
       snapshot.selectedPlan = structuredClone(candidate.plan);
     }
     return this.changed(snapshot);

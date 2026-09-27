@@ -3,7 +3,7 @@ export type Goal = Intent | 'export_selected_package';
 export interface Version { inputRevision: number; configVersion: string }
 export const operations = [
   'prepare_drawing_model', 'derive_work_package', 'generate_change_candidates',
-  'evaluate_work_package', 'compare_candidates', 'stage_evidence', 'request_input',
+  'evaluate_work_package', 'compare_candidates', 'request_input',
   'export_work_package',
 ] as const;
 export type Operation = typeof operations[number];
@@ -18,7 +18,6 @@ export interface InputQuestion {
   text: string;
   kind: 'fact' | 'candidate_selection';
   subjectId: string;
-  order: number;
 }
 export interface Gap {
   id: string;
@@ -36,20 +35,14 @@ export interface WorkSnapshot extends Version {
   selectedPlanId?: string; // Only the explicit user API may set this.
   outputs: OutputRef[];
   gaps: Gap[];
-  evidenceCandidates: { id: string; description: string }[];
 }
 export interface BoundAction {
   id: string;
   operation: Operation;
   description: string;
   subjectId: string;
-  question?: InputQuestion;
-}
-export interface Plan {
-  stage: string;
-  eligible: BoundAction[];
-  terminal?: { status: 'completed' | 'blocked'; reason: string };
-  blocker?: string;
+  ruleId?: string;
+  ruleVersion?: string;
 }
 export interface ExecutionContext extends Version {
   packageId: string;
@@ -57,8 +50,15 @@ export interface ExecutionContext extends Version {
   actionId: string;
   signal: AbortSignal;
 }
-export interface DomainResult { summary: string; payload: unknown }
+export interface DomainResult { summary: string; payload: unknown; modelResult?: unknown }
+export interface RuleDescriptor {
+  id: string; version: string; title: string; check: string; applicability: string;
+  subjectTypes: string[]; requiredInputs: string[]; sourceRefs: unknown[];
+  implementationStatus: string; executionFunction: string | null;
+}
 export interface DomainPort {
+  inspect?(packageId: string, query: {kind:'snapshot'|'drawing'|'sources'|'results'|'answers'; id?:string; query?:string}): unknown | Promise<unknown>;
+  ruleCatalog?(packageId: string): RuleDescriptor[];
   // Return detached, validated domain state. Derive gaps and output references from saved data.
   read(packageId: string): WorkSnapshot;
   // Stage computation only; never publish outputs or mutate inputs here. Honor signal.
@@ -72,10 +72,9 @@ export interface DecisionTrace extends Version {
   stage: string;
   eligibleIds: string[];
   selectedId?: string;
-  source: 'code' | 'jev' | 'fallback';
+  source: 'jev';
   model?: string;
   confidence?: number;
-  fallback?: string;
 }
 export interface RunRecord extends Version {
   id: string;
@@ -86,10 +85,10 @@ export interface RunRecord extends Version {
   startedAt: string;
   endedAt?: string;
   reason?: string;
+  explanation?: string;
   latestAction?: string;
   latestResult?: string;
   latestDecision?: DecisionTrace;
-  latestFallback?: string;
   error?: string;
   question?: InputQuestion;
 }

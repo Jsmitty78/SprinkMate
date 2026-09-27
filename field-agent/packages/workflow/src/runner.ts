@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { Agent, type AgentEvent, type AgentTool } from '@earendil-works/pi-agent-core';
+import { Agent, type AgentEvent, type AgentTool, type StreamFn } from '@earendil-works/pi-agent-core';
 import { Type } from 'typebox';
 import { bounded, ExecutionStop } from './bounded.js';
-import { ChoiceFailure, choiceRequest, JEV_MODEL, validateChoice, type ChoiceClient } from './choice.js';
-import { operations, sameVersion, type BoundAction, type DomainPort, type Goal, type RunRecord, type RunStore, type Version } from './contracts.js';
-import { fallbackQuestion, planNext } from './policy.js';
-import { decisionStream, WORKFLOW_MODEL } from './stream.js';
+import { ChoiceFailure, ruleChoiceRequest, CLARIFY, SELECTION_DONE, JEV_MODEL, validateChoice, type ChoiceClient } from './choice.js';
+import { operations, currentOutputs, sameVersion, type BoundAction, type DomainPort, type Goal, type RunRecord, type RunStore, type Version } from './contracts.js';
+import { astraStream, workflowLlmFromEnv, type WorkflowLlm } from './llm-stream.js';
 
 export interface RunHandle {
   id: string;
@@ -17,6 +16,8 @@ export interface RunnerOptions {
   store: RunStore;
   choice: ChoiceClient;
   configVersion: string;
+  llm?: WorkflowLlm;
+  testStream?: StreamFn;
   requestTimeoutMs?: number;
   maxSteps?: number;
   // Optional observation only; used by the integration example/tests, not persisted as an audit log.
@@ -29,8 +30,8 @@ export class WorkflowRunner {
   private readonly timeout: number;
   private readonly maxSteps: number;
   constructor(private readonly options: RunnerOptions) {
-    this.timeout = options.requestTimeoutMs ?? 15_000;
-    this.maxSteps = options.maxSteps ?? 20;
+    this.timeout = options.requestTimeoutMs ?? 60_000;
+    this.maxSteps = options.maxSteps ?? 80;
     if (!options.configVersion || !Number.isSafeInteger(this.timeout) || this.timeout < 1 ||
         !Number.isSafeInteger(this.maxSteps) || this.maxSteps < 1) throw new Error('Invalid workflow configuration');
     options.store.interruptRunning();
@@ -62,10 +63,13 @@ export class WorkflowRunner {
 
   private async execute(run: RunRecord, active: ActiveRun): Promise<RunRecord> {
     const { domain, store } = this.options;
-    let pending: BoundAction | undefined;
+    let selectedRule: {id:string;version:string} | undefined;
+    const researched = new Set<string>();
+    const ruleResults: unknown[] = [];
+    const executedRules = new Map<string, unknown>();
     const save = () => store.save(run);
     const finish = (status: RunRecord['status'], reason: string) => {
-      run.status = status; run.reason = reason; run.endedAt = new Date().toISOString(); save();
+      run.status = status; run.reason = reason; run.explanation = reason; run.endedAt = new Date().toISOString(); save();
     };
     const guard = () => {
       if (active.controller.signal.aborted) throw new ExecutionStop('cancelled');
@@ -76,99 +80,139 @@ export class WorkflowRunner {
     const fail = (error: unknown) => {
       if (active.controller.signal.aborted) finish('cancelled', 'cancelled');
       else if (error instanceof ExecutionStop) finish(error.message === 'input_or_config_changed' ? 'interrupted' : 'blocked', error.message);
-      else { run.error = 'domain_or_adapter_error'; finish('failed', 'Operation failed; no automatic retry. Inspect the domain service.'); }
+      else { run.error ??= 'domain_or_adapter_error'; finish('failed', run.error.startsWith('choice_') || run.error === 'distribution_sum' ? `JEV rule selection failed (${run.error}); no fallback operation was executed.` : 'Operation failed; no automatic retry. Inspect the domain service.'); }
     };
-    const streamFn = decisionStream(run.id, async () => {
+    const respond = (value: unknown, terminate = false) => ({content:[{type:'text' as const,text:JSON.stringify(value)}],details:value,terminate});
+    const wrap = (fn: (args: any) => Promise<unknown>): any => async (_id: string, args: any) => {
       try {
-        if (run.status !== 'running') return undefined;
-        const snapshot = guard();
-        const plan = planNext(snapshot, run.goal);
-        if (plan.terminal) { finish(plan.terminal.status, plan.terminal.reason); return undefined; }
-        if (!plan.eligible.length) { finish('blocked', plan.blocker ?? 'No eligible operation for the saved inputs.'); return undefined; }
-        if (run.steps >= this.maxSteps) { finish('blocked', 'step_limit'); return undefined; }
-        let selected: BoundAction | undefined;
-        run.latestDecision = { inputRevision: run.inputRevision, configVersion: run.configVersion,
-          stage: plan.stage, eligibleIds: plan.eligible.map(a => a.id), source: 'code' };
-        if (plan.eligible.length === 1) selected = plan.eligible[0];
-        else {
-          const request = choiceRequest(snapshot, run.goal, plan, run.latestResult);
-          run.latestDecision.model = JEV_MODEL;
-          try {
-            const envelope = await bounded(active.controller.signal, this.timeout,
-              signal => this.options.choice.choose(request, signal));
-            guard();
-            const choice = validateChoice(envelope, request);
-            selected = plan.eligible.find(a => a.id === choice.id);
-            run.latestDecision.source = 'jev';
-            run.latestDecision.confidence = choice.confidence;
-          } catch (error) {
-            guard(); // Cancellation / input edits are never converted into a question fallback.
-            const reason = error instanceof ChoiceFailure || error instanceof ExecutionStop ? error.message : 'choice_service_failure';
-            selected = fallbackQuestion(plan.eligible);
-            run.latestDecision.source = 'fallback'; run.latestDecision.fallback = reason;
-            run.latestFallback = reason;
-            if (!selected) { finish('blocked', `${reason}; ${plan.blocker ?? 'No eligible input question is available.'}`); return undefined; }
-          }
-        }
         guard();
-        if (!selected) throw new Error('No bound action');
-        run.latestDecision.selectedId = selected.id;
-        run.latestAction = selected.id;
-        pending = selected;
+        if (run.status !== 'running') throw new ExecutionStop('run_stopped');
+        if (run.steps >= this.maxSteps) throw new ExecutionStop('step_limit');
+        run.steps++; save();
+        const result = await fn(args);
         save();
-        return selected;
-      } catch (error) { fail(error); throw error; }
-    });
-    const parameters = Type.Object({ runId: Type.String(), actionId: Type.String() }, { additionalProperties: false });
-    const tools: AgentTool<typeof parameters>[] = operations.map(operation => ({
-      name: operation, label: operation, description: 'Execute the current server-bound business operation.',
-      parameters, executionMode: 'sequential', replay: 'never',
-      execute: async (_callId, args) => {
-        try {
-          const before = guard();
-          const action = pending;
-          if (run.status !== 'running' || !action || args.runId !== run.id || args.actionId !== action.id || action.operation !== operation) throw new Error('Invalid action binding');
-          pending = undefined; // One-shot binding; no replay of this tool call.
-          run.steps += 1;
-          if (operation === 'request_input') {
-            if (!action.question) throw new Error('Missing question');
-            run.question = action.question;
-            run.latestResult = action.question.text;
-            finish('waiting_input', 'Answer through the domain API, then start a fresh run.');
-            return { content: [{ type: 'text', text: action.question.text }], details: { question: action.question }, terminate: true };
-          }
-          save();
-          const context = { packageId: run.packageId, runId: run.id, actionId: action.id,
-            inputRevision: run.inputRevision, configVersion: run.configVersion, signal: active.controller.signal };
-          const result = await bounded(active.controller.signal, this.timeout,
-            signal => domain.execute(action, { ...context, signal }));
+        return respond(result, run.status !== 'running');
+      } catch (error) { fail(error); return respond({error:run.error ?? run.reason},true); }
+    };
+    const operationDescriptions: Partial<Record<typeof operations[number],string>> = {
+      prepare_drawing_model:'Prepare the saved drawing model. subjectId is the saved drawingId.',
+      derive_work_package:'Calculate materials, cuts and assembly for the saved baseline and applicable candidates/selected plan. subjectId is the baseline/selected plan ID, or current candidate-set output ID for the candidate collection.',
+      generate_change_candidates:'Generate alternatives for the saved site discrepancy. subjectId is the saved changeRequestId.',
+      compare_candidates:'Compare current calculated candidate packages. subjectId is the current candidate-set output ID.',
+      export_work_package:'Export the existing current draft, retaining unresolved findings. subjectId is selectedPlanId, or baselinePlanId for drawing preparation.',
+    };
+    const tools: AgentTool<any>[] = [
+      {name:'inspect_saved_information',label:'Inspect saved information',description:'Read drawing, registered source material, saved results or user answers. Inspect before asking for unknown inputs.',
+        parameters:Type.Object({kind:Type.Union(['snapshot','drawing','sources','results','answers'].map(k=>Type.Literal(k))),id:Type.Optional(Type.String()),query:Type.Optional(Type.String())}),
+        execute:wrap(async args => {
+          const result = domain.inspect ? await bounded(active.controller.signal,this.timeout,()=>Promise.resolve(domain.inspect!(run.packageId,args))) : domain.read(run.packageId);
           guard();
-          if (!domain.commit(action, result, context)) throw new ExecutionStop('input_or_config_changed');
-          const after = guard();
-          run.latestResult = result.summary;
-          if (JSON.stringify(before) === JSON.stringify(after)) finish('blocked', 'no_progress');
-          else save();
-          return { content: [{ type: 'text', text: result.summary }], details: { actionId: action.id }, terminate: run.status !== 'running' };
-        } catch (error) {
-          fail(error);
-          // Pi catches tool errors. The persisted status prevents another domain operation.
-          throw new Error('Business operation stopped; inspect the saved run status.');
-        }
-      },
-    }));
+          if(args.kind==='sources') {
+            const documents=(result as {documents?:unknown[]}|undefined)?.documents;
+            const searched=Boolean(args.id?.trim() || args.query?.trim());
+            if(domain.inspect && (searched || (Array.isArray(documents) && documents.length===0))) researched.add('sources');
+          } else researched.add(args.kind);
+          return result;
+        })},
+      {name:'select_verification_rule',label:'Ask JEV for a rule',description:'Ask JEV to select one verification rule using the FULL catalog, current facts and all preceding rule results. Execute the selected rule next, or investigate needs_information. Selection completion is not coverage approval.',
+        parameters:Type.Object({context:Type.String()}),execute:wrap(async args => {
+          const snapshot = guard(), catalog = domain.ruleCatalog?.(run.packageId);
+          if (!catalog?.length) throw new Error('rule_catalog_unavailable');
+          const request = ruleChoiceRequest(snapshot,run.goal,catalog,{understanding:args.context,ruleResults,savedInformation:domain.inspect ? {snapshot:await domain.inspect(run.packageId,{kind:'snapshot'}),results:await domain.inspect(run.packageId,{kind:'results'})} : snapshot});
+          let choice;
+          try { choice = validateChoice(await bounded(active.controller.signal,this.timeout,signal=>this.options.choice.choose(request,signal)),request); }
+          catch(error) { run.error = error instanceof ChoiceFailure ? error.message : 'choice_service_failure'; throw error; }
+          guard(); selectedRule = undefined;
+          run.latestDecision = {inputRevision:run.inputRevision,configVersion:run.configVersion,stage:'select_verification_rule',eligibleIds:catalog.map(r=>r.id),selectedId:choice.id,source:'jev',model:JEV_MODEL,confidence:choice.confidence};
+          if(choice.id===CLARIFY) return {status:'needs_information',instruction:'Investigate saved drawings, sources and results; ask only what remains unknown.'};
+          if(choice.id===SELECTION_DONE) return {status:'selection_complete',instruction:'Report unexecuted/unimplemented checks and unresolved evidence. This is not coverage or construction approval.'};
+          const rule=catalog.find(r=>r.id===choice.id)!;
+          selectedRule={id:rule.id,version:rule.version};
+          return {status:'selected',rule};
+        })},
+      ...operations.filter(o=>o!=='request_input').map(operation=>({name:operation,label:operation,
+        description:operation==='evaluate_work_package' ? 'Execute the one JEV-selected rule script; ruleId must match its selected ID. subjectId must be the work-package ID to evaluate ALL calculated plans, or one calculated plan ID from current package output references. Never use a changeRequestId, drawingId, or candidate-set ID. Returns detailed results and evidence. Feed results into the next JEV request.' : `${operationDescriptions[operation]} This tool does not confirm facts or adopt candidates.`,
+        parameters:Type.Object({subjectId:Type.String(),ruleId:Type.Optional(Type.String())}),
+        execute:wrap(async args=>{
+          const snapshot=guard();
+          if(operation==='generate_change_candidates' && snapshot.selectedPlanId) return {error:'A user-adopted plan is saved. Derive the current selected plan using its preserved geometry. The user must clear selection before generating a new candidate set.',selectedPlanId:snapshot.selectedPlanId};
+          const blockers=snapshot.gaps.filter(g=>g.blocks.includes(operation));
+          if(blockers.length) return {status:'missing_inputs',gaps:blockers};
+          if(operation==='evaluate_work_package') {
+            const outputs=currentOutputs(snapshot), collections=new Set(outputs.filter(output=>output.kind==='candidates').map(output=>output.id));
+            const allowedSubjectIds=[...new Set([snapshot.id,...outputs.filter(output=>output.kind==='package' && !collections.has(output.subjectId)).map(output=>output.subjectId)])];
+            if(!allowedSubjectIds.includes(args.subjectId)) return {error:'Invalid verification target. Use the work-package ID for all calculated plans or a current calculated plan ID; change requests and candidate sets are not rule targets.',allowedSubjectIds};
+          }
+          if(operation==='evaluate_work_package' && (!selectedRule || args.ruleId!==selectedRule.id)) return {error:'Call select_verification_rule and use its selected ruleId first.'};
+          const action:BoundAction={id:randomUUID(),operation,subjectId:args.subjectId,description:operation,
+            ...(operation==='evaluate_work_package' ? {ruleId:selectedRule!.id,ruleVersion:selectedRule!.version} : {})};
+          if(operation==='evaluate_work_package') selectedRule=undefined;
+          const ruleKey=operation==='evaluate_work_package' ? JSON.stringify([action.ruleId,action.ruleVersion,action.subjectId]) : undefined;
+          if(ruleKey && executedRules.has(ruleKey)) return {noProgress:true,
+            instruction:'This rule/version/subject was already executed on these unchanged inputs. Read its existing result; do not reexecute. Investigate missing information, ask the user, or explain why work is blocked. Keep the complete catalog available to JEV.',
+            existingResult:executedRules.get(ruleKey)};
+          run.latestAction=operation; save();
+          const context={packageId:run.packageId,runId:run.id,actionId:action.id,inputRevision:run.inputRevision,configVersion:run.configVersion,signal:active.controller.signal};
+          const result=await bounded(active.controller.signal,this.timeout,signal=>domain.execute(action,{...context,signal}));
+          guard();
+          if(!domain.commit(action,result,context)) throw new ExecutionStop('input_or_config_changed');
+          guard(); run.latestResult=result.summary;
+          const detail={summary:result.summary,result:result.modelResult ?? result.payload};
+          if(operation==='evaluate_work_package') {
+            ruleResults.push({ruleId:action.ruleId,version:action.ruleVersion,subjectId:action.subjectId,...detail});
+            executedRules.set(ruleKey!,detail);
+          }
+          return detail;
+        })})),
+      {name:'request_input',label:'Ask user',description:'After inspecting saved information, ask only the remaining unknown question. Candidate adoption and fact confirmation must be performed by the user. Saved answers are available in the next run.',
+        parameters:Type.Object({id:Type.String(),text:Type.String(),subjectId:Type.String(),kind:Type.Union([Type.Literal('fact'),Type.Literal('candidate_selection')])}),execute:wrap(async args=>{
+          const snapshot=guard();
+          if(args.kind==='candidate_selection') {
+            const outputs=currentOutputs(snapshot);
+            const candidates=outputs.find(output=>output.kind==='candidates' && output.subjectId===snapshot.changeRequestId);
+            if(snapshot.intent!=='adapt_to_site' || !candidates || snapshot.gaps.some(g=>g.blocks.includes('compare_candidates')) || !outputs.some(output=>output.kind==='comparison' && output.subjectId===candidates.id))
+              return {error:'Generate and compare current candidates before requesting user adoption.'};
+          }
+          const missing=['drawing','sources','results','answers'].filter(kind=>!researched.has(kind));
+          if(missing.length) return {error:'Inspect all relevant saved information before asking.',missingInspections:missing};
+          run.question={...args}; run.latestResult=args.text;
+          finish('waiting_input','User answer required; save answer and resume with current inputs.');
+          return {question:run.question};
+        })},
+      {name:'finish_work',label:'Finish this run',description:'Finish with an evidence-based explanation of outputs and unresolved conditions. Completed means requested artifacts are available, never regulatory coverage or construction approval.',
+        parameters:Type.Object({status:Type.Union([Type.Literal('completed'),Type.Literal('blocked')]),explanation:Type.String()}),execute:wrap(async args=>{
+          if(args.status==='completed') {
+            const snapshot=guard(), outputs=currentOutputs(snapshot);
+            const needed=['package','evaluation',...(run.goal==='export_selected_package'?['export']:[])];
+            const subjectId=snapshot.selectedPlanId ?? snapshot.baselinePlanId;
+            const missing=needed.filter(kind=>!outputs.some(output=>output.kind===kind && output.subjectId===subjectId));
+            if(snapshot.intent==='adapt_to_site' && !snapshot.selectedPlanId) missing.push('user_candidate_adoption');
+            if(missing.length) return {error:'Requested outputs are not yet available.',missing};
+          }
+          finish(args.status,args.explanation);return {status:args.status,explanation:args.explanation};})},
+    ];
     try {
-      const agent = new Agent({ initialState: { model: WORKFLOW_MODEL, tools, thinkingLevel: 'off',
-        systemPrompt: 'Execute only the current server-bound business operation.' }, streamFn, toolExecution: 'sequential',
-        finishTurn: () => run.status === 'running' ? undefined : { action: 'end' } });
-      active.agent = agent;
-      if (this.options.onEvent) agent.subscribe(event => this.options.onEvent!(run.id, event));
-      if (active.controller.signal.aborted) throw new ExecutionStop('cancelled');
-      await agent.prompt(`Execute ${run.goal} for the saved work package.`);
-      if (run.status === 'running') {
-        guard();
-        finish('failed', 'Pi ended without a policy stop; business completion was not inferred.');
-      }
-    } catch (error) { fail(error); }
+      const llm=this.options.llm ?? (this.options.testStream ? undefined : workflowLlmFromEnv());
+      const model=llm?.model ?? {id:'test-only',name:'test-only',api:'test',provider:'test',baseUrl:'',reasoning:false,input:['text'] as ['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:32768,maxTokens:4096};
+      const agent = new Agent({ initialState: { model, tools, thinkingLevel: 'off',
+        systemPrompt: `You are the sprinkler work assistant inside Pi. Understand the user's goal and current saved state; autonomously choose tools, investigate sources and calculate. JEV alone chooses verification rules: call select_verification_rule, then evaluate_work_package for exactly its selection, read detailed results, and repeat JEV selection with updated understanding. Never preselect a rule subset. Distinguish needs_information, selection_complete and service failure. Investigate drawing, sources, saved results and answers before asking users. Do not invent facts, confirm evidence, adopt a candidate, waive checks or declare construction approval. All executed checks passing never establishes completeness. Generate and derive packages before evaluation; compare evaluated candidates before asking the user to adopt one. Use subject IDs from saved state. For prepare_from_drawing produce materials, cut lengths, assembly proposal and verification; for adapt_to_site generate alternatives, calculate, verify, compare and ask user adoption before final export. For export_selected_package, inspect current saved results and export the existing selected revision-bound draft; unresolved checks remain in the artifact and do not require re-running unchanged calculations or rules. When a user has adopted a candidate, reuse that saved candidate geometry across answer/fact revisions and derive the current selected plan; do not generate a new candidate set unless the user clears adoption. Only regenerate stale or missing outputs. Export when the goal requests it. Acknowledge unresolved/unimplemented checks and sources in final explanation. Call finish_work or request_input to persist the stopping condition.` },
+        streamFn:this.options.testStream ?? astraStream(llm!),toolExecution:'sequential',
+        finishTurn:()=>run.status==='running' ? undefined : {action:'end'} });
+      active.agent=agent;
+      agent.subscribe(event=>{
+        if(event.type==='message_end' && event.message.role==='assistant') {
+          const explanation=event.message.content.filter(c=>c.type==='text').map(c=>c.type==='text'?c.text:'').join('\n');
+          if(explanation) {run.explanation=explanation;save();}
+        }
+        this.options.onEvent?.(run.id,event);
+      });
+      await bounded(active.controller.signal,this.timeout*this.maxSteps,async signal=>{
+        const abort=()=>agent.abort(); signal.addEventListener('abort',abort,{once:true});
+        try { await agent.prompt(`Goal: ${run.goal}. Current saved snapshot: ${JSON.stringify(guard())}`); }
+        finally {signal.removeEventListener('abort',abort);}
+      });
+      if(run.status==='running') { guard(); finish('failed','Astra ended without a persisted stop; completion was not inferred.'); }
+    } catch(error) { fail(error); }
     return structuredClone(run);
   }
 }

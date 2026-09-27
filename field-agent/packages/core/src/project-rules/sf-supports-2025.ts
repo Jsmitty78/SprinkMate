@@ -137,3 +137,9 @@ function evaluateConcreteRule(
 export function evaluateSfSupports2025(request: ProjectEvaluationRequest): ProjectRuleResult[] {
   return (request.supports ?? []).flatMap(support => [evaluateOne(request, support, studRule), evaluateOne(request, support, concreteRule)]);
 }
+
+export function evaluateSfSupportRule(request: ProjectEvaluationRequest, ruleId: string): ProjectRuleResult[] {
+  const rule = [studRule, concreteRule].find(item => item.id === ruleId);
+  if (!rule) throw new Error(`Unknown support rule: ${ruleId}`);
+  return (request.supports ?? []).map(support => evaluateOne(request, support, rule));
+}

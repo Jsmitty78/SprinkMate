@@ -111,4 +111,4 @@ export interface DetailPlan {
   };
   delta?: DetailDelta;
 }
-export interface Detail { state: { inputRevision: number; details: DetailPlan[] } | null; current?: boolean }
+export interface Detail { state: { inputRevision: number; details: DetailPlan[]; latestRun?: { id: string; explanation?: string; status: string; question?: { text: string; kind: "fact" | "candidate_selection" } } } | null; current?: boolean }
