@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PackageInputs, PackagePlan } from "@field-agent/core";
-import { boxGaps, requirements, siteFrameOf } from "../model.js";
+import { boxGaps, reopenSiteGeometry, requirements, siteFrameOf } from "../model.js";
 import { frameFormulas, frameFromYaw, spanFrame } from "./SiteInputs.js";
 
 // FS-01 P27 traced in the drawing-plan frame: N27 (12544.2133, 9620.5040) to N28 (12544.2133, 12668.1653)
@@ -25,8 +25,13 @@ describe("site frame", () => {
     expect(span.length).toBeCloseTo(3047.6613, 6);
     expect(span.yaw).toBe(-90);
     const frame = frameFromYaw(span.origin, span.yaw);
-    expect(frameFormulas(frame, 0).plan).toBe("Plan (mm) = (12544.2133 + Y, −9620.504 − X, Z)");
-    expect(frameFormulas(frame, 0).drawing).toBe("Drawing XY (mm from the sheet origin, Y down the sheet) = (12544.2133 + Y, 9620.504 + X)");
+    expect(frameFormulas(frame, { rotationDeg: 0, originMm: { x: 0, y: 0 } }).plan).toBe("Plan (mm) = (12544.2133 + Y, −9620.504 − X, Z)");
+    expect(frameFormulas(frame, { rotationDeg: 0, originMm: { x: 0, y: 0 } }).drawing).toBe("Drawing XY (mm from the sheet origin, Y down the sheet) = (12544.2133 + Y, 9620.504 + X)");
+  });
+
+  it("adds the plan origin's sheet offset to the drawing formula", () => {
+    const frame = frameFromYaw({ x: 100, y: -200, z: 0 }, 0);
+    expect(frameFormulas(frame, { rotationDeg: 0, originMm: { x: 50, y: 30 } }).drawing).toBe("Drawing XY (mm from the sheet origin, Y down the sheet) = (150 + X, 230 − Y)");
   });
 
   it("reads boxes in the saved adaptationFrame facts and names missing faces", () => {
@@ -38,6 +43,13 @@ describe("site frame", () => {
     expect(d.x).toBeCloseTo(12794.2133, 6);
     expect(d.y).toBeCloseTo(-10820.504, 6);
     expect(boxGaps(s, "duct", true)).toEqual(["height (Z): both faces missing"]);
+  });
+
+  it("reopens the frame and boxes when the affected span changes", () => {
+    const frame = [f("adaptationFrame.origin.x", 0), f("adaptationFrame.origin.y", 0), f("adaptationFrame.origin.z", 0), f("adaptationFrame.yaw", 0, { unit: "deg" })];
+    const out = reopenSiteGeometry({ detailing: frame, siteFacts: [...box("duct", [1, 1, 1, 2, 2, 2]), f("requiredPipeClearance", 100)] });
+    expect([...out.detailing, ...out.siteFacts].filter(x => x.confirmation === "confirmed").map(x => x.field)).toEqual(["requiredPipeClearance"]);
+    expect(siteFrameOf(out)?.reason).toBeTruthy();
   });
 
   it("reports an incomplete frame instead of guessing", () => {

@@ -3,7 +3,7 @@ import type { PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "./api.js";
 import { lengthInput, lengthText, parseLength, toMetres } from "./format.js";
 import {
-  showCpvcInputs, showSfInputs, activeDetailingPlan, BOX_KEYS, buildRun, ELBOW, inScope, PIPE, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
+  reopenSiteGeometry, showCpvcInputs, showSfInputs, activeDetailingPlan, BOX_KEYS, buildRun, ELBOW, inScope, PIPE, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
   syncRunDraft, type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
 } from "./model.js";
 import { Badge, Button, Callout, Field, Icon, Section } from "./ui.js";
@@ -283,9 +283,17 @@ export function ChangeInputs({ s, act, busy, setNotice, callouts }: Common & { c
   const [desc, setDesc] = useState(s.changeRequest?.description ?? "");
   const [ids, setIds] = useState<string[]>(s.changeRequest?.affectedEntityIds ?? []);
   useEffect(() => { setDesc(s.changeRequest?.description ?? ""); setIds(s.changeRequest?.affectedEntityIds ?? []); }, [s.changeRequest]);
-  const save = () => act("change", cur => patchClearing(cur, {
-    changeRequest: { id: cur.changeRequest?.id ?? "site-change", description: desc.trim(), affectedEntityIds: ids, factIds: [...cur.detailing, ...cur.siteFacts].filter(f => f.field.startsWith("duct.")).map(f => f.id) },
-  }, setNotice));
+  const save = () => act("change", async cur => {
+    // Site geometry is read along the affected span; a different span needs it confirmed again.
+    const moved = (cur.changeRequest?.affectedEntityIds ?? []).join(",") !== ids.join(",") && !!cur.changeRequest;
+    const reopened = moved ? reopenSiteGeometry(cur) : {};
+    await patchClearing(cur, {
+      ...reopened,
+      changeRequest: { id: cur.changeRequest?.id ?? "site-change", description: desc.trim(), affectedEntityIds: ids, factIds: [...cur.detailing, ...cur.siteFacts].filter(f => f.field.startsWith("duct.")).map(f => f.id) },
+    }, setNotice);
+    if (moved && [...cur.detailing, ...cur.siteFacts].some(f => /^(adaptationFrame|duct|workEnvelope)\./.test(f.field) && f.confirmation === "confirmed"))
+      setNotice("The affected span changed. Save the site frame on the new span, then confirm the obstacle and work boundary again.");
+  });
   if (!pipes.length) return <p className="fa-muted">Enter the existing run first, then choose the piece the obstacle blocks.</p>;
   return <div className="fa-stack">
     <Field label="What did you find on site?"><textarea rows={2} value={desc} onChange={e => setDesc(e.target.value)} placeholder="e.g. Duct installed where the branch should run" /></Field>
