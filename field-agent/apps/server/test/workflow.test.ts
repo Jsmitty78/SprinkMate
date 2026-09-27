@@ -1,4 +1,3 @@
-import { RULE } from '@field-agent/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,6 +6,7 @@ import { FieldService } from '../src/service.js';
 import { createApp } from '../src/api.js';
 import { sceneSvg } from '../src/drawing.js';
 import type { TaskSnapshot } from '../src/models.js';
+import { ADOPTED_RULES, RULE } from '@field-agent/core';
 
 const directories:string[]=[],services:FieldService[]=[];
 function setup(){const dir=mkdtempSync(join(tmpdir(),'field-test-'));directories.push(dir);const service=new FieldService(dir);services.push(service);return service;}
@@ -48,14 +48,46 @@ describe('durable deterministic workflow',()=>{
     const artifact=s.prepareArtifact(t.id);
     expect(artifact.validation.rule.status).toBe('pass');expect(artifact.synthetic).toBe(true);
     expect(artifact.validation.taskRevision).toBe(first.revision);
-    expect(artifact.adoptedRules).toHaveLength(1);
+    expect(artifact.adoptedRules).toHaveLength(ADOPTED_RULES.length);
+    expect(artifact.validation.rules).toHaveLength(ADOPTED_RULES.length);
   });
   it('matching incorrect drawings still fail and final artifacts retain that failure',async()=>{
     const s=setup(),t=s.createTask();await s.replay(t.id,'matching_wrong');
     const artifact=s.prepareArtifact(t.id);
     expect(artifact.validation.comparison.status).toBe('match');expect(artifact.validation.rule.status).toBe('fail');
-    expect(artifact.unresolved).toContain('TY3231取付方向の不適合は未解消');
+    expect(artifact.unresolved).toContain(`${RULE.title}: 不適合は未解消`);
     expect(s.getTask(t.id).state).toBe('review_ready');
+  });
+  it('retains a pressure failure even when orientation and the drawing match',async()=>{
+    const s=setup(),t=s.createTask();await s.replay(t.id,'pressure_exceeded');
+    const artifact=s.prepareArtifact(t.id);
+    expect(artifact.validation.rule.status).toBe('pass');
+    expect(artifact.validation.comparison.status).toBe('match');
+    const failure=artifact.validation.rules.find(rule=>rule.status==='fail');
+    expect(failure).toBeDefined();
+    expect(artifact.unresolved).toContain(`${failure!.title}: 不適合は未解消`);
+    expect(artifact.scope).toContain('水理充足');
+  });
+  it('requires missing installation records and preserves unknown after an unavailable answer',async()=>{
+    const s=setup(),t=s.createTask();await s.replay(t.id,'normal');
+    const current=s.getTask(t.id);
+    s.reviewFacts(t.id,{baseRevision:current.revision,facts:{installationTorqueFtLb:{value:null,confirmed:false,evidenceIds:[],source:'manual'}}});
+    expect(s.getTask(t.id).validation?.rule.status).toBe('pass');
+    expect(s.getTask(t.id).validation?.missingInputs).toContain('installationTorqueFtLb');
+    expect(()=>s.prepareArtifact(t.id)).toThrow('未確認項目');
+    const request=s.requestEvidence(t.id,{kind:'confirmation',reason:'施工時トルクの記録を確認',fields:['installationTorqueFtLb']});
+    s.answer(t.id,{id:'no-torque-record',requestId:request.id,observationIds:[],unavailableReason:'施工記録なし'});
+    const artifact=s.prepareArtifact(t.id);
+    expect(artifact.validation.rules.some(rule=>rule.status==='unknown'&&rule.missingInputs.includes('installationTorqueFtLb'))).toBe(true);
+    expect(artifact.unresolved).toContain('施工記録なし');
+  });
+  it('does not let an AI pressure candidate confirm itself',async()=>{
+    const s=setup(),t=s.createTask();await s.replay(t.id,'normal');
+    s.reviewFacts(t.id,{baseRevision:s.getTask(t.id).revision,facts:{workingPressurePsi:{value:null,confirmed:false,evidenceIds:[],source:'manual'}}});
+    s.proposeFacts(t.id,{id:'pressure-candidate',targetId:'H1',reason:'記録上は100 psiの候補',facts:{workingPressurePsi:{value:100,confirmed:true,source:'manual',evidenceIds:['normal-initial']}}});
+    const current=s.getTask(t.id);
+    expect(current.facts.workingPressurePsi).toMatchObject({value:100,confirmed:false,source:'model'});
+    expect(current.validation?.rules.some(rule=>rule.status==='unknown'&&rule.missingInputs.includes('workingPressurePsi.confirmation'))).toBe(true);
   });
   it('never reuses the artifact or result version after confirmation is removed',async()=>{
     const s=setup(),t=s.createTask();await s.replay(t.id,'normal');const artifact=s.prepareArtifact(t.id);
@@ -71,7 +103,28 @@ describe('durable deterministic workflow',()=>{
     const old=s.getTask(t.id);old.validation!.rule.versions.ruleVersion='old-version';s.store.save(old);
     const dir=s.dataDir;s.store.close();s=new FieldService(dir);services.push(s);
     const current=s.getTask(t.id);expect(current.artifact).toBeNull();expect(current.revision).toBeGreaterThan(artifact.taskRevision);
-    expect(current.validation?.rule.versions.ruleVersion).toBe('1');expect(current.validation?.taskRevision).toBe(current.revision);
+    expect(current.validation?.rule.versions.ruleVersion).toBe(RULE.version);expect(current.validation?.taskRevision).toBe(current.revision);
+  });
+  it('invalidates an artifact when any non-orientation rule changes',async()=>{
+    let s=setup();const t=s.createTask();await s.replay(t.id,'normal');const artifact=s.prepareArtifact(t.id);
+    const old=s.getTask(t.id);old.validation!.rules[1].versions.sourceRevision='older-source';s.store.save(old);
+    const dir=s.dataDir;s.store.close();s=new FieldService(dir);services.push(s);
+    const current=s.getTask(t.id);
+    expect(current.artifact).toBeNull();expect(current.revision).toBeGreaterThan(artifact.taskRevision);
+    expect(current.validation?.rules[1].versions.sourceRevision).toBe(ADOPTED_RULES[1].sourceRevision);
+  });
+  it('migrates an old five-field task without inventing newly required facts',async()=>{
+    let s=setup();const t=s.createTask();await s.replay(t.id,'normal');s.prepareArtifact(t.id);
+    const old=s.getTask(t.id);
+    old.facts=Object.fromEntries(Object.entries(old.facts).filter(([key])=>['model','installation','mounting','orientation','verticalReference'].includes(key))) as typeof old.facts;
+    delete (old.validation as unknown as Record<string,unknown>).rules;
+    s.store.save(old);
+    const dir=s.dataDir;s.store.close();s=new FieldService(dir);services.push(s);
+    const current=s.getTask(t.id);
+    expect(current.artifact).toBeNull();expect(current.facts.model.value).toBe('TY3231');
+    expect(current.facts.installationTorqueFtLb).toMatchObject({value:null,confirmed:false});
+    expect(current.validation?.rules).toHaveLength(ADOPTED_RULES.length);
+    expect(()=>s.prepareArtifact(t.id)).toThrow('未確認項目');
   });
   it('keeps unknown in a completed report when a missing input is explicitly unavailable',async()=>{
     const s=setup(),t=s.createTask();await s.replay(t.id,'missing');
@@ -122,6 +175,34 @@ describe('durable deterministic workflow',()=>{
 });
 
 describe('same API for web, replay, and camera',()=>{
+  it('resolves an SF permit edition without turning it into a compliance result or task mutation',async()=>{
+    const s=setup(),app=createApp(s,{token});
+    const evidence={value:'san_francisco',confirmed:true,source:'fixture',evidenceIds:['permit']};
+    const facts={jurisdiction:evidence,standard:{...evidence,value:'nfpa13'},permitKind:{...evidence,value:'new_building_site_permit'},
+      sitePermitCodeCycle:{...evidence,value:'2022'},architecturalPermitCodeCycle:{...evidence,value:'2022'},editionElection:{...evidence,value:'permit_basis'}};
+    const input={facts,context:{targetId:'project',taskRevision:1,observations:[{id:'permit',targetId:'project'}]}};
+    const response=await app.request('/api/rules/san-francisco/resolve-edition',json(input));
+    expect(response.status).toBe(200);
+    const result=await response.json() as Record<string,unknown>;
+    expect(result).toMatchObject({status:'resolved',nfpa13Edition:'2022'});
+    expect(s.listTasks()).toHaveLength(0);
+    const missing=await app.request('/api/rules/san-francisco/resolve-edition',json({...input,facts:{...facts,sitePermitCodeCycle:{...facts.sitePermitCodeCycle,confirmed:false}}}));
+    expect(await missing.json()).toMatchObject({status:'unknown',nfpa13Edition:null});
+    const malformed=await app.request('/api/rules/san-francisco/resolve-edition',json({facts:{},context:{}}));
+    expect(malformed.status).toBe(400);
+  });
+  it('lists all adopted rules and preserves numeric facts through the HTTP boundary',async()=>{
+    const s=setup(),app=createApp(s,{token}),t=s.createTask();await s.replay(t.id,'normal');
+    const registry=await app.request('/api/rules',{headers:{Authorization:`Bearer ${token}`}});
+    expect((await registry.json() as {id:string}[]).map(rule=>rule.id)).toEqual(ADOPTED_RULES.map(rule=>rule.id));
+    const writeFact=(value:unknown)=>app.request(`/api/tasks/${t.id}/facts`,json({baseRevision:s.getTask(t.id).revision,facts:{installationTorqueFtLb:{value,confirmed:true,evidenceIds:['normal-initial'],source:'manual'}}}));
+    expect((await writeFact('10')).status).toBe(400);
+    expect((await writeFact(-1)).status).toBe(400);
+    expect((await writeFact(11.5)).status).toBe(200);
+    expect(s.getTask(t.id).facts.installationTorqueFtLb?.value).toBe(11.5);
+    const unknown=await app.request(`/api/tasks/${t.id}/facts`,json({baseRevision:s.getTask(t.id).revision,facts:{inventedRule:{value:'pass',confirmed:true,evidenceIds:['normal-initial'],source:'manual'}}}));
+    expect(unknown.status).toBe(400);
+  });
   it('saves and deduplicates an answer without an agent runtime',async()=>{
     const s=setup(),t=s.createTask();await s.replay(t.id,'normal');
     const request=s.requestEvidence(t.id,{kind:'capture',reason:'追加',fields:['orientation']});
