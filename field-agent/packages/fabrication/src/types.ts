@@ -102,7 +102,10 @@ export interface FabricationInput {
     /** Reviewed, project-specific set/cure plan with manufacturer section and conditions. */
     curePlan: Value<string>;
     /** Preparation/sealant/tool plan scoped to each threaded joint and product pair. */
-    threadedJointPlan?: Record<string, Value<string>>;
+    threadedJointPlan?: Record<string, {
+      pipeProductId: string; fittingProductId: string;
+      plan: Value<string>; movement: Value<boolean>;
+    }>;
   };
 }
 export interface Metric {

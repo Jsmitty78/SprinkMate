@@ -50,6 +50,7 @@ function sourceOnly(asset: string) {
   add(input, "datum.start", "scope_interface", ["pipe"]);
   add(input, "datum.end", "scope_interface", ["pipe"]);
   add(input, "requiredConnectionMethod", "steel_threaded", ["pipe"]);
+  add(input, "requiredPipeSpecification", "Schedule 40 black steel / threaded cast-iron fittings (FS-02)", ["pipe"]);
   return input;
 }
 
@@ -61,6 +62,7 @@ it("carries scoped steel datums through production model, geometry and scenario 
   expect(plan.fittings[0].ports[1].insertionOrThreadMakeup.value?.value).toBe(0.015);
   const profile = evaluateProfile(s, input, output, plan, plan);
   expect(profile.project.basis).toBeUndefined();
+  expect(profile.checks.some(c => /2025/.test(c.reason))).toBe(false);
   expect(profile.excluded.map(p => p.id)).toContain("sf-local-change-2025");
   expect(profile.checks.filter(c => c.id.startsWith("PRODUCT-SUITABILITY")).every(c => c.status === "unknown")).toBe(true);
   s.baselinePlan!.entities.forEach(e => e.productId = e.kind === "pipe" ? STEEL_PAIRS[1].pipeId : STEEL_PAIRS[1].elbowId);

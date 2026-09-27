@@ -13,7 +13,10 @@ function specimen(pair = STEEL_PAIRS[0] as typeof STEEL_PAIRS[number]) {
     axialEngagement: confirmed({ value: i === 0 ? 12 : 15, unit: "mm" }),
   });
   input.assemblyConditions.curePlan = { value: null, status: "unknown", reason: "Not CPVC", evidenceIds: [] };
-  input.assemblyConditions.threadedJointPlan = { "f1/in": confirmed("Invented joint review"), "f1/out": confirmed("Invented joint review") };
+  input.assemblyConditions.threadedJointPlan = Object.fromEntries(["f1/in", "f1/out"].map(id => [id, {
+    pipeProductId: pair.pipeId, fittingProductId: pair.elbowId,
+    plan: confirmed("Invented joint review"), movement: confirmed(true),
+  }]));
   return input;
 }
 const derive = (input = specimen()) => deriveWorkPackage(input, steelCatalog(input.configVersion));
@@ -59,6 +62,9 @@ it("keeps known geometry when engagement is missing, foreign, proposed or bound 
   expect(toLocalPlanGeometry(input, steelCatalog(input.configVersion)).fittings[0].ports[0].insertionOrThreadMakeup.confirmed).toBe(false);
   port.threadMakeup!.pipeProductId = STEEL_PAIRS[1].pipeId;
   expect(derive(input).cuts[0].cutLength.value).toBeNull();
+  const review = input.assemblyConditions.threadedJointPlan!["f1/out"];
+  review.pipeProductId = STEEL_PAIRS[1].pipeId;
+  expect(derive(input).operations.filter(o => o.jointIds.includes("f1/out")).every(o => o.status === "needs_confirmation")).toBe(true);
   delete port.threadMakeup;
   const out = derive(input);
   expect(out.cuts[0].centerline.value).toBeCloseTo(0.6096);

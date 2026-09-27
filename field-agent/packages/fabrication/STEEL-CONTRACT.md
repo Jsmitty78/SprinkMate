@@ -21,7 +21,11 @@ Production saved facts use `threadMakeup.<portId>` with unit and fitting subject
 companion confirmed string facts `threadMakeup.<portId>.pipeProductId` and
 `threadMakeup.<portId>.fittingProductId` bind dimensions to products. Per-joint
 preparation/sealant/access review uses `threadedJointPlan.<portId>` and the existing
-`movement.<portId>`. The model widens those fitting-scoped evidence records only
+`movement.<portId>`. Review companion fields
+`threadedJointPlan.<portId>.pipeProductId` and `.fittingProductId` bind the
+plan/movement review separately from the dimensional input. The engine's optional
+`assemblyConditions.threadedJointPlan[jointId]` holds that pair, `plan: Value<string>`
+and `movement: Value<boolean>`. The model widens those fitting-scoped evidence records only
 to the corresponding joint. Changing a pair does not reuse old engagement.
 
 #29 owns fixed-end closure, any added components/splits, and its reviewed sequence.

@@ -313,11 +313,15 @@ function buildOperations(input: FabricationInput, cuts: CutRow[], joints: Joint[
       ...(movement.value === true && movement.basis === "confirmed_inputs" ? [] : ["Confirm full insertion and quarter-turn movement in the stated sequence", ...movement.reasons]),
       ...(cure.value?.trim() && cure.basis === "confirmed_inputs" ? [] : ["Confirm the set/cure plan for temperature, fit, moisture, test pressure, and new-work versus cut-in conditions", ...cure.reasons])];
     if (joint.procedureId === "anvil-351-threaded") {
-      const plan = read(input, input.assemblyConditions.threadedJointPlan?.[joint.id], joint.id);
+      const review = input.assemblyConditions.threadedJointPlan?.[joint.id];
+      const fitting = input.fittings.find(f => f.id === joint.fittingId);
+      const boundReview = review?.pipeProductId === cut.productId && review?.fittingProductId === fitting?.productId ? review : undefined;
+      const plan = read(input, boundReview?.plan, joint.id);
+      const threadMovement = read(input, boundReview?.movement, joint.id);
       // Fixed-end assembly is deliberately a separate owner/strategy (#29).
       const threadedReasons = [...accessReasons, ...joint.reasons,
         ...(cut.cutLength.basis === "proposed_inputs" ? ["Confirm proposed geometry before fabrication"] : []),
-        ...(movement.value === true && movement.basis === "confirmed_inputs" ? [] : ["Confirm threaded-joint rotation and wrench access", ...movement.reasons]),
+        ...(threadMovement.value === true && threadMovement.basis === "confirmed_inputs" ? [] : ["Confirm product-bound threaded-joint rotation and wrench access", ...threadMovement.reasons]),
         ...(plan.value?.trim() && plan.basis === "confirmed_inputs" ? [] : ["Confirm NPT end preparation, selected sealant, tools and product suitability", ...plan.reasons]),
         ...(cut.disposition === "proposed_reuse" ? ["Confirm reuse condition"] : [])];
       add("inspect_threads", [joint.pieceId], [joint.id], "Inspect and clean male/female threads; replace damaged components. Refer to Fig.351 page 4.", threadedReasons, true, [STEEL_ELBOW_SOURCE]);

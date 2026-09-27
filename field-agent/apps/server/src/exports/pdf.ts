@@ -137,7 +137,7 @@ export async function renderPdf(s: ExportSnapshot, options: PdfOptions = {}): Pr
     if (s.baselinePlan) plan(s.baselinePlan, 'Before / unchanged baseline');
     plan(s.selectedPlan, s.intent === 'adapt_to_site' ? 'After / selected proposal' : 'Numbered work plan');
     heading('Material quantities');
-    paragraph('Installed quantities from the selected plan. Purchasing stock and allowances are not inferred. Numeric values are preserved without added rounding.');
+    paragraph('Modeled quantities from the selected plan; physical fabrication splits may remain unresolved. Purchasing stock and allowances are not inferred. Numeric values are preserved without added rounding.');
     table(['Material / subjects', 'Quantity / unit', 'Status / sources / notes'], [205, 100, 206], s.materials.map(r => [`${r.id}: ${r.description}\nSubjects: ${r.subjectIds.join(', ')}`, r.quantity === null ? `UNRESOLVED\n${r.unit}` : `${r.quantity}\n${r.unit}`, `${r.status}\nSources: ${r.sourceIds.join(', ') || 'none'}\n${r.unresolvedReason ?? ''}`]));
     heading('Cut list');
     table(['Piece / segments / joints', 'Cut / unit', 'Status / sources / notes'], [205, 100, 206], s.cuts.map(r => [`${r.pieceId}\nSegments: ${r.segmentIds.join(', ')}\nJoints: ${r.jointIds.join(', ')}`, r.length === null ? `UNRESOLVED\n${r.unit}` : `${r.length}\n${r.unit}`, `${r.status}\nSources: ${r.sourceIds.join(', ') || 'none'}\n${r.unresolvedReason ?? ''}`]));

@@ -185,6 +185,14 @@ export function evaluateProfile(
       id: `PRODUCT-SUITABILITY-${p.id}`, subjectIds: input.pieces.filter(x => x.productId === p.id).map(x => x.id),
       status: "unknown" as const, state: "input_missing", reason: p.limitations!.join(" "), sourceRefs: p.sourceIds,
     })),
+    ...input.pieces.flatMap(p => ["requiredConnectionMethod", "requiredPipeSpecification"].flatMap(field => {
+      const requirement = fact<string>(s, field, p.id);
+      return requirement.confirmed && requirement.value ? [{
+        id: `SOURCE-REQUIREMENT-${p.id}-${field}`, subjectIds: [p.id], status: "unknown" as const,
+        state: "review_required", reason: `Source requirement: ${requirement.value}. Selection and project suitability require independent review.`,
+        sourceRefs: requirement.evidenceIds,
+      }] : [];
+    })),
     ...input.pieces.flatMap(p => {
       const required = fact<string>(s, "requiredConnectionMethod", p.id);
       const product = output.selectedProducts.find(x => x.id === p.productId);
@@ -218,7 +226,7 @@ export function evaluateProfile(
           : "verified",
       reason: output.operations.every((o) => o.status === "planned")
         ? "Supported procedure with supplied access, movement and cure confirmations"
-        : "Assembly has unresolved movement, cure, geometry or unsupported fixed-end closure",
+        : "Assembly has unresolved method-specific conditions, geometry or fixed-end closure",
       sourceRefs: output.sources.map((r) => r.id),
     },
     ...project.rules.map((r) => ({
@@ -233,7 +241,7 @@ export function evaluateProfile(
     })),
     ...project.coverage
       .filter(
-        (c) => c.state !== "supported" && (c.area === "nfpa13" || c.selected),
+        (c) => c.state !== "supported" && ((sfApplicable && c.area === "nfpa13") || c.selected),
       )
       .map((c) => ({
         id: `COVERAGE-${c.id}`,

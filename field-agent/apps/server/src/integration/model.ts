@@ -251,15 +251,22 @@ export function fabricationInput(
     description: `Explicit ${plan.confirmation} structured drawing dimensions: ${s.sourceDrawing.drawingId} ${s.sourceDrawing.revision}`,
   });
   const jointMovement: Record<string, Value<boolean>> = {};
-  const threadedJointPlan: Record<string, Value<string>> = {};
+  const threadedJointPlan: NonNullable<FabricationInput["assemblyConditions"]["threadedJointPlan"]> = {};
   for (const f of fittings)
     for (const port of f.ports) {
       const id = `${f.id}/${port.id}`;
       jointMovement[id] = value<boolean>(s, `movement.${port.id}`, f.id);
-      threadedJointPlan[id] = value<string>(s, `threadedJointPlan.${port.id}`, f.id);
+      threadedJointPlan[id] = {
+        pipeProductId: confirmedProductBinding(s, `threadedJointPlan.${port.id}.pipeProductId`, f.id),
+        fittingProductId: confirmedProductBinding(s, `threadedJointPlan.${port.id}.fittingProductId`, f.id),
+        plan: value<string>(s, `threadedJointPlan.${port.id}`, f.id),
+        movement: value<boolean>(s, `movement.${port.id}`, f.id),
+      };
       for (const e of evidence.filter((e) => e.subjectIds.includes(f.id)))
         e.subjectIds.push(id);
     }
+  const retainedContext = (entityId: string) => nodes.some(n =>
+    n.datum === "scope_interface" && n.id === `node-${entityId}`) || s.scope!.excludedEntityIds.includes(entityId);
   return {
     projectId: s.projectId,
     packageId: s.id,
@@ -294,13 +301,13 @@ export function fabricationInput(
               : "other",
         productId: e.productId,
         quantity: {
-          value: nodes.some(n => n.datum === "scope_interface") ? null : 1,
-          status: nodes.some(n => n.datum === "scope_interface") ? "unknown" : "proposed",
+          value: retainedContext(e.id) ? null : 1,
+          status: retainedContext(e.id) ? "unknown" : "proposed",
           evidenceIds: [],
-          reason: nodes.some(n => n.datum === "scope_interface") ? "Retained context entity; purchasing quantity is unknown" : "Counted from the saved model",
+          reason: retainedContext(e.id) ? "Retained context entity; purchasing quantity is unknown" : "Counted from the saved model",
         },
         attachedPieceIds: [],
-        reason: nodes.some(n => n.datum === "scope_interface") ? "Retained context; one model reference, not a purchased item" : "Installation outside the supported catalog",
+        reason: retainedContext(e.id) ? "Retained context; one model reference, not a purchased item" : "Installation outside the supported catalog",
       })),
     assemblyConditions: {
       workAreaAccess: value<boolean>(s, "workAreaAccess"),
