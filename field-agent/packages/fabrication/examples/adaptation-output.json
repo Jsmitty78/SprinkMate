@@ -1,0 +1,1320 @@
+{
+  "schemaVersion": "fabrication/v1",
+  "projectId": "example-project",
+  "packageId": "example-spool",
+  "planId": "candidate-a",
+  "baselinePlanId": "baseline",
+  "intent": "adapt_to_site",
+  "inputRevision": 1,
+  "configVersion": "example-config-1",
+  "sourceDrawing": {
+    "id": "example-drawing",
+    "revision": "A",
+    "approval": "approved"
+  },
+  "planRole": "candidate",
+  "selectedPlanId": "candidate-a",
+  "siteEvidenceIds": [
+    "example-duct"
+  ],
+  "evidenceClass": "manufacturer_document",
+  "frame": {
+    "id": "example-room",
+    "lengthUnit": "in"
+  },
+  "selectedProducts": [
+    {
+      "id": "spears/CP-010",
+      "kind": "pipe",
+      "label": "Spears FlameGuard CP-010 SDR 13.5 plain-end pipe",
+      "nominalSize": "NPS 1",
+      "outsideDiameter": {
+        "value": 1.315,
+        "unit": "in"
+      },
+      "connection": "cpvc_socket_solvent",
+      "sourceIds": [
+        "spears-fg-dimensions",
+        "spears-fg3"
+      ]
+    },
+    {
+      "id": "spears/4206-010S",
+      "kind": "elbow_90",
+      "label": "Spears FlameGuard 4206-010S sweep 90 socket x socket",
+      "nominalSize": "NPS 1",
+      "connection": "cpvc_socket_solvent",
+      "compatiblePipeIds": [
+        "spears/CP-010"
+      ],
+      "centerToFace": {
+        "value": 2.375,
+        "unit": "in"
+      },
+      "centerToSocketBottom": {
+        "value": 1.3125,
+        "unit": "in"
+      },
+      "publishedDimensionTolerance": {
+        "value": 0.03125,
+        "unit": "in"
+      },
+      "sourceIds": [
+        "spears-fg90s",
+        "spears-fg-dimensions",
+        "spears-fg3"
+      ]
+    }
+  ],
+  "rounding": "none; metres in calculation; renderer must declare display rounding",
+  "quantityBasis": "installed pieces; no stock nesting, waste, or procurement allowance",
+  "fittings": [
+    {
+      "id": "f2",
+      "sourceEntityIds": [
+        "source-elbow"
+      ],
+      "nodeId": "d",
+      "productId": "spears/4206-010S",
+      "ports": [
+        {
+          "id": "in",
+          "pieceId": "q1",
+          "end": "end",
+          "location": "shop"
+        },
+        {
+          "id": "out",
+          "pieceId": "q2",
+          "end": "start",
+          "location": "shop"
+        }
+      ],
+      "callout": "F1",
+      "position": {
+        "value": {
+          "x": 0,
+          "y": 12,
+          "z": 0,
+          "unit": "in",
+          "frameId": "example-room"
+        },
+        "status": "proposed",
+        "evidenceIds": [],
+        "reason": "Candidate geometry"
+      },
+      "jointIds": [
+        "f2/in",
+        "f2/out"
+      ]
+    },
+    {
+      "id": "f3",
+      "sourceEntityIds": [],
+      "nodeId": "e",
+      "productId": "spears/4206-010S",
+      "ports": [
+        {
+          "id": "in",
+          "pieceId": "q2",
+          "end": "end",
+          "location": "shop"
+        },
+        {
+          "id": "out",
+          "pieceId": "q3",
+          "end": "start",
+          "location": "field"
+        }
+      ],
+      "callout": "F2",
+      "position": {
+        "value": {
+          "x": 24,
+          "y": 12,
+          "z": 0,
+          "unit": "in",
+          "frameId": "example-room"
+        },
+        "status": "proposed",
+        "evidenceIds": [],
+        "reason": "Candidate geometry"
+      },
+      "jointIds": [
+        "f3/in",
+        "f3/out"
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "id": "pipe:spears/CP-010",
+      "kind": "pipe",
+      "productId": "spears/CP-010",
+      "entityIds": [
+        "q1",
+        "q2",
+        "q3"
+      ],
+      "quantity": {
+        "value": 3,
+        "unit": "each",
+        "basis": "confirmed_inputs",
+        "reasons": [],
+        "evidenceIds": []
+      },
+      "centerlineLength": {
+        "value": 1.0668,
+        "unit": "m",
+        "basis": "proposed_inputs",
+        "reasons": [],
+        "evidenceIds": [
+          "example-inputs"
+        ]
+      },
+      "cutLength": {
+        "value": 0.9334499999999999,
+        "unit": "m",
+        "basis": "proposed_inputs",
+        "reasons": [],
+        "evidenceIds": [
+          "example-inputs"
+        ]
+      },
+      "status": "supported",
+      "reasons": []
+    },
+    {
+      "id": "fitting:spears/4206-010S",
+      "kind": "fitting",
+      "productId": "spears/4206-010S",
+      "entityIds": [
+        "f2",
+        "f3"
+      ],
+      "quantity": {
+        "value": 2,
+        "unit": "each",
+        "basis": "confirmed_inputs",
+        "reasons": [],
+        "evidenceIds": []
+      },
+      "centerlineLength": null,
+      "cutLength": null,
+      "status": "supported",
+      "reasons": []
+    },
+    {
+      "id": "consumable:cement",
+      "kind": "consumable",
+      "productId": "spears/FS-5",
+      "entityIds": [
+        "f2/in",
+        "f2/out",
+        "f3/in",
+        "f3/out"
+      ],
+      "quantity": {
+        "value": null,
+        "unit": "each",
+        "basis": "unknown",
+        "reasons": [
+          "Cement purchase quantity is not estimated"
+        ],
+        "evidenceIds": []
+      },
+      "centerlineLength": null,
+      "cutLength": null,
+      "status": "unresolved",
+      "reasons": [
+        "No stock or consumables optimization"
+      ]
+    }
+  ],
+  "cuts": [
+    {
+      "pieceId": "q1",
+      "callout": 1,
+      "sourceSegmentIds": [
+        "source-1"
+      ],
+      "productId": "spears/CP-010",
+      "subassemblyId": "spool-1",
+      "disposition": "new",
+      "start": {
+        "value": {
+          "x": 0,
+          "y": 0,
+          "z": 0,
+          "unit": "in",
+          "frameId": "example-room"
+        },
+        "status": "confirmed",
+        "evidenceIds": [
+          "example-inputs"
+        ],
+        "reason": null
+      },
+      "end": {
+        "value": {
+          "x": 0,
+          "y": 12,
+          "z": 0,
+          "unit": "in",
+          "frameId": "example-room"
+        },
+        "status": "proposed",
+        "evidenceIds": [],
+        "reason": "Candidate geometry"
+      },
+      "centerline": {
+        "value": 0.30479999999999996,
+        "unit": "m",
+        "basis": "proposed_inputs",
+        "reasons": [],
+        "evidenceIds": [
+          "example-inputs"
+        ]
+      },
+      "cutLength": {
+        "value": 0.27146249999999994,
+        "unit": "m",
+        "basis": "proposed_inputs",
+        "reasons": [],
+        "evidenceIds": [
+          "example-inputs"
+        ]
+      },
+      "takeouts": [
+        {
+          "nodeId": "a",
+          "datum": "physical_pipe_end",
+          "fittingId": null,
+          "portId": null,
+          "centerToFaceM": null,
+          "insertionM": null,
+          "netTakeout": {
+            "value": 0,
+            "unit": "m",
+            "basis": "confirmed_inputs",
+            "reasons": [],
+            "evidenceIds": []
+          },
+          "sourceIds": []
+        },
+        {
+          "nodeId": "d",
+          "datum": "fitting_center",
+          "fittingId": "f2",
+          "portId": "in",
+          "centerToFaceM": 0.060325,
+          "insertionM": 0.026987499999999998,
+          "netTakeout": {
+            "value": 0.0333375,
+            "unit": "m",
+            "basis": "confirmed_inputs",
+            "reasons": [],
+            "evidenceIds": []
+          },
+          "sourceIds": [
+            "spears-fg90s",
+            "spears-fg-dimensions",
+            "spears-fg3"
+          ]
+        }
+      ],
+      "formula": "centerline - start.netTakeout - end.netTakeout"
+    },
+    {
+      "pieceId": "q2",
+      "callout": 2,
+      "sourceSegmentIds": [
+        "source-1"
+      ],
+      "productId": "spears/CP-010",
+      "subassemblyId": "spool-1",
+      "disposition": "new",
+      "start": {
+        "value": {
+          "x": 0,
+          "y": 12,
+          "z": 0,
+          "unit": "in",
+          "frameId": "example-room"
+        },
+        "status": "proposed",
+        "evidenceIds": [],
+        "reason": "Candidate geometry"
+      },
+      "end": {
+        "value": {
+          "x": 24,
+          "y": 12,
+          "z": 0,
+          "unit": "in",
+          "frameId": "example-room"
+        },
+        "status": "proposed",
+        "evidenceIds": [],
+        "reason": "Candidate geometry"
+      },
+      "centerline": {
+        "value": 0.6095999999999999,
+        "unit": "m",
+        "basis": "proposed_inputs",
+        "reasons": [],
+        "evidenceIds": []
+      },
+      "cutLength": {
+        "value": 0.5429249999999999,
+        "unit": "m",
+        "basis": "proposed_inputs",
+        "reasons": [],
+        "evidenceIds": []
+      },
+      "takeouts": [
+        {
+          "nodeId": "d",
+          "datum": "fitting_center",
+          "fittingId": "f2",
+          "portId": "out",
+          "centerToFaceM": 0.060325,
+          "insertionM": 0.026987499999999998,
+          "netTakeout": {
+            "value": 0.0333375,
+            "unit": "m",
+            "basis": "confirmed_inputs",
+            "reasons": [],
+            "evidenceIds": []
+          },
+          "sourceIds": [
+            "spears-fg90s",
+            "spears-fg-dimensions",
+            "spears-fg3"
+          ]
+        },
+        {
+          "nodeId": "e",
+          "datum": "fitting_center",
+          "fittingId": "f3",
+          "portId": "in",
+          "centerToFaceM": 0.060325,
+          "insertionM": 0.026987499999999998,
+          "netTakeout": {
+            "value": 0.0333375,
+            "unit": "m",
+            "basis": "confirmed_inputs",
+            "reasons": [],
+            "evidenceIds": []
+          },
+          "sourceIds": [
+            "spears-fg90s",
+            "spears-fg-dimensions",
+            "spears-fg3"
+          ]
+        }
+      ],
+      "formula": "centerline - start.netTakeout - end.netTakeout"
+    },
+    {
+      "pieceId": "q3",
+      "callout": 3,
+      "sourceSegmentIds": [
+        "source-2"
+      ],
+      "productId": "spears/CP-010",
+      "subassemblyId": "spool-1",
+      "disposition": "new",
+      "start": {
+        "value": {
+          "x": 24,
+          "y": 12,
+          "z": 0,
+          "unit": "in",
+          "frameId": "example-room"
+        },
+        "status": "proposed",
+        "evidenceIds": [],
+        "reason": "Candidate geometry"
+      },
+      "end": {
+        "value": {
+          "x": 24,
+          "y": 18,
+          "z": 0,
+          "unit": "in",
+          "frameId": "example-room"
+        },
+        "status": "confirmed",
+        "evidenceIds": [
+          "example-inputs"
+        ],
+        "reason": null
+      },
+      "centerline": {
+        "value": 0.15240000000000004,
+        "unit": "m",
+        "basis": "proposed_inputs",
+        "reasons": [],
+        "evidenceIds": [
+          "example-inputs"
+        ]
+      },
+      "cutLength": {
+        "value": 0.11906250000000004,
+        "unit": "m",
+        "basis": "proposed_inputs",
+        "reasons": [],
+        "evidenceIds": [
+          "example-inputs"
+        ]
+      },
+      "takeouts": [
+        {
+          "nodeId": "e",
+          "datum": "fitting_center",
+          "fittingId": "f3",
+          "portId": "out",
+          "centerToFaceM": 0.060325,
+          "insertionM": 0.026987499999999998,
+          "netTakeout": {
+            "value": 0.0333375,
+            "unit": "m",
+            "basis": "confirmed_inputs",
+            "reasons": [],
+            "evidenceIds": []
+          },
+          "sourceIds": [
+            "spears-fg90s",
+            "spears-fg-dimensions",
+            "spears-fg3"
+          ]
+        },
+        {
+          "nodeId": "c",
+          "datum": "physical_pipe_end",
+          "fittingId": null,
+          "portId": null,
+          "centerToFaceM": null,
+          "insertionM": null,
+          "netTakeout": {
+            "value": 0,
+            "unit": "m",
+            "basis": "confirmed_inputs",
+            "reasons": [],
+            "evidenceIds": []
+          },
+          "sourceIds": []
+        }
+      ],
+      "formula": "centerline - start.netTakeout - end.netTakeout"
+    }
+  ],
+  "joints": [
+    {
+      "id": "f2/in",
+      "callout": 1,
+      "pieceId": "q1",
+      "end": "end",
+      "nodeId": "d",
+      "fittingId": "f2",
+      "portId": "in",
+      "subassemblyId": "spool-1",
+      "location": "shop",
+      "orientation": "-Y",
+      "procedureId": "spears-fg3-socket-1in",
+      "reasons": []
+    },
+    {
+      "id": "f2/out",
+      "callout": 2,
+      "pieceId": "q2",
+      "end": "start",
+      "nodeId": "d",
+      "fittingId": "f2",
+      "portId": "out",
+      "subassemblyId": "spool-1",
+      "location": "shop",
+      "orientation": "+X",
+      "procedureId": "spears-fg3-socket-1in",
+      "reasons": []
+    },
+    {
+      "id": "f3/in",
+      "callout": 3,
+      "pieceId": "q2",
+      "end": "end",
+      "nodeId": "e",
+      "fittingId": "f3",
+      "portId": "in",
+      "subassemblyId": "spool-1",
+      "location": "shop",
+      "orientation": "-X",
+      "procedureId": "spears-fg3-socket-1in",
+      "reasons": []
+    },
+    {
+      "id": "f3/out",
+      "callout": 4,
+      "pieceId": "q3",
+      "end": "start",
+      "nodeId": "e",
+      "fittingId": "f3",
+      "portId": "out",
+      "subassemblyId": "spool-1",
+      "location": "field",
+      "orientation": "+Y",
+      "procedureId": "spears-fg3-socket-1in",
+      "reasons": []
+    }
+  ],
+  "operations": [
+    {
+      "id": "op-1",
+      "number": 1,
+      "code": "cut_square",
+      "pieceIds": [
+        "q1"
+      ],
+      "jointIds": [],
+      "predecessorId": null,
+      "instruction": "Cut piece 1 square to the cut-list length with a suitable plastic-pipe tool.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication"
+      ]
+    },
+    {
+      "id": "op-2",
+      "number": 2,
+      "code": "deburr_bevel",
+      "pieceIds": [
+        "q1"
+      ],
+      "jointIds": [],
+      "predecessorId": "op-1",
+      "instruction": "Remove internal/external burrs and bevel the end approximately 10-15 degrees.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication"
+      ]
+    },
+    {
+      "id": "op-3",
+      "number": 3,
+      "code": "cut_square",
+      "pieceIds": [
+        "q2"
+      ],
+      "jointIds": [],
+      "predecessorId": "op-2",
+      "instruction": "Cut piece 2 square to the cut-list length with a suitable plastic-pipe tool.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication"
+      ]
+    },
+    {
+      "id": "op-4",
+      "number": 4,
+      "code": "deburr_bevel",
+      "pieceIds": [
+        "q2"
+      ],
+      "jointIds": [],
+      "predecessorId": "op-3",
+      "instruction": "Remove internal/external burrs and bevel the end approximately 10-15 degrees.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication"
+      ]
+    },
+    {
+      "id": "op-5",
+      "number": 5,
+      "code": "cut_square",
+      "pieceIds": [
+        "q3"
+      ],
+      "jointIds": [],
+      "predecessorId": "op-4",
+      "instruction": "Cut piece 3 square to the cut-list length with a suitable plastic-pipe tool.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication"
+      ]
+    },
+    {
+      "id": "op-6",
+      "number": 6,
+      "code": "deburr_bevel",
+      "pieceIds": [
+        "q3"
+      ],
+      "jointIds": [],
+      "predecessorId": "op-5",
+      "instruction": "Remove internal/external burrs and bevel the end approximately 10-15 degrees.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication"
+      ]
+    },
+    {
+      "id": "op-7",
+      "number": 7,
+      "code": "inspect_dry_fit_clean",
+      "pieceIds": [
+        "q1"
+      ],
+      "jointIds": [
+        "f2/in"
+      ],
+      "predecessorId": "op-6",
+      "instruction": "Inspect q1 and f2/in; check dry-fit interference, then clean and dry mating surfaces.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f2/in"
+      ]
+    },
+    {
+      "id": "op-8",
+      "number": 8,
+      "code": "apply_cement",
+      "pieceIds": [
+        "q1"
+      ],
+      "jointIds": [
+        "f2/in"
+      ],
+      "predecessorId": "op-7",
+      "instruction": "Apply FS-5 to pipe and socket per FG-3; prevent cement pooling.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f2/in"
+      ]
+    },
+    {
+      "id": "op-9",
+      "number": 9,
+      "code": "insert_rotate_hold",
+      "pieceIds": [
+        "q1"
+      ],
+      "jointIds": [
+        "f2/in"
+      ],
+      "predecessorId": "op-8",
+      "instruction": "Immediately insert fully, rotating 1/4 turn during insertion. Align -Y; hold 30 seconds. Inspect the continuous bead and remove exterior excess.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f2/in"
+      ]
+    },
+    {
+      "id": "op-10",
+      "number": 10,
+      "code": "set_and_cure",
+      "pieceIds": [
+        "q1"
+      ],
+      "jointIds": [
+        "f2/in"
+      ],
+      "predecessorId": "op-9",
+      "instruction": "Keep the joint unstressed and follow the reviewed cure plan: Example only: new dry assembly, 70 F, normal fit; review moisture/humidity. FG-3 pp27-28 Table 1: minimum 90 minutes for 1 inch at up to 225 psi; initial unstressed set per Step 6. Qualified installer confirms actual conditions before use.. FG-3 governs handling and testing.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f2/in"
+      ]
+    },
+    {
+      "id": "op-11",
+      "number": 11,
+      "code": "inspect_dry_fit_clean",
+      "pieceIds": [
+        "q2"
+      ],
+      "jointIds": [
+        "f2/out"
+      ],
+      "predecessorId": "op-10",
+      "instruction": "Inspect q2 and f2/out; check dry-fit interference, then clean and dry mating surfaces.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f2/out"
+      ]
+    },
+    {
+      "id": "op-12",
+      "number": 12,
+      "code": "apply_cement",
+      "pieceIds": [
+        "q2"
+      ],
+      "jointIds": [
+        "f2/out"
+      ],
+      "predecessorId": "op-11",
+      "instruction": "Apply FS-5 to pipe and socket per FG-3; prevent cement pooling.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f2/out"
+      ]
+    },
+    {
+      "id": "op-13",
+      "number": 13,
+      "code": "insert_rotate_hold",
+      "pieceIds": [
+        "q2"
+      ],
+      "jointIds": [
+        "f2/out"
+      ],
+      "predecessorId": "op-12",
+      "instruction": "Immediately insert fully, rotating 1/4 turn during insertion. Align +X; hold 30 seconds. Inspect the continuous bead and remove exterior excess.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f2/out"
+      ]
+    },
+    {
+      "id": "op-14",
+      "number": 14,
+      "code": "set_and_cure",
+      "pieceIds": [
+        "q2"
+      ],
+      "jointIds": [
+        "f2/out"
+      ],
+      "predecessorId": "op-13",
+      "instruction": "Keep the joint unstressed and follow the reviewed cure plan: Example only: new dry assembly, 70 F, normal fit; review moisture/humidity. FG-3 pp27-28 Table 1: minimum 90 minutes for 1 inch at up to 225 psi; initial unstressed set per Step 6. Qualified installer confirms actual conditions before use.. FG-3 governs handling and testing.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f2/out"
+      ]
+    },
+    {
+      "id": "op-15",
+      "number": 15,
+      "code": "inspect_dry_fit_clean",
+      "pieceIds": [
+        "q2"
+      ],
+      "jointIds": [
+        "f3/in"
+      ],
+      "predecessorId": "op-14",
+      "instruction": "Inspect q2 and f3/in; check dry-fit interference, then clean and dry mating surfaces.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f3/in"
+      ]
+    },
+    {
+      "id": "op-16",
+      "number": 16,
+      "code": "apply_cement",
+      "pieceIds": [
+        "q2"
+      ],
+      "jointIds": [
+        "f3/in"
+      ],
+      "predecessorId": "op-15",
+      "instruction": "Apply FS-5 to pipe and socket per FG-3; prevent cement pooling.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f3/in"
+      ]
+    },
+    {
+      "id": "op-17",
+      "number": 17,
+      "code": "insert_rotate_hold",
+      "pieceIds": [
+        "q2"
+      ],
+      "jointIds": [
+        "f3/in"
+      ],
+      "predecessorId": "op-16",
+      "instruction": "Immediately insert fully, rotating 1/4 turn during insertion. Align -X; hold 30 seconds. Inspect the continuous bead and remove exterior excess.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f3/in"
+      ]
+    },
+    {
+      "id": "op-18",
+      "number": 18,
+      "code": "set_and_cure",
+      "pieceIds": [
+        "q2"
+      ],
+      "jointIds": [
+        "f3/in"
+      ],
+      "predecessorId": "op-17",
+      "instruction": "Keep the joint unstressed and follow the reviewed cure plan: Example only: new dry assembly, 70 F, normal fit; review moisture/humidity. FG-3 pp27-28 Table 1: minimum 90 minutes for 1 inch at up to 225 psi; initial unstressed set per Step 6. Qualified installer confirms actual conditions before use.. FG-3 governs handling and testing.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f3/in"
+      ]
+    },
+    {
+      "id": "op-19",
+      "number": 19,
+      "code": "inspect_dry_fit_clean",
+      "pieceIds": [
+        "q3"
+      ],
+      "jointIds": [
+        "f3/out"
+      ],
+      "predecessorId": "op-18",
+      "instruction": "Inspect q3 and f3/out; check dry-fit interference, then clean and dry mating surfaces.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f3/out"
+      ]
+    },
+    {
+      "id": "op-20",
+      "number": 20,
+      "code": "apply_cement",
+      "pieceIds": [
+        "q3"
+      ],
+      "jointIds": [
+        "f3/out"
+      ],
+      "predecessorId": "op-19",
+      "instruction": "Apply FS-5 to pipe and socket per FG-3; prevent cement pooling.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f3/out"
+      ]
+    },
+    {
+      "id": "op-21",
+      "number": 21,
+      "code": "insert_rotate_hold",
+      "pieceIds": [
+        "q3"
+      ],
+      "jointIds": [
+        "f3/out"
+      ],
+      "predecessorId": "op-20",
+      "instruction": "Immediately insert fully, rotating 1/4 turn during insertion. Align +Y; hold 30 seconds. Inspect the continuous bead and remove exterior excess.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f3/out"
+      ]
+    },
+    {
+      "id": "op-22",
+      "number": 22,
+      "code": "set_and_cure",
+      "pieceIds": [
+        "q3"
+      ],
+      "jointIds": [
+        "f3/out"
+      ],
+      "predecessorId": "op-21",
+      "instruction": "Keep the joint unstressed and follow the reviewed cure plan: Example only: new dry assembly, 70 F, normal fit; review moisture/humidity. FG-3 pp27-28 Table 1: minimum 90 minutes for 1 inch at up to 225 psi; initial unstressed set per Step 6. Qualified installer confirms actual conditions before use.. FG-3 governs handling and testing.",
+      "sourceIds": [
+        "spears-fg3"
+      ],
+      "status": "needs_confirmation",
+      "reasons": [
+        "Confirm proposed geometry before fabrication",
+        "Confirm full insertion and quarter-turn movement in the stated sequence",
+        "Missing value for f3/out"
+      ]
+    }
+  ],
+  "subassemblies": [
+    {
+      "id": "spool-1",
+      "pieceIds": [
+        "q1",
+        "q2",
+        "q3"
+      ],
+      "jointIds": [
+        "f2/in",
+        "f2/out",
+        "f3/in",
+        "f3/out"
+      ]
+    }
+  ],
+  "gaps": [
+    {
+      "subjectId": "consumable:cement",
+      "reason": "No stock or consumables optimization"
+    },
+    {
+      "subjectId": "op-1",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-2",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-3",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-4",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-5",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-6",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-7",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-7",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-7",
+      "reason": "Missing value for f2/in"
+    },
+    {
+      "subjectId": "op-8",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-8",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-8",
+      "reason": "Missing value for f2/in"
+    },
+    {
+      "subjectId": "op-9",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-9",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-9",
+      "reason": "Missing value for f2/in"
+    },
+    {
+      "subjectId": "op-10",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-10",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-10",
+      "reason": "Missing value for f2/in"
+    },
+    {
+      "subjectId": "op-11",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-11",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-11",
+      "reason": "Missing value for f2/out"
+    },
+    {
+      "subjectId": "op-12",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-12",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-12",
+      "reason": "Missing value for f2/out"
+    },
+    {
+      "subjectId": "op-13",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-13",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-13",
+      "reason": "Missing value for f2/out"
+    },
+    {
+      "subjectId": "op-14",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-14",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-14",
+      "reason": "Missing value for f2/out"
+    },
+    {
+      "subjectId": "op-15",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-15",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-15",
+      "reason": "Missing value for f3/in"
+    },
+    {
+      "subjectId": "op-16",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-16",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-16",
+      "reason": "Missing value for f3/in"
+    },
+    {
+      "subjectId": "op-17",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-17",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-17",
+      "reason": "Missing value for f3/in"
+    },
+    {
+      "subjectId": "op-18",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-18",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-18",
+      "reason": "Missing value for f3/in"
+    },
+    {
+      "subjectId": "op-19",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-19",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-19",
+      "reason": "Missing value for f3/out"
+    },
+    {
+      "subjectId": "op-20",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-20",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-20",
+      "reason": "Missing value for f3/out"
+    },
+    {
+      "subjectId": "op-21",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-21",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-21",
+      "reason": "Missing value for f3/out"
+    },
+    {
+      "subjectId": "op-22",
+      "reason": "Confirm proposed geometry before fabrication"
+    },
+    {
+      "subjectId": "op-22",
+      "reason": "Confirm full insertion and quarter-turn movement in the stated sequence"
+    },
+    {
+      "subjectId": "op-22",
+      "reason": "Missing value for f3/out"
+    }
+  ],
+  "sources": [
+    {
+      "id": "spears-fg-dimensions",
+      "document": "FlameGuard Technical: General Information",
+      "revision": "undated; retrieved 2026-09-26",
+      "pages": "PDF 1, printed 5: dimension reference and CP-010 row",
+      "url": "https://parts.spearsmfg.com/sourcebook/FGTECH_FG-1_T_FGGI_T.pdf",
+      "sha256": "bd8804bfa4c2e94f062ee7a21e8d162b41ec5544d258216c5b051a7856c37cab"
+    },
+    {
+      "id": "spears-fg90s",
+      "document": "FlameGuard CPVC Sweep 90 Elbows",
+      "revision": "FG90S-2-0723; printed 08/24",
+      "pages": "PDF 1-2; 4206-010S row and G/H drawing on 2",
+      "url": "https://www.spearsmfg.com/flameguard/027-FG90S-2-0723_0824_web.pdf",
+      "sha256": "919dec69092bd8a371731ec21b22ec1503de703baad54a9142761999c18dc327"
+    },
+    {
+      "id": "spears-fg3",
+      "document": "FlameGuard CPVC Fire Sprinkler Products Installation Instructions",
+      "revision": "FG-3-1223, December 20, 2023 (URL retains 0321)",
+      "pages": "24-28: socket procedure; 39-40: cut-in conditions; 42: pipe dimensions",
+      "url": "https://www.spearsmfg.com/flameguard/03-FG-3_0321_web.pdf",
+      "sha256": "ee2db4064f2d51d556d91f484e44f789b1b128812a2feefbd46dca99c8e0697c"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "example-inputs",
+      "subjectIds": [
+        "baseline",
+        "a",
+        "b",
+        "c",
+        "f1/in",
+        "f1/out",
+        "candidate-a"
+      ],
+      "description": "Invented drawing and explicit confirmation fixture; not a site observation or approved real drawing."
+    },
+    {
+      "id": "example-duct",
+      "subjectIds": [
+        "duct-1"
+      ],
+      "description": "Synthetic discrepancy input; candidate generation is owned by #9."
+    }
+  ],
+  "constructionApproval": "not_assessed"
+}
