@@ -76,6 +76,19 @@ export interface ExportSnapshot {
   findings: { id: string; status: 'pass' | 'fail' | 'unknown' | 'not_applicable'; description: string; subjectIds: string[]; sourceIds: string[] }[];
   unresolvedItems: string[];
   sources: { id: string; title: string; reference: string }[];
+  /** Saved inputs as entered, with their basis, so a test assumption is never read as a measurement. */
+  inputs?: InputRow[];
+}
+export interface InputRow {
+  id: string;
+  field: string;
+  subjectIds: string[];
+  value: string | number | boolean | null;
+  unit: string | null;
+  status: 'confirmed' | 'proposed' | 'unknown';
+  basis: 'test_assumption' | 'sample' | 'recorded';
+  source: string;
+  evidenceAssetId: string | null;
 }
 export type ExportFileName = 'work-package.pdf' | 'bom.csv' | 'cut-list.csv' | 'manifest.json';
 export interface ExportManifest {

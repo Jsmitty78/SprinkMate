@@ -2,8 +2,10 @@ import { adaptationFrame } from "@field-agent/core";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, type Snapshot } from "./api.js";
 import { dateTime } from "./format.js";
-import { ChangeInputs, ClearanceInput, DetailingInputs, EvidenceInputs, RunEditor, BoxInputs, type Unit } from "./inputs.js";
-import { callouts, contextIds, findFact, isConfirmed, readBox, requirements, resultFor, routeOptions, runBlockers, type Plan } from "./model.js";
+import { ChangeInputs, DetailingInputs, EvidenceInputs, RunEditor, type Unit } from "./inputs.js";
+import { SiteBoxInputs, SiteFrameInputs, SiteLengthInput } from "./site/SiteInputs.js";
+import { SiteViews } from "./site/SiteViews.js";
+import { callouts, contextIds, findFact, isConfirmed, readBox, requirements, siteFrameOf, resultFor, routeOptions, runBlockers, type Plan } from "./model.js";
 import { IntakeInputs } from "./intake/IntakeInputs.js";
 import { SheetView } from "./intake/SheetView.js";
 import { FRAME_ID } from "./intake/sheet.js";
@@ -134,9 +136,13 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
       case "site": return <>
         <MissingList reqs={reqs} />
         <Section title="Site condition" defaultOpen={!s.changeRequest}><ChangeInputs {...common} callouts={baseCallouts} /></Section>
-        <Section title="Measured obstacle (duct box)" defaultOpen={!readBox(s, "duct").confirmed}><BoxInputs {...common} prefix="duct" title="Obstacle" help="Faces of the duct box in the run's frame." /></Section>
-        <Section title="Work boundary" defaultOpen={!readBox(s, "workEnvelope").confirmed}><BoxInputs {...common} prefix="workEnvelope" title="Work boundary" help="Where new pipe may go." /></Section>
-        <Section title="Clearance"><ClearanceInput {...common} /></Section>
+        <Section title="Site frame" defaultOpen={!siteFrameOf(s) || !!siteFrameOf(s)!.reason}><SiteFrameInputs {...common} callouts={baseCallouts} /></Section>
+        <Section title="Plan and elevation"><SiteViews s={s} /></Section>
+        <Section title="Obstacle (duct box)" defaultOpen={!readBox(s, "duct").confirmed}><SiteBoxInputs {...common} prefix="duct" title="Obstacle" help={siteFrameOf(s) ? "Faces of the duct box along the pinned span." : "Faces of the duct box in the plan frame."} /></Section>
+        <Section title="Work boundary" defaultOpen={!readBox(s, "workEnvelope").confirmed}><SiteBoxInputs {...common} prefix="workEnvelope" title="Work boundary" help="Where new pipe may go, in the same frame." /></Section>
+        <Section title="Clearance">
+          <SiteLengthInput {...common} field="requiredPipeClearance" label="Required surface clearance, pipe to obstacle" tag="Test parameter" help="A parameter for this test, not a regulation. The planner keeps the pipe's outside surface at least this far from the obstacle box." />
+        </Section>
         <Section title="Photos" count={s.siteFacts.filter(f => f.field.startsWith("evidence.photo")).length}><EvidenceInputs {...common} /></Section>
         {intakeInputs}
         <DetailingInputs {...common} callouts={baseCallouts} />

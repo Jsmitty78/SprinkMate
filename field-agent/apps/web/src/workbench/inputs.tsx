@@ -3,7 +3,7 @@ import type { PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "./api.js";
 import { lengthInput, lengthText, parseLength, toMetres } from "./format.js";
 import {
-  showCpvcInputs, showSfInputs, activeDetailingPlan, BOX_KEYS, buildRun, ELBOW, inScope, PIPE, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
+  reopenSiteGeometry, showCpvcInputs, showSfInputs, activeDetailingPlan, BOX_KEYS, buildRun, ELBOW, inScope, PIPE, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
   syncRunDraft, type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
 } from "./model.js";
 import { Badge, Button, Callout, Field, Icon, Section } from "./ui.js";
@@ -198,37 +198,22 @@ export function DetailingInputs(props: Common & { callouts: Callouts }) {
 
 // ---------------------------------------------------------------- site conditions
 
-const AXIS_LABEL = ["West (min X)", "South (min Y)", "Bottom (min Z)", "East (max X)", "North (max Y)", "Top (max Z)"];
-
-export function BoxInputs({ s, act, busy, unit, setNotice, prefix, title, help }: Common & { prefix: "duct" | "workEnvelope"; title: string; help: string }) {
-  const box = readBox(s, prefix);
-  const [vals, setVals] = useState(() => box.values.map(v => lengthInput(v, unit)));
-  useEffect(() => { setVals(box.values.map(v => lengthInput(v, unit))); }, [box.values.join(","), unit]);
-  const parsed = vals.map(v => v.trim() ? parseLength(v, unit) : null);
-  const invalid = vals.some((v, i) => v.trim() && parsed[i] === null);
-  const sample = BOX_KEYS.some(k => findFact(s, `${prefix}.${k}`)?.source.description.startsWith("SAMPLE"));
-  const save = () => act(prefix, async cur => {
-    const facts = upsertFacts(cur, BOX_KEYS.map((k, i) => ({ field: `${prefix}.${k}`, value: parsed[i], unit: "mm", confirmation: "confirmed", context: "observed", source: MEASURED, unknownReason: "Not measured yet" })));
-    const patch: Partial<PackageInputs> = { ...facts };
-    if (prefix === "duct" && cur.changeRequest) patch.changeRequest = { ...cur.changeRequest, factIds: facts.siteFacts.filter(f => f.field.startsWith("duct.")).map(f => f.id) };
-    await patchClearing(cur, patch, setNotice);
-  });
-  return <div className="fa-stack">
-    <div className="fa-fact-head"><span className="fa-muted">{help}</span>{sample ? <Badge tone="sample">Sample</Badge> : box.confirmed ? <Badge tone="green">Measured by you</Badge> : <Badge tone="amber">{box.values.some(v => v !== null) ? "Incomplete" : "Not measured"}</Badge>}</div>
-    <div className="fa-grid3">{AXIS_LABEL.map((l, i) => <Field key={l} label={l}><input className={`mono ${vals[i].trim() && parsed[i] === null ? "is-invalid" : ""}`} value={vals[i]} placeholder="Unknown" onChange={e => setVals(vals.map((v, j) => j === i ? e.target.value : v))} /></Field>)}</div>
-    {parsed.some(v => v === null) && <small className="fa-warn">Empty faces are saved as unknown, not zero. Routes cannot be generated around an incomplete {title.toLowerCase()}.</small>}
-    <div className="fa-actions"><Button variant="primary" busy={busy === prefix} disabled={!!busy || invalid} onClick={() => void save()}>Save measurement</Button></div>
-  </div>;
-}
-
 export function ChangeInputs({ s, act, busy, setNotice, callouts }: Common & { callouts: Callouts }) {
   const pipes = s.baselinePlan?.entities.filter(e => e.kind === "pipe" && inScope(s)(e.id)) ?? [];
   const [desc, setDesc] = useState(s.changeRequest?.description ?? "");
   const [ids, setIds] = useState<string[]>(s.changeRequest?.affectedEntityIds ?? []);
   useEffect(() => { setDesc(s.changeRequest?.description ?? ""); setIds(s.changeRequest?.affectedEntityIds ?? []); }, [s.changeRequest]);
-  const save = () => act("change", cur => patchClearing(cur, {
-    changeRequest: { id: cur.changeRequest?.id ?? "site-change", description: desc.trim(), affectedEntityIds: ids, factIds: [...cur.detailing, ...cur.siteFacts].filter(f => f.field.startsWith("duct.")).map(f => f.id) },
-  }, setNotice));
+  const save = () => act("change", async cur => {
+    // Site geometry is read along the affected span; a different span needs it confirmed again.
+    const moved = (cur.changeRequest?.affectedEntityIds ?? []).join(",") !== ids.join(",") && !!cur.changeRequest;
+    const reopened = moved ? reopenSiteGeometry(cur) : {};
+    await patchClearing(cur, {
+      ...reopened,
+      changeRequest: { id: cur.changeRequest?.id ?? "site-change", description: desc.trim(), affectedEntityIds: ids, factIds: [...cur.detailing, ...cur.siteFacts].filter(f => f.field.startsWith("duct.")).map(f => f.id) },
+    }, setNotice);
+    if (moved && [...cur.detailing, ...cur.siteFacts].some(f => /^(adaptationFrame|duct|workEnvelope)\./.test(f.field) && f.confirmation === "confirmed"))
+      setNotice("The affected span changed. Save the site frame on the new span, then confirm the obstacle and work boundary again.");
+  });
   if (!pipes.length) return <p className="fa-muted">Enter the existing run first, then choose the piece the obstacle blocks.</p>;
   return <div className="fa-stack">
     <Field label="What did you find on site?"><textarea rows={2} value={desc} onChange={e => setDesc(e.target.value)} placeholder="e.g. Duct installed where the branch should run" /></Field>
@@ -270,8 +255,4 @@ function Thumb({ packageId, assetId, caption }: { packageId: string; assetId: st
     return () => { revoked = true; if (made) URL.revokeObjectURL(made); };
   }, [packageId, assetId]);
   return <figure className="fa-thumb">{url ? <img src={url} alt={caption} /> : <div className="fa-thumb-ph" />}<figcaption>{caption}</figcaption></figure>;
-}
-
-export function ClearanceInput(props: Common) {
-  return <FactRow {...props} spec={{ field: "requiredPipeClearance", label: "Required clearance from pipe to obstacle", kind: { type: "length" }, context: "observed", help: "The planner keeps every route at least this far from the measured duct box." }} />;
 }

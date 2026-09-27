@@ -9,6 +9,9 @@ import {
 } from "../exports/types.js";
 import type { Detail, IntegratedState } from "./runtime.js";
 
+const isAssumption = (description: string) =>
+  description.startsWith("ASSUMPTION:");
+
 function view(d: Detail, s: WorkPackageSnapshot): PlanView {
   const point = (v: FabricationOutput["cuts"][number]["start"]) => {
     if (!v.value)
@@ -230,5 +233,20 @@ export function exportSnapshot(
         : []),
     ],
     sources: [...sources.values()],
+    inputs: [...s.siteFacts, ...s.detailing].map((x) => ({
+      id: x.id,
+      field: x.field,
+      subjectIds: x.subjectIds,
+      value: x.value,
+      unit: x.unit,
+      status: x.value === null ? "unknown" : x.confirmation,
+      basis: isAssumption(x.source.description)
+        ? "test_assumption"
+        : x.source.description.startsWith("SAMPLE")
+          ? "sample"
+          : "recorded",
+      source: x.source.description,
+      evidenceAssetId: x.source.assetId,
+    })),
   };
 }

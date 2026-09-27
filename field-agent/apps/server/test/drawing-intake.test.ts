@@ -2,43 +2,13 @@ import { afterEach, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { PackagePlan, PackageInputs } from "@field-agent/core";
 import { FieldService } from "../src/service.js";
 import { createApp } from "../src/api.js";
 import { WorkPackageStore } from "../src/work-packages/store.js";
 import { createIntegratedServices } from "../src/integration/runtime.js";
-
-// FS-01 P27 as the browser intake saves it: PDF points (Y down) mapped to a right-handed plan frame,
-// N27 (12544.2133, 9620.5040) and N28 (12544.2133, 12668.1653) mm in the crop frame; heads H1/H3 and the
-// adjacent pipes are unconnected context outside the scope.
-const MM_PER_PT = 33.8666666667;
-const frame = { id: "drawing-plan", lengthUnit: "mm" as const, axes: "right_handed_z_up" as const };
-const at = (x: number, y: number) => ({ x, y: -y, z: 0 });
-const N27 = at(12544.2133, 9620.504), N28 = at(12544.2133, 12668.1653);
-const port = (id: string, position: { x: number; y: number; z: number }) => ({ id, position, unknownReason: null });
-export function fs01Trace(): Pick<PackageInputs, "baselinePlan" | "scope"> {
-  const plan: PackagePlan = {
-    id: "baseline", coordinateFrame: frame, confirmation: "confirmed",
-    entities: [
-      { id: "p1", kind: "pipe", productId: null, ports: [port("start", N27), port("end", N28)] },
-      { id: "t1", kind: "tie_in", productId: null, ports: [port("socket", N27)] },
-      { id: "t2", kind: "tie_in", productId: null, ports: [port("socket", N28)] },
-      { id: "h1", kind: "head", productId: null, ports: [port("center", N27)] },
-      { id: "h2", kind: "head", productId: null, ports: [port("center", N28)] },
-      { id: "c1", kind: "pipe", productId: null, ports: [port("start", at(12544.2133, 9000)), port("end", at(12544.2133, 8000))] },
-    ],
-    connections: [
-      { id: "t1-joint", from: { entityId: "p1", portId: "start" }, to: { entityId: "t1", portId: "socket" } },
-      { id: "t2-joint", from: { entityId: "p1", portId: "end" }, to: { entityId: "t2", portId: "socket" } },
-    ],
-  };
-  return { baselinePlan: plan, scope: { coordinateFrame: frame, includedEntityIds: ["p1", "t1", "t2"], excludedEntityIds: ["h1", "h2", "c1"], tieInEntityIds: ["t1", "t2"] } };
-}
-export const fs01View = {
-  sheetUnit: "pdf_pt" as const, workArea: { x: 300, y: 230, width: 160, height: 190 },
-  calibration: { method: "printed_scale" as const, a: null, b: null, realDistance: null, printedScale: "1/8 in = 1 ft", reference: "Printed scale on FS-01", pointUncertaintyMm: 5 },
-  frame: { origin: { x: 0, y: 0 }, rotationDeg: 0 }, derivativeOf: "FM32361 FS-01 PDF crop (test copy)",
-};
+import { exportSnapshot } from "../src/integration/snapshot.js";
+import { renderPdf } from "../src/exports/pdf.js";
+import { fs01Trace, fs01View, MM_PER_PT } from "./fs01-fixture.js";
 
 const cleanup: (() => void)[] = [];
 afterEach(() => cleanup.splice(0).forEach(f => f()));
@@ -101,4 +71,15 @@ it("refuses context that is connected into the work instead of dropping it", asy
   const done = await run(t, d.id);
   expect(done.run?.status).toBe("failed");
   expect(done.outputs.results).toHaveLength(0);
+});
+
+it("exports saved inputs with their basis, so a test assumption never reads as a measurement", async () => {
+  const t = setup(), d = await drawing(t);
+  const assumed = { id: "clearance", field: "requiredPipeClearance", value: 100, unit: "mm", subjectIds: [], unknownReason: null, confirmation: "confirmed" as const,
+    context: "observed" as const, source: { description: "ASSUMPTION: software-test parameter, not a regulation", assetId: null, page: null } };
+  t.packages.edit(d.id, { expectedRevision: 1, patch: { sourceDrawing: d.sourceDrawing, ...fs01Trace(), siteFacts: [assumed] } });
+  await run(t, d.id);
+  const snap = exportSnapshot(t.packages.get(d.id), t.detailStore.get(d.id)!)!;
+  expect(snap.inputs).toEqual([expect.objectContaining({ id: "clearance", value: 100, unit: "mm", status: "confirmed", basis: "test_assumption" })]);
+  expect((await renderPdf(snap)).subarray(0, 5).toString()).toBe("%PDF-");
 });

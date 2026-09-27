@@ -1,4 +1,4 @@
-import { adaptationInterval } from "@field-agent/core";
+import { adaptationFrame, adaptationInterval } from "@field-agent/core";
 import type { PackageInputs, PackagePlan, PackageResult, WorkPackageSnapshot } from "@field-agent/core";
 import { lengthInput, parseLength } from "./format.js";
 
@@ -99,7 +99,45 @@ export function readBox(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">,
     box: complete ? { min: { x: values[0]!, y: values[1]!, z: values[2]! }, max: { x: values[3]!, y: values[4]!, z: values[5]! } } : null,
   };
 }
-function toMm(value: number, unit: string | null): number | null {
+/** Source prefix for fictional values entered to exercise the software. Confirming never removes it. */
+export const ASSUMPTION_PREFIX = "ASSUMPTION:";
+export const FRAME_FIELDS = ["origin.x", "origin.y", "origin.z", "yaw"].map(k => `adaptationFrame.${k}`);
+/**
+ * The explicit local frame (docs/contracts/adaptation-interval.md), or null when boxes are in the
+ * drawing frame. `reason` is set when the saved facts are partial or unconfirmed.
+ */
+export function siteFrameOf(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">) {
+  const facts = FRAME_FIELDS.map(f => findFact(s, f));
+  if (facts.every(f => !f)) return null;
+  try {
+    const t = adaptationFrame(s);
+    const yaw = facts[3]!.value as number;
+    return { facts, yaw, origin: { x: t.toDrawing({ x: 0, y: 0, z: 0 }).x, y: t.toDrawing({ x: 0, y: 0, z: 0 }).y, z: t.toDrawing({ x: 0, y: 0, z: 0 }).z }, toLocal: t.toLocal, toDrawing: t.toDrawing, reason: null as string | null };
+  } catch (e) {
+    return { facts, yaw: null, origin: null, toLocal: null, toDrawing: null, reason: e instanceof Error ? e.message : String(e) };
+  }
+}
+/**
+ * Sets the local frame and both boxes back to proposed, keeping their numbers: they were read along a
+ * span that is no longer the affected one, so they must be confirmed again before routing.
+ */
+export function reopenSiteGeometry(cur: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">) {
+  const reopen = (f: Fact): Fact => /^(adaptationFrame|duct|workEnvelope)\./.test(f.field) && f.confirmation === "confirmed" ? { ...f, confirmation: "proposed" } : f;
+  return { detailing: cur.detailing.map(reopen), siteFacts: cur.siteFacts.map(reopen) };
+}
+/** Which faces a box still needs, in words a fitter would use. */
+export function boxGaps(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">, prefix: string, local: boolean): string[] {
+  const v = readBox(s, prefix).values;
+  const names = local ? ["along the span (X)", "across the span (Y)", "height (Z)"] : ["east-west (X)", "north-south (Y)", "height (Z)"];
+  const out: string[] = [];
+  names.forEach((n, i) => {
+    if (v[i] === null || v[i + 3] === null) out.push(`${n}: ${v[i] === null && v[i + 3] === null ? "both faces" : v[i] === null ? "the low face" : "the high face"} missing`);
+    else if (v[i]! >= v[i + 3]!) out.push(`${n}: the low face must be less than the high face`);
+  });
+  return out;
+}
+export const isTestAssumption = (f: Fact | undefined) => !!f?.source.description.startsWith(ASSUMPTION_PREFIX);
+export function toMm(value: number, unit: string | null): number | null {
   const factor: Record<string, number> = { mm: 1, m: 1000, cm: 10, in: 25.4, ft: 304.8 };
   const f = factor[unit ?? "mm"];
   return f === undefined ? null : value * f;
@@ -328,9 +366,14 @@ export function requirements(s: WorkPackageSnapshot): Requirement[] {
   for (const b of showSfInputs(s) ? PROJECT_BASIS : []) add({ id: b.field, group: "Project", label: b.label, done: isConfirmed(findFact(s, b.field)) });
   if (s.intent === "adapt_to_site") {
     add({ id: "change", group: "Site", label: "Affected pipe chosen", done: !!s.changeRequest?.affectedEntityIds.length });
-    add({ id: "duct", group: "Site", label: "Obstacle measured (all six faces)", done: readBox(s, "duct").confirmed });
-    add({ id: "workEnvelope", group: "Site", label: "Work boundary measured", done: readBox(s, "workEnvelope").confirmed });
-    add({ id: "requiredPipeClearance", group: "Site", label: "Required pipe clearance", done: isConfirmed(findFact(s, "requiredPipeClearance")) });
+    const site = siteFrameOf(s);
+    if (site) add({ id: "siteFrame", group: "Site", label: "Local frame along the span confirmed", done: !site.reason, hint: site.reason ?? undefined });
+    for (const [prefix, label] of [["duct", "Obstacle"], ["workEnvelope", "Work boundary"]] as const) {
+      const gaps = readBox(s, prefix).values.some(v => v !== null) ? boxGaps(s, prefix, !!site) : [];
+      if (gaps.length) for (const g of gaps) add({ id: `${prefix}.${g}`, group: "Site", label: `${label} ${g}`, done: false });
+      else add({ id: prefix, group: "Site", label: `${label} entered and confirmed (all six faces)`, done: readBox(s, prefix).confirmed });
+    }
+    add({ id: "requiredPipeClearance", group: "Site", label: "Required surface clearance", done: isConfirmed(findFact(s, "requiredPipeClearance")) });
   }
   return out;
 }
