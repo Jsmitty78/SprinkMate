@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { RULE, ADOPTED_RULES, HEAD_FACT_FIELDS, HeadFactsPatchSchema, emptyFacts, validateRules, comparePlan, validateMeasurement as checkMeasurement, MeasurementSchema, checkSchema, type HeadFacts, type Measurement, type Orientation } from '@field-agent/core';
 import { Store, digest } from './store.js';
-import { AppError, type TaskSnapshot, type Observation, type EvidenceRequest, type Candidate, type Artifact, type Finding } from './models.js';
+import { AppError, type TaskSnapshot, type Observation, type EvidenceRequest, type Artifact } from './models.js';
 import { planSvg, sceneSvg } from './drawing.js';
 
 const fields = HEAD_FACT_FIELDS;
@@ -103,19 +103,6 @@ export class FieldService {
     if(!row) throw new AppError(404,'画像が見つかりません');
     return {bytes:await readFile(row.path),mimeType:row.mime};
   }
-  async getObservationImage(id:string,observationId:string) {
-    const obs=this.getTask(id).observations.find(o=>o.id===observationId&&!o.superseded);
-    if(!obs) throw new AppError(404,'有効な観測が見つかりません');
-    const a=await this.asset(id,obs.assetId); return {mimeType:a.mimeType,data:a.bytes.toString('base64')};
-  }
-  async cropImage(id:string,observationId:string,rect:{x:number;y:number;width:number;height:number}) {
-    const obs=this.getTask(id).observations.find(o=>o.id===observationId&&!o.superseded);
-    if(!obs) throw new AppError(404,'観測が見つかりません');
-    if(!Object.values(rect).every(Number.isInteger)||rect.x<0||rect.y<0||rect.width<1||rect.height<1||rect.x+rect.width>obs.width||rect.y+rect.height>obs.height) throw new AppError(400,'切り出し範囲が画像外です');
-    const a=await this.asset(id,obs.assetId);
-    const data=await sharp(a.bytes).extract({left:rect.x,top:rect.y,width:rect.width,height:rect.height}).jpeg().toBuffer();
-    return {mimeType:'image/jpeg',data:data.toString('base64')};
-  }
   reviewFacts(id:string,input:{baseRevision:number;facts:Partial<HeadFacts>},opId:string=randomUUID(),actor:'manual'|'fixture'='manual') {
     const facts=patchFacts(input.facts);
     return this.store.operation(id,opId,{...input,actor},()=>{
@@ -126,26 +113,6 @@ export class FieldService {
         (t.facts as unknown as Record<string,unknown>)[key]={...fact,source:actor};
       }
       this.changed(t,'facts_reviewed'); return t;
-    });
-  }
-  proposeFacts(id:string,input:{id:string;targetId:string;reason:string;facts:Partial<HeadFacts>},opId:string=randomUUID()) {
-    safeId(input.id); requireText(input.reason,'reason'); const facts=patchFacts(input.facts);
-    return this.store.operation(id,opId,input,()=>{
-      const t=this.active(id); if(input.targetId!==t.targetId) throw new AppError(400,'対象が違います');
-      const prior=t.candidates.find(c=>c.id===input.id); if(prior) throw new AppError(409,'候補IDはすでに使用されています');
-      for(const f of Object.values(facts)) { f.confirmed=false; f.source='model'; if(f.evidenceIds.some(e=>!t.observations.some(o=>o.id===e&&o.targetId===t.targetId&&!o.superseded))) throw new AppError(400,'根拠が存在しません'); }
-      const candidate:Candidate={...input,facts,createdAt:now()};t.candidates.push(candidate);
-      for(const key of fields) if(facts[key]&&!t.facts[key]?.confirmed) (t.facts as unknown as Record<string,unknown>)[key]=facts[key];
-      this.changed(t,'candidate_added'); return candidate;
-    });
-  }
-  recordFinding(id:string,input:{id:string;targetId:string;description:string;evidenceIds:string[]},opId:string=randomUUID()) {
-    safeId(input.id); requireText(input.description,'description');
-    return this.store.operation(id,opId,input,()=>{
-      const t=this.active(id);
-      if(input.targetId!==t.targetId||!Array.isArray(input.evidenceIds)||!input.evidenceIds.length||input.evidenceIds.some(e=>!t.observations.some(o=>o.id===e&&o.targetId===t.targetId&&!o.superseded))) throw new AppError(400,'同じ対象の有効な写真根拠が必要です');
-      if(t.findings.some(f=>f.id===input.id)) throw new AppError(409,'差異候補IDはすでに使用されています');
-      const finding:Finding={...input,status:'unverified',createdAt:now()}; t.findings.push(finding);this.changed(t,'finding_added');return finding;
     });
   }
   requestEvidence(id:string,input:{kind:EvidenceRequest['kind'];reason:string;fields:string[]},opId:string=randomUUID()) {

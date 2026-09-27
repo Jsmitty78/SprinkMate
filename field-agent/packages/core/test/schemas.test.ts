@@ -1,17 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { assertSchema, checkSchema, emptyFacts, HeadFactsPatchSchema, HeadFactsSchema, MeasurementSchema, validateSchema } from "../src/index.js";
+import { checkSchema, emptyFacts, HeadFactsPatchSchema, HeadFactsSchema, MeasurementSchema } from "../src/index.js";
 
 describe("shared JSON contracts", () => {
   it("represents incomplete facts without pretending they are confirmed", () => {
     expect(checkSchema(HeadFactsSchema, emptyFacts())).toBe(true);
-    expect(validateSchema(HeadFactsSchema, emptyFacts()).valid).toBe(true);
   });
 
   it("rejects unknown fields and arbitrary orientation strings", () => {
     expect(checkSchema(HeadFactsSchema, { ...emptyFacts(), pass: true })).toBe(false);
     const facts = emptyFacts();
     expect(checkSchema(HeadFactsSchema, { ...facts, orientation: { ...facts.orientation, value: "45 degrees is close enough" } })).toBe(false);
-    expect(() => assertSchema(HeadFactsSchema, {})).toThrow("Invalid input");
   });
 
   it("strictly validates partial facts including numeric fields without requiring old fields", () => {
