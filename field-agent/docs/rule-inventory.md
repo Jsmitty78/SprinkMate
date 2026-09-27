@@ -53,4 +53,4 @@ Rule status describes implemented software and source scope as of the date above
 
 ## Verification
 
-As of 2026-09-26: the synthetic example passes through `pnpm rules:evaluate`; the representative CLI/stdin/HTTP request and known missing-input/error cases were verified; `pnpm test` passes all 473 tests across 14 files; `pnpm typecheck` passes core, server, and web; and `git diff --check` passes. These checks validate this bounded implementation only.
+As of 2026-09-26: the synthetic example passes through `pnpm rules:evaluate`; the representative CLI/stdin/HTTP request and known missing-input/error cases were verified; `pnpm test` passes all 479 tests across 15 files; `pnpm typecheck` passes core, server, and web; and `git diff --check` passes. These checks validate this bounded implementation only.
