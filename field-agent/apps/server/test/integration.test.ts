@@ -344,7 +344,9 @@ it("does not turn unsupported products or protected-context routing into a succe
   expect(result.run?.status).toBe("completed");
   const d = t.detailStore.get(s.id)!.details[0];
   expect(d.fabrication.cuts[0].cutLength.value).toBeNull();
-  expect(d.fabrication.materials[0].quantity.value).toBe(1);
+  // A modeled piece of an unlisted product is not a purchase count.
+  expect(d.fabrication.materials[0].quantity.value).toBeNull();
+  expect(d.fabrication.materials[0].centerlineLength?.value).not.toBeNull();
   expect(d.fabrication.operations.some((o) => o.status === "unsupported")).toBe(
     true,
   );

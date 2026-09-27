@@ -4,7 +4,7 @@ import { dateTime } from "./format.js";
 import { ChangeInputs, DetailingInputs, EvidenceInputs, RunEditor, type Unit } from "./inputs.js";
 import { SiteBoxInputs, SiteFrameInputs, SiteLengthInput } from "./site/SiteInputs.js";
 import { SiteViews } from "./site/SiteViews.js";
-import { callouts, contextIds, findFact, isConfirmed, planBox, readBox, requirements, siteFrameOf, resultFor, routeOptions, runBlockers, type Plan } from "./model.js";
+import { callouts, contextIds, findFact, isConfirmed, planBox, readBox, requirements, siteFrameOf, sourceLabel, resultFor, routeOptions, runBlockers, type Plan } from "./model.js";
 import { IntakeInputs } from "./intake/IntakeInputs.js";
 import { SheetView } from "./intake/SheetView.js";
 import { FRAME_ID } from "./intake/sheet.js";
@@ -113,6 +113,7 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
   const common = { s, act: pkg.act, busy: pkg.busy, unit, setNotice: pkg.setNotice };
   const showSheet = () => { setView("drawing"); setSheetOpen(false); };
   const traced = !baseline || baseline.coordinateFrame.id === FRAME_ID;
+  const retained = (baseline?.entities ?? []).filter(e => contextIds(s).has(e.id)).map(e => ({ id: e.id, kind: e.kind, label: sourceLabel(s, e.id) }));
   const sitePipe = siteFrameOf(s)?.fact.subjectIds[0] ?? s.changeRequest?.affectedEntityIds[0] ?? null;
   const intakeInputs = <>
     <Section title="Drawing and trace" defaultOpen={baseline?.confirmation !== "confirmed"}><IntakeInputs {...common} intake={intake} showSheet={showSheet} /></Section>
@@ -142,7 +143,8 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
         {intakeInputs}
         <DetailingInputs {...common} callouts={baseCallouts} />
       </>;
-      case "materials": return <MaterialsCuts result={base.result} current={base.current} revision={s.inputRevision} plan={baseline} callouts={baseCallouts} detail={detailFor(baseline?.id)} selectedPiece={piece} onSelectPiece={setPiece} sources={sources} />;
+      case "materials": return <MaterialsCuts result={base.result} current={base.current} revision={s.inputRevision} plan={baseline} callouts={baseCallouts} detail={detailFor(baseline?.id)} selectedPiece={piece} onSelectPiece={setPiece} sources={sources}
+        context={retained} projected={!!s.sourceDrawing?.view && traced} />;
       case "assembly": return <Assembly result={base.result} callouts={baseCallouts} sources={sources} />;
       case "checks": return <Checks result={workResult} sources={sources} callouts={workCallouts} />;
       case "routes": return <RouteComparison routes={routes} baseline={baseline} baselineResult={base.result} focusId={focusId} selectedId={selectedId} current={candidatesCurrent} appliedAt={selectedId && selectedResult.current ? s.inputRevision : null}

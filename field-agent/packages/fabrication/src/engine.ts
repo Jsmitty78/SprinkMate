@@ -6,6 +6,9 @@ import type {
 
 const FACTORS = { m: 1, mm: 0.001, ft: 0.3048, in: 0.0254 } as const;
 const unique = <T>(items: T[]) => [...new Set(items)];
+/** The product id adapters give a piece or fitting whose product has not been selected yet. */
+export const UNSELECTED_PRODUCT = "unsupported";
+const pipeReason = (productId: string) => productId === UNSELECTED_PRODUCT ? "Pipe product not selected" : `Unsupported pipe: ${productId}`;
 export function toMeters(length: Length): number {
   const result = length.value * FACTORS[length.unit];
   if (!Number.isFinite(result) || length.value < 0) throw new Error("Length must be finite, nonnegative, and have a supported unit");
@@ -167,7 +170,7 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
     if (cut !== null && cut <= 0) throw new Error(`Takeouts leave no positive cut: ${piece.id}`);
     return { pieceId: piece.id, callout: i + 1, sourceSegmentIds: [...piece.sourceSegmentIds], productId: piece.productId,
       subassemblyId: piece.subassemblyId, disposition: piece.disposition, start: structuredClone(start.position), end: structuredClone(end.position),
-      centerline, cutLength: metric(cut, combined.basis, [...combined.reasons, ...(!supported ? [`Unsupported pipe: ${piece.productId}`] : [])], combined.evidenceIds),
+      centerline, cutLength: metric(cut, combined.basis, [...combined.reasons, ...(!supported ? [pipeReason(piece.productId)] : [])], combined.evidenceIds),
       takeouts: ends, formula: "centerline - start.netTakeout - end.netTakeout" };
   });
   const joints: Joint[] = [];
@@ -195,8 +198,11 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
   for (const productId of unique(input.pieces.map(p => p.productId))) {
     const rows = cuts.filter(p => p.productId === productId);
     const supported = products.get(productId)?.kind === "pipe";
+    // Modeled pieces are not purchased lengths; without a product there is nothing to count.
     materials.push({ id: `pipe:${productId}`, kind: "pipe", productId, entityIds: rows.map(r => r.pieceId),
-      quantity: metric(rows.length, "confirmed_inputs", [], [], "each"), centerlineLength: total(rows.map(r => r.centerline)),
+      quantity: supported ? metric(rows.length, "confirmed_inputs", [], [], "each")
+        : metric(null, "unknown", [`${pipeReason(productId)}; purchase quantity is not established`], [], "each"),
+      centerlineLength: total(rows.map(r => r.centerline)),
       cutLength: total(rows.map(r => r.cutLength)), status: !supported ? "unsupported" : rows.some(r => r.cutLength.value === null) ? "unresolved" : "supported",
       reasons: unique(rows.flatMap(r => r.cutLength.reasons)) });
   }
@@ -205,7 +211,7 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
     const supported = products.get(productId)?.kind === "elbow_90";
     materials.push({ id: `fitting:${productId}`, kind: "fitting", productId, entityIds: rows.map(r => r.id),
       quantity: metric(rows.length, "confirmed_inputs", [], [], "each"), centerlineLength: null, cutLength: null,
-      status: supported ? "supported" : "unsupported", reasons: supported ? [] : [`Unsupported fitting ${productId}`] });
+      status: supported ? "supported" : "unsupported", reasons: supported ? [] : [productId === UNSELECTED_PRODUCT ? "Fitting product not selected" : `Unsupported fitting ${productId}`] });
   }
   for (const accessory of input.accessories) {
     const value = read(input, accessory.quantity, accessory.id);
@@ -252,6 +258,12 @@ function buildOperations(input: FabricationInput, cuts: CutRow[], joints: Joint[
   };
   for (const cut of cuts) {
     const supported = cut.productId === PIPE_ID;
+    if (!supported) {
+      // No product-specific cutting or end preparation is invented for a product the catalog does not cover.
+      add("detail_cut_and_end_preparation", [cut.pieceId], [], `Detail cutting and end preparation for piece ${cut.callout} once its product and connection are selected.`,
+        [pipeReason(cut.productId), ...cut.cutLength.reasons], false);
+      continue;
+    }
     const reasons = [...accessReasons, ...cut.cutLength.reasons,
       ...(cut.cutLength.basis === "proposed_inputs" ? ["Confirm proposed geometry before fabrication"] : []),
       ...(cut.disposition === "proposed_reuse" ? ["Reuse feasibility and condition require separate confirmation"] : [])];

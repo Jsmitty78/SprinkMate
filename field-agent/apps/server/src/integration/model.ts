@@ -11,6 +11,7 @@ import {
   spearsCatalog,
   toLocalPlanGeometry,
   toPlanningProduct,
+  UNSELECTED_PRODUCT,
   type FabricationInput,
   type Value,
   type Length,
@@ -48,6 +49,12 @@ export function savedFact(
   if (matches.length > 1) throw new Error(`Ambiguous fact: ${field}`);
   return matches[0];
 }
+/** How a missing input reads in a reason; other fields keep their name. */
+const FIELD_TEXT: Record<string, string> = {
+  netCutOffset: "the net cut offset at the tie-in",
+  workAreaAccess: "work-area access",
+  curePlan: "the set and cure plan",
+};
 export function value<T extends string | number | boolean>(
   s: WorkPackageSnapshot,
   field: string,
@@ -61,7 +68,7 @@ export function value<T extends string | number | boolean>(
         ? "confirmed"
         : "unknown",
     evidenceIds: f ? [f.id] : [],
-    reason: f?.unknownReason ?? `Confirm ${field}`,
+    reason: f?.unknownReason ?? `Confirm ${FIELD_TEXT[field] ?? field}`,
   };
 }
 export function fact<T extends string | number | boolean>(
@@ -204,7 +211,7 @@ export function fabricationInput(
     pieces.push({
       id: p.id,
       sourceSegmentIds: [p.id],
-      productId: p.productId ?? "unsupported",
+      productId: p.productId ?? UNSELECTED_PRODUCT,
       startNodeId: ends[0],
       endNodeId: ends[1],
       subassemblyId: "run",
@@ -247,7 +254,7 @@ export function fabricationInput(
     fittings.push({
       id: f.id,
       sourceEntityIds: [f.id],
-      productId: f.productId ?? "unsupported",
+      productId: f.productId ?? UNSELECTED_PRODUCT,
       nodeId: `node-${f.id}`,
       ports,
     });

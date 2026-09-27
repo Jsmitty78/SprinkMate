@@ -25,7 +25,8 @@ export interface ProfileOutput {
   required: { id: string; subjectIds: string[] }[];
   checks: CheckResult[];
   excluded: { id: string; reason: string }[];
-  project: ReturnType<typeof evaluateProject>;
+  /** Null when no executable rule pack covers the project's jurisdiction. */
+  project: ReturnType<typeof evaluateProject> | null;
 }
 export function evaluateProfile(
   s: WorkPackageSnapshot,
@@ -36,9 +37,22 @@ export function evaluateProfile(
 ): ProfileOutput {
   const adaptation = s.intent === "adapt_to_site" && plan.id !== baseline.id;
   const profile = !adaptation ? "drawing_preparation" : "site_adaptation";
-  const heads = s.baselinePlan!.entities.filter((e) => e.kind === "head");
+  // Retained context heads are outside the work: they are not selected products to check.
+  const context = new Set(s.scope?.excludedEntityIds ?? []);
+  const heads = s.baselinePlan!.entities.filter(
+    (e) => e.kind === "head" && !context.has(e.id),
+  );
+  // The San Francisco packs apply only to a San Francisco project. With the jurisdiction unknown the
+  // basis pack asks for it; with another jurisdiction no pack is run rather than one that does not apply.
+  const jurisdiction = fact<string>(s, "jurisdiction");
+  const otherJurisdiction =
+    jurisdiction.confirmed &&
+    jurisdiction.value !== null &&
+    jurisdiction.value !== "san_francisco";
   const tyco = heads.filter((e) => e.productId === "TY3231");
-  const supports = s.baselinePlan!.entities.filter((e) => e.kind === "support");
+  const supports = s.baselinePlan!.entities.filter(
+    (e) => e.kind === "support" && !context.has(e.id),
+  );
   const request: ProjectEvaluationRequest = {
     project: {
       id: s.projectId,
@@ -163,22 +177,32 @@ export function evaluateProfile(
     const e = request.evidence.find((e) => e.id === f.id);
     if (e) e.subjectIds.push(s.projectId);
   }
-  const project = evaluateProject(request);
+  const project = otherJurisdiction ? null : evaluateProject(request);
   const checks: CheckResult[] = [
-    {
-      id: "PROJECT_BASIS",
-      subjectIds: [],
-      status:
-        project.basis?.status === "resolved"
-          ? "pass"
-          : project.basis?.status === "not_applicable"
-            ? "not_applicable"
-            : "unknown",
-      state:
-        project.basis?.status === "resolved" ? "verified" : "input_missing",
-      reason: project.basis?.reason ?? "Project basis unresolved",
-      sourceRefs: project.basis?.sourceRefs.map((r) => r.url) ?? [],
-    },
+    !project
+      ? {
+          id: "PROJECT_BASIS",
+          subjectIds: [],
+          status: "unknown",
+          state: "unsupported",
+          reason:
+            "No executable rule pack for this project's jurisdiction; Sprink's code rule packs are for San Francisco only. Code rules are not evaluated for this project.",
+          sourceRefs: [],
+        }
+      : {
+          id: "PROJECT_BASIS",
+          subjectIds: [],
+          status:
+            project.basis?.status === "resolved"
+              ? "pass"
+              : project.basis?.status === "not_applicable"
+                ? "not_applicable"
+                : "unknown",
+          state:
+            project.basis?.status === "resolved" ? "verified" : "input_missing",
+          reason: project.basis?.reason ?? "Project basis unresolved",
+          sourceRefs: project.basis?.sourceRefs.map((r) => r.url) ?? [],
+        },
     ...output.cuts.map((c) => ({
       id: `CUT-${c.pieceId}`,
       subjectIds: [c.pieceId],
@@ -204,10 +228,16 @@ export function evaluateProfile(
           : "verified",
       reason: output.operations.every((o) => o.status === "planned")
         ? "Supported procedure with supplied access, movement and cure confirmations"
-        : "Assembly has unresolved movement, cure, geometry or unsupported fixed-end closure",
-      sourceRefs: output.sources.map((r) => r.id),
+        : !output.operations.some((o) => o.sourceIds.length)
+          ? "No catalog procedure applies: select the product and connection, then detail the steps"
+          : "Assembly has unresolved movement, cure, geometry or unsupported fixed-end closure",
+      // Cite the catalog procedure only where a step actually uses it.
+      sourceRefs: [...new Set(output.operations.flatMap((o) => o.sourceIds))]
+        .length
+        ? output.sources.map((r) => r.id)
+        : [],
     },
-    ...project.rules.map((r) => ({
+    ...(project?.rules ?? []).map((r) => ({
       id: r.ruleId,
       subjectIds: r.subjectIds,
       status: r.status,
@@ -217,7 +247,7 @@ export function evaluateProfile(
       reason: r.reason,
       sourceRefs: r.sourceRefs.map((x) => x.url),
     })),
-    ...project.coverage
+    ...(project?.coverage ?? [])
       .filter(
         (c) => c.state !== "supported" && (c.area === "nfpa13" || c.selected),
       )
@@ -255,6 +285,14 @@ export function evaluateProfile(
     checks,
     project,
     excluded: [
+      ...(otherJurisdiction
+        ? [
+            {
+              id: "sf-project-basis",
+              reason: `Jurisdiction is ${jurisdiction.value}; the San Francisco packs do not apply`,
+            },
+          ]
+        : []),
       ...(!adaptation
         ? [
             {

@@ -8,6 +8,7 @@ import {
   type ChangeRow,
 } from "../exports/types.js";
 import type { Detail, IntegratedState } from "./runtime.js";
+import { materialDescription, retainedContext } from "./describe.js";
 
 function view(d: Detail): PlanView {
   const point = (v: FabricationOutput["cuts"][number]["start"]) => {
@@ -155,7 +156,7 @@ export function exportSnapshot(
     ...(s.intent === "adapt_to_site" ? { baselinePlan: view(baseline) } : {}),
     materials: f.materials.map((m) => ({
       id: m.id,
-      description: m.productId ?? m.kind,
+      description: materialDescription(s, m),
       quantity: m.quantity.value,
       unit: m.quantity.unit,
       status: m.quantity.value === null ? "unresolved" : "known",
@@ -175,6 +176,7 @@ export function exportSnapshot(
         .map((j) => j.id),
       length: c.cutLength.value,
       unit: "m",
+      centerline: c.centerline.value,
       status: c.cutLength.value === null ? "unresolved" : "known",
       sourceIds: [...new Set(c.takeouts.flatMap((t) => t.sourceIds))],
       unresolvedReason:
@@ -221,6 +223,7 @@ export function exportSnapshot(
         : []),
     ],
     sources: [...sources.values()],
+    retainedContext: retainedContext(s),
     inputs: [...s.siteFacts, ...s.detailing].map((x) => ({
       id: x.id,
       field: x.field,
