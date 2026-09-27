@@ -161,7 +161,7 @@ export function exportSnapshot(
     ...(s.intent === "adapt_to_site" ? { baselinePlan: view(baseline, s) } : {}),
     materials: f.materials.map((m) => ({
       id: m.id,
-      description: m.kind === "pipe" ? `${m.productId ?? "Unselected pipe"} (modeled spans; not purchasing stock)` : m.productId ?? m.kind,
+      description: m.kind === "pipe" ? `${m.productId ?? "Unselected pipe"} (modeled spans; not purchasing stock)` : m.productId ?? m.id,
       quantity: m.quantity.value,
       unit: m.quantity.unit,
       status: m.quantity.value === null ? "unresolved" : "known",
@@ -169,7 +169,7 @@ export function exportSnapshot(
       sourceIds:
         f.selectedProducts.find((p) => p.id === m.productId)?.sourceIds ?? [],
       unresolvedReason:
-        m.quantity.value === null
+        m.reasons.length || m.quantity.value === null
           ? reason(m.reasons, "Quantity unresolved")
           : null,
     })),
