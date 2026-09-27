@@ -54,5 +54,11 @@ it("defaults new requirements to unverified input and locks restored synthetic r
   const s = { ...snapshot, detailing: [{ id: "material", field: "materialRequirement", value: "Supplemental steel test only", subjectIds: [], unit: null, unknownReason: null, confirmation: "proposed", provenance: "synthetic_assumption", context: "detailing", source: { description: "Synthetic catalog selection", assetId: "sheet", page: 1 } }] } as Snapshot;
   const html = render(s);
   expect(html).toMatch(/value="synthetic_assumption" selected=""/);
-  expect(html).toContain('cannot turn it into confirmed source evidence');
+  const textControl = html.split('Requirement text provenance')[1].split('</select>')[0];
+  const materialControl = html.split('Material provenance')[1].split('</select>')[0];
+  expect(textControl).toContain('disabled=""');
+  expect(textControl).toContain('value="synthetic_assumption" selected=""');
+  expect(materialControl).not.toContain('disabled=""');
+  expect(materialControl).toContain('value="user_entered" selected=""');
+  expect(html).toContain('This value remains a synthetic test assumption.');
 });

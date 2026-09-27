@@ -5,7 +5,7 @@ import type { Snapshot } from "../api.js";
 import { FactRow } from "../inputs.js";
 import { upsertFacts } from "../model.js";
 import { PRODUCT_SETS, applyRunProducts } from "../products.js";
-import { intakeTracePatch, sourceRequirementsPatch } from "./IntakeInputs.js";
+import { intakeTracePatch, sourceRequirementsPatch, SourceRequirements } from "./IntakeInputs.js";
 import { buildTracePlan } from "./sheet.js";
 
 function fixture() {
@@ -58,7 +58,7 @@ it.each(["synthetic_assumption", "legacy_synthetic"])("requirements saving canno
   const reloaded = JSON.parse(JSON.stringify({ ...s, ...first })) as Snapshot;
   const second = sourceRequirementsPatch(reloaded, values);
   for (const patch of [first, second]) {
-    expect(patch.detailing.find(f => f.field === "nominalSize")).toMatchObject({ value: values.size, provenance: "synthetic_assumption", confirmation: "proposed", source: { assetId: "source", page: 1 } });
+    expect(patch.detailing.find(f => f.field === "nominalSize")).toMatchObject({ value: values.size, provenance: "synthetic_assumption", confirmation: "proposed", source: nominal.source });
   }
 });
 it.each(["synthetic_assumption", "user_entered", "machine_proposal", "confirmed_evidence"] as const)("requirements saving applies selected %s provenance to a new nominal size", provenance => {
@@ -68,4 +68,84 @@ it.each(["synthetic_assumption", "user_entered", "machine_proposal", "confirmed_
   expect(patch.detailing.find(f => f.field === "nominalSize")).toMatchObject({ provenance, confirmation: provenance === "confirmed_evidence" ? "confirmed" : "proposed", source: { page: 1 } });
   expect(patch.detailing.find(f => f.field === "materialRequirement")).toMatchObject({ provenance, source: { page: 2 } });
   expect(patch.detailing).toContainEqual(s.detailing.find(f => f.field === "requiredPipeSpecification"));
+});
+
+function independentRequirements(nominalSynthetic: boolean) {
+  const { s } = fixture();
+  const nominal = s.detailing.find(f => f.field === "nominalSize")!;
+  nominal.provenance = nominalSynthetic ? "synthetic_assumption" : "confirmed_evidence";
+  nominal.confirmation = nominalSynthetic ? "proposed" : "confirmed";
+  const provenance = nominalSynthetic ? "confirmed_evidence" as const : "synthetic_assumption" as const;
+  Object.assign(s, upsertFacts(s, [
+    ...["materialRequirement", "materialRequirement.material"].map((field, i) => ({ field, value: ["Schedule 40 steel", "steel"][i], confirmation: provenance === "confirmed_evidence" ? "confirmed" as const : "proposed" as const, provenance, context: "detailing" as const, source: "Read by you from FS02 notes", assetId: "source", page: 2 })),
+  ]));
+  return s;
+}
+it.each([true, false])("saving unrelated requirements preserves independent provenance (synthetic nominal=%s)", nominalSynthetic => {
+  const s = independentRequirements(nominalSynthetic);
+  const before = structuredClone(s);
+  const values = { size: "2 inch", text: "Schedule 40 steel", mat: "steel", nominalProvenance: nominalSynthetic ? "synthetic_assumption" as const : "confirmed_evidence" as const, provenance: nominalSynthetic ? "confirmed_evidence" as const : "synthetic_assumption" as const, materialProvenance: nominalSynthetic ? "confirmed_evidence" as const : "synthetic_assumption" as const, source: "Read by you from FS02 notes", page: 2 };
+  const patch = sourceRequirementsPatch(s, values);
+  expect(patch).toEqual({ detailing: before.detailing, siteFacts: before.siteFacts });
+  const edited = sourceRequirementsPatch(s, { ...values, size: "1-1/2 inch" });
+  for (const field of ["materialRequirement", "materialRequirement.material"]) expect(edited.detailing.find(f => f.field === field && !f.subjectIds.length)).toEqual(before.detailing.find(f => f.field === field && !f.subjectIds.length));
+  expect(edited.detailing.find(f => f.field === "nominalSize")?.provenance).toBe(values.nominalProvenance);
+  const reloaded = JSON.parse(JSON.stringify({ ...s, ...edited })) as Snapshot;
+  expect(sourceRequirementsPatch(reloaded, { ...values, size: "1-1/2 inch" })).toEqual(edited);
+});
+it("locks only each synthetic field and displays independent provenance controls", () => {
+  const s = independentRequirements(true);
+  const html = renderToStaticMarkup(createElement(SourceRequirements, { s, act: async () => true, busy: "", unit: "mm", setNotice: () => {}, intake: { sheet: { pages: 2 } } as never, showSheet: () => {}, nominal: s.detailing.find(f => f.field === "nominalSize"), requirement: s.detailing.find(f => f.field === "materialRequirement" && !f.subjectIds.length), material: s.detailing.find(f => f.field === "materialRequirement.material" && !f.subjectIds.length) }));
+  const nominalControl = html.split('Nominal size provenance')[1].split('</select>')[0];
+  const materialControl = html.split('Material provenance')[1].split('</select>')[0];
+  const textControl = html.split('Requirement text provenance')[1].split('</select>')[0];
+  expect(nominalControl).toContain('disabled=""');
+  expect(nominalControl).toContain('value="synthetic_assumption" selected=""');
+  for (const control of [materialControl, textControl]) {
+    expect(control).not.toContain('disabled=""');
+    expect(control).toContain('value="confirmed_evidence" selected=""');
+  }
+});
+it("editing requirement text or its source does not rewrite independent nominal evidence", () => {
+  const s = independentRequirements(true), nominal = s.detailing.find(f => f.field === "nominalSize");
+  const edited = sourceRequirementsPatch(s, { size: "2 inch", text: "Revised material note", mat: "steel", provenance: "confirmed_evidence", nominalProvenance: "synthetic_assumption", materialProvenance: "confirmed_evidence", source: "Read by you from corrected FS02 notes", page: 2, updateSource: true });
+  expect(edited.detailing.find(f => f.field === "nominalSize")).toEqual(nominal);
+  expect(edited.detailing.find(f => f.field === "materialRequirement")?.source.description).toBe("Read by you from corrected FS02 notes");
+});
+
+it.each([false, true])("preserves mixed per-span nominal evidence across unrelated saves and edits (reversed=%s)", reversed => {
+  const s = independentRequirements(false);
+  const first = s.detailing.find(f => f.field === "nominalSize")!;
+  const second = { ...structuredClone(first), id: "nominal-second", subjectIds: ["p2"], value: "3 inch", provenance: "synthetic_assumption" as const, confirmation: "proposed" as const, source: { ...first.source, description: "Synthetic second span", assetId: "supplement", page: 1 } };
+  s.detailing.push(second);
+  s.baselinePlan!.entities.push({ ...structuredClone(s.baselinePlan!.entities.find(e => e.id === "p1")!), id: "p2" });
+  s.scope!.includedEntityIds = reversed ? ["p2", "p1"] : ["p1", "p2"];
+  const shown = reversed ? second : first;
+  const values = { size: String(shown.value), nominalProvenance: shown.provenance, text: "Updated requirement", mat: "steel", provenance: "synthetic_assumption" as const, materialProvenance: "synthetic_assumption" as const, source: "Notes", page: 2 };
+  const unchanged = sourceRequirementsPatch(s, values);
+  expect(unchanged.detailing.filter(f => f.field === "nominalSize")).toEqual([first, second]);
+  const edited = sourceRequirementsPatch(s, { ...values, size: "4 inch" });
+  for (const original of [first, second]) {
+    expect(edited.detailing.find(f => f.field === "nominalSize" && f.subjectIds.includes(original.subjectIds[0]))).toMatchObject({ value: "4 inch", provenance: original.provenance, confirmation: original.confirmation, source: original.source });
+  }
+  const reloaded = JSON.parse(JSON.stringify({ ...s, ...edited })) as Snapshot;
+  expect(sourceRequirementsPatch(reloaded, { ...values, size: "4 inch" })).toEqual(edited);
+  const html = renderToStaticMarkup(createElement(SourceRequirements, { s, act: async () => true, busy: "", unit: "mm", setNotice: () => {}, intake: { sheet: { pages: 2 } } as never, showSheet: () => {}, nominal: shown, requirement: s.detailing.find(f => f.field === "materialRequirement"), material: s.detailing.find(f => f.field === "materialRequirement.material" && !f.subjectIds.length) }));
+  const control = html.split('Nominal size provenance')[1].split('</select>')[0];
+  expect(control).toContain('disabled=""');
+  expect(control).toContain('value="mixed" selected=""');
+  expect(html).toContain('Sizes vary by span.');
+});
+
+it("retains nominal evidence for subjects outside the edited scope", () => {
+  const s = independentRequirements(true);
+  const nominal = s.detailing.find(f => f.field === "nominalSize")!;
+  nominal.subjectIds.push("outside-scope");
+  nominal.id = "ui-nominalSize.p1";
+  nominal.source.assetId = "supplement";
+  const patch = sourceRequirementsPatch(s, { size: "4 inch", text: "Schedule 40 steel", mat: "steel", provenance: "confirmed_evidence", source: "Notes", page: 2 });
+  expect(patch.detailing.find(f => f.field === "nominalSize" && f.subjectIds.includes("outside-scope"))).toEqual({ ...nominal, subjectIds: ["outside-scope"] });
+  expect(patch.detailing.find(f => f.field === "nominalSize" && f.subjectIds.includes("p1"))).toMatchObject({ value: "4 inch", provenance: "synthetic_assumption", source: nominal.source });
+  const ids = [...patch.detailing, ...patch.siteFacts].map(f => f.id);
+  expect(new Set(ids).size).toBe(ids.length);
 });

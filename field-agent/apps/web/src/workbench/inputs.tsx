@@ -136,7 +136,41 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
 // ---------------------------------------------------------------- single facts
 
 type Kind = { type: "length" } | { type: "bool"; yes: string; no: string } | { type: "text" } | { type: "choice"; options: Array<[string, string]> };
-interface RowSpec { field: string; subject?: string; label: string; kind: Kind; context?: Fact["context"]; help?: string }
+interface RowSpec { field: string; subject?: string; label: string; kind: Kind; context?: Fact["context"]; help?: string; productBindings?: Array<{ field: string; value: string }> }
+
+/** Shared by the input action and payload regression tests: a joint measurement is bound to its chosen pair. */
+export function detailFactPatch(s: Snapshot, spec: RowSpec, value: Fact["value"], provenance: Provenance, source: string) {
+  const evidence = evidenceSpec(findFact(s, spec.field, spec.subject), provenance, source);
+  const subjectIds = spec.subject ? [spec.subject] : [];
+  const specs: FactSpec[] = [{ field: spec.field, subjectIds, value, unit: spec.kind.type === "length" ? "mm" : null,
+    ...evidence, context: evidence.provenance === "synthetic_assumption" ? "detailing" : spec.context ?? "detailing" },
+    ...(spec.productBindings ?? []).map(binding => ({ ...binding, subjectIds, context: "detailing" as const,
+      ...evidenceSpec(findFact(s, binding.field, spec.subject), evidence.provenance!, source) }))];
+  return upsertFacts(s, specs);
+}
+
+export function steelDetailRows(s: Snapshot, callouts: Callouts): RowSpec[] {
+  const plan = activeDetailingPlan(s), work = inScope(s);
+  if (!plan) return [];
+  return plan.entities.filter(f => f.kind === "fitting" && work(f.id) && Object.values(PRODUCT_SETS).some(p => p.material === "steel" && p.elbow === f.productId)).flatMap(f =>
+    f.ports.flatMap(port => {
+      const connections = plan.connections.filter(c => [c.from, c.to].some(end => end.entityId === f.id && end.portId === port.id));
+      if (connections.length !== 1) return [];
+      const c = connections[0], other = c.from.entityId === f.id ? c.to : c.from;
+      const pipe = plan.entities.find(e => e.id === other.entityId && e.kind === "pipe");
+      if (!pipe?.productId || !f.productId) return [];
+      const binding = (prefix: string) => [{ field: `${prefix}.${port.id}.pipeProductId`, value: pipe.productId! }, { field: `${prefix}.${port.id}.fittingProductId`, value: f.productId! }];
+      const label = `${callouts.fitting.get(f.id) ?? f.id}/${port.id}`;
+      return [
+        { field: `threadMakeup.${port.id}`, subject: f.id, label: `${label}: final axial engagement`, kind: { type: "length" } as Kind, productBindings: binding("threadMakeup"),
+          help: `From the fitting face to the final pipe end for ${pipe.productId} and ${f.productId}. Supply scoped measured or documented evidence; tightening turns are not a length. A selected pair is not proof of compatibility.` },
+        { field: `threadedJointPlan.${port.id}`, subject: f.id, label: `${label}: threaded joint preparation and assembly plan`, kind: { type: "text" } as Kind, productBindings: binding("threadedJointPlan"),
+          help: "Record reviewed end preparation, inspection, tools, sealant and assembly order for this joint. Fixed-end closure requires separate reviewed evidence and remains unsupported here." },
+        { field: `movement.${port.id}`, subject: f.id, label: `${label}: rotation, movement and tool access`, kind: { type: "bool", yes: "Possible, checked against evidence", no: "Not possible" } as Kind,
+          help: "Identify the rotating part and required movement/access in the source description. Synthetic assumptions remain unconfirmed and cannot establish physical assembly readiness." },
+      ];
+    }));
+}
 
 export function FactRow({ s, act, busy, unit, setNotice, spec }: Common & { spec: RowSpec }) {
   const f = findFact(s, spec.field, spec.subject);
@@ -154,10 +188,7 @@ export function FactRow({ s, act, busy, unit, setNotice, spec }: Common & { spec
   useEffect(() => { setValue(initial()); setEditing(!isConfirmed(f)); }, [f?.id, f?.value, unit]);
 
   const parsed = spec.kind.type === "length" ? parseLength(value, unit) : spec.kind.type === "bool" ? (value === "true" ? true : value === "false" ? false : null) : value.trim() || null;
-  const save = () => act(key, cur => patchClearing(cur, upsertFacts(cur, [{
-    field: spec.field, subjectIds: spec.subject ? [spec.subject] : [], value: parsed, unit: spec.kind.type === "length" ? "mm" : null,
-    ...evidenceSpec(findFact(cur, spec.field, spec.subject), provenance, source), context: provenance === "synthetic_assumption" ? "detailing" : spec.context ?? "detailing",
-  }]), setNotice));
+  const save = () => act(key, cur => patchClearing(cur, detailFactPatch(cur, spec, parsed, provenance, source), setNotice));
   const metres = typeof f?.value === "number" ? toMetres(f.value, f.unit ?? "mm") : null;
   const shown = f?.value === null || f?.value === undefined ? null
     : spec.kind.type === "length" && typeof f.value === "number" ? (unit === "mm" ? (metres === null ? UNKNOWN : millimetres(metres)) : lengthText({ value: f.value, unit: f.unit ?? "mm", basis: "confirmed_inputs" }).primary)
@@ -198,9 +229,14 @@ export function DetailingInputs(props: Common & { callouts: Callouts }) {
     { field: "workAreaAccess", label: "Work-area access", kind: { type: "bool", yes: "Access confirmed", no: "No access" } },
     ...(showCpvcInputs(s) ? [{ field: "curePlan", label: "Set and cure plan (temperature, fit, test pressure)", kind: { type: "text" } as Kind }] : []),
   ];
+  const steel = steelDetailRows(s, callouts);
   const project: RowSpec[] = projectBasis(s).map(b => ({ field: b.field, label: b.label, kind: b.options.length ? { type: "choice", options: b.options } : { type: "text" } }));
   return <>
     {plan && <Section title="Dimensions" count={`${dims.filter(r => isConfirmed(findFact(s, r.field, r.subject))).length}/${dims.length}`} defaultOpen={!done(dims)}>{dims.map(r => <FactRow key={`${r.field}.${r.subject}`} {...props} spec={r} />)}</Section>}
+    {steel.length > 0 && <Section title="Steel threaded joints" count={`${steel.filter(r => isConfirmed(findFact(s, r.field, r.subject))).length}/${steel.length}`} defaultOpen={!done(steel)}>
+      <p className="fa-muted">Each port has its own engagement and assembly evidence. Unknown or synthetic inputs preserve null cuts and unresolved assembly; no physical measurements are inferred from the drawing.</p>
+      {steel.map(r => <FactRow key={`${r.field}.${r.subject}`} {...props} spec={r} />)}
+    </Section>}
     <Section title="Assembly conditions" count={`${assembly.filter(r => isConfirmed(findFact(s, r.field, r.subject))).length}/${assembly.length}`} defaultOpen={!done(assembly)}>{assembly.map(r => <FactRow key={`${r.field}.${r.subject}`} {...props} spec={r} />)}</Section>
     <Section title="Project basis" count={`${project.filter(r => isConfirmed(findFact(s, r.field))).length}/${project.length}`} defaultOpen={!done(project)}>{!showSfInputs(s) && <p className="fa-muted">This package has no confirmed San Francisco basis. Source basis, current applicability and approval remain separate; supply project-specific facts through the shared intake/API.</p>}{project.map(r => <FactRow key={r.field} {...props} spec={r} />)}</Section>
   </>;

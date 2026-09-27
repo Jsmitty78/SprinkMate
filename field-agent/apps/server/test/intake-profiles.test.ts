@@ -70,3 +70,19 @@ it.each(['2/2 in', '1 0/2"', '1/0 in', 'unknown'])("does not invent a size confl
   s.detailing.find(f => f.field === "nominalSize")!.value = value;
   expect(evaluate(s, "spears/CP-010").checks.some(c => c.id === "NOMINAL-SIZE-CONFLICT-p1")).toBe(false);
 });
+
+it.each([true, false, 2, 0])("retains non-text source requirement %s as an actionable unknown without crashing", async value => {
+  const s = await saved();
+  const fields = ["requiredConnectionMethod", "requiredPipeSpecification", "materialRequirement", "materialRequirement.material", "nominalSize"];
+  const template = s.detailing.find(f => f.field === "materialRequirement")!;
+  s.detailing = s.detailing.filter(f => !fields.includes(f.field));
+  s.detailing.push(...fields.map(field => ({ ...template, id: `malformed-${field}`, field, value, unit: typeof value === "number" ? "mm" : null, subjectIds: ["p1"] })));
+  const profile = evaluate(s, STEEL_PAIRS[0].pipeId);
+  expect(profile.checks.some(c => c.id.startsWith("MATERIAL-CONFLICT") || c.id.startsWith("NOMINAL-SIZE-CONFLICT"))).toBe(false);
+  for (const field of fields) {
+    expect(profile.checks.find(c => c.id === `SOURCE-REQUIREMENT-p1-${field}`)).toMatchObject({
+      status: "unknown", state: "invalid_input", sourceRefs: [`malformed-${field}`],
+    });
+    expect(profile.checks.find(c => c.id === `SOURCE-REQUIREMENT-p1-${field}`)?.reason).toContain(String(value));
+  }
+});
