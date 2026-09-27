@@ -94,3 +94,14 @@ it("rejects impossible engagement and keeps the CPVC catalog separate", () => {
   expect(out.cuts[1].cutLength.value).toBeCloseTo(0.4238625, 10);
   expect(out.operations.every(o => o.status === "planned")).toBe(true);
 });
+
+it.each(["steel", "cpvc"])("rejects procedure evidence belonging only to other catalog products: %s", method => {
+  const input = method === "steel" ? specimen() : drawingExample();
+  const catalog = fabricationCatalog(input.configVersion);
+  const elbow = catalog.products.find(p => p.id === input.fittings[0].productId)!;
+  // The source still exists globally; it is no longer evidence for this fitting.
+  elbow.sourceIds = [];
+  const out = deriveWorkPackage(input, catalog);
+  expect(out.joints.every(j => j.procedureId === null)).toBe(true);
+  expect(out.operations.some(o => ["thread_joint", "apply_thread_sealant"].includes(o.code))).toBe(false);
+});

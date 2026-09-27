@@ -209,8 +209,8 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
     const procedure = elbow?.kind === "elbow_90" ? elbow.procedureId : undefined;
     const isSupported = catalog.evidenceClass === "manufacturer_document" && pipe?.kind === "pipe" && elbow?.kind === "elbow_90"
       && elbow.compatiblePipeIds.includes(pipe.id) && elbow.nominalSize === pipe.nominalSize && elbow.connection === pipe.connection
-      && (procedure === "spears-fg3-socket-1in" ? pipe.connection === "cpvc_socket_solvent" && sources.has(PROCEDURE_SOURCE)
-        : procedure === "anvil-351-threaded" && pipe.connection === "steel_threaded" && sources.has(STEEL_ELBOW_SOURCE));
+      && (procedure === "spears-fg3-socket-1in" ? pipe.connection === "cpvc_socket_solvent" && sources.has(PROCEDURE_SOURCE) && elbow.sourceIds.includes(PROCEDURE_SOURCE)
+        : procedure === "anvil-351-threaded" && pipe.connection === "steel_threaded" && sources.has(STEEL_ELBOW_SOURCE) && elbow.sourceIds.includes(STEEL_ELBOW_SOURCE));
     joints.push({ id, callout: joints.length + 1, pieceId: piece.id, end, nodeId: node.id,
       fittingId: connection?.fitting.id ?? null, portId: connection?.port.id ?? null,
       subassemblyId: piece.subassemblyId, location: connection?.port.location ?? "field", orientation: direction,
