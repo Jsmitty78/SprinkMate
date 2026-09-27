@@ -1,3 +1,4 @@
+import { planSvg } from './drawing.js';
 import { Hono } from 'hono';
 import { exportRoutes } from './exports/routes.js';
 import type { WorkPackageExports } from './exports/service.js';
@@ -63,6 +64,11 @@ export function createApp(service:FieldService,options:{token:string;webDir?:str
     const input=await c.req.json(),id=c.req.param('id');
     return c.json(await commands.run(id,()=>service.updatePlan(id,input.orientation,input.baseRevision,op(c.req.header('Idempotency-Key')))));
   });
+  app.get('/api/tasks/:id/drawing.svg',c=>{
+    const task=service.getTask(c.req.param('id'));
+    c.header('Content-Type','image/svg+xml; charset=utf-8');
+    return c.body(planSvg(task.plan));
+  });
   app.post('/api/tasks/:id/drawing',async c=>{
     const input=await c.req.json(),id=c.req.param('id');
     if(!input||typeof input!=='object')throw new AppError(400,'図面の形式が不正です');
@@ -105,7 +111,7 @@ export function createApp(service:FieldService,options:{token:string;webDir?:str
   app.get('/api/tasks/:id/artifact',c=>{
     const task=service.getTask(c.req.param('id'));
     if(!task.artifact||task.artifact.taskRevision!==task.revision)throw new AppError(409,'現行版の資料はまだありません');
-    return c.json(task.artifact);
+    return c.json({...task.artifact,plan:{...task.artifact.plan,svg:planSvg(task.artifact.plan)}});
   });
   app.post('/api/tasks/:id/replay',async c=>{
     const input=await c.req.json(),id=c.req.param('id');

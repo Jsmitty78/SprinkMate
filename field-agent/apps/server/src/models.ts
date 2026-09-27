@@ -67,7 +67,7 @@ export interface Artifact {
   planRevision: number;
   synthetic: boolean;
   targetId: string;
-  plan: PlanModel & { svg: string };
+  plan: PlanModel;
   facts: HeadFacts;
   observations: Observation[];
   measurements: Measurement[];
@@ -85,7 +85,7 @@ export interface TaskSnapshot {
   createdAt: string;
   updatedAt: string;
   state: 'active' | 'waiting' | 'review_ready' | 'cancelled';
-  plan: PlanModel & { svg: string };
+  plan: PlanModel;
   facts: HeadFacts;
   candidates: Candidate[];
   findings: Finding[];

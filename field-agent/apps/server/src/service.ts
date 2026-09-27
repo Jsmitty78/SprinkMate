@@ -5,7 +5,7 @@ import sharp from 'sharp';
 import { referenceDrawing, exampleDrawing, validateDrawing, pipeLength, RULE, ADOPTED_RULES, HEAD_FACT_FIELDS, HeadFactsPatchSchema, emptyFacts, validateRules, comparePlan, validateMeasurement as checkMeasurement, MeasurementSchema, checkSchema, type HeadFacts, type Measurement, type Orientation } from '@field-agent/core';
 import { Store, digest } from './store.js';
 import { AppError, type TaskSnapshot, type Observation, type EvidenceRequest, type Artifact } from './models.js';
-import { planSvg, sceneSvg } from './drawing.js';
+import { sceneSvg } from './drawing.js';
 
 const fields = HEAD_FACT_FIELDS;
 const now=()=>new Date().toISOString();
@@ -49,10 +49,9 @@ export class FieldService {
     const task=this.store.get(safeId(id));
     // Legacy records acquire an editable sample in memory; evidence stays untouched.
     if(!task.plan.drawing)task.plan.drawing=exampleDrawing(task.plan.orientation);
-    task.plan.svg=planSvg(task.plan);
     return task;
   }
-  listTasks() { return this.store.list().map(({id,title,state,revision,updatedAt})=>({id,title,state,revision,updatedAt})); }
+  listTasks() { return this.store.listSummaries(); }
   private active(id:string) { const task=this.getTask(id); if(task.state==='cancelled') throw new AppError(409,'この仕事はキャンセル済みです'); return task; }
   private changed(task:TaskSnapshot,type:string) {
     task.revision++; task.updatedAt=now(); task.validation=null; task.artifact=null;
@@ -68,7 +67,7 @@ export class FieldService {
       const drawing=input.reference?referenceDrawing():exampleDrawing(orientation);
       const target=drawing.heads.find(h=>h.id==='H1')!;
       const plan={revision:1,targetId:'H1',model:target.model,orientation:target.orientation,lengthMeters:pipeLength(drawing,drawing.pipes.find(p=>p.id==='P1')!)/1000,drawing};
-      const task:TaskSnapshot={id,title:requireText(input.title??'配管1区間の現場確認','title'),targetId:'H1',revision:1,createdAt:now(),updatedAt:now(),state:'active',plan:{...plan,svg:planSvg(plan)},facts:emptyFacts(),candidates:[],findings:[],observations:[],measurements:[],requests:[],validation:null,artifact:null};
+      const task:TaskSnapshot={id,title:requireText(input.title??'配管1区間の現場確認','title'),targetId:'H1',revision:1,createdAt:now(),updatedAt:now(),state:'active',plan,facts:emptyFacts(),candidates:[],findings:[],observations:[],measurements:[],requests:[],validation:null,artifact:null};
       this.store.save(task); this.store.event(id,'created',{revision:1}); return task;
     });
   }
@@ -78,7 +77,7 @@ export class FieldService {
       const t=this.active(id); if(t.revision!==baseRevision) throw new AppError(409,'仕事が更新されています');
       const drawing=t.plan.drawing!;
       drawing.heads.find(h=>h.id===t.targetId)!.orientation=orientation as 'pendent'|'upright'|'sideways';
-      t.plan={...t.plan,orientation,drawing,revision:t.plan.revision+1}; t.plan.svg=planSvg(t.plan);
+      t.plan={...t.plan,orientation,drawing,revision:t.plan.revision+1};
       t.requests.filter(r=>r.status==='open').forEach(r=>r.status='superseded');
       this.changed(t,'plan_updated'); return t;
     });
@@ -92,7 +91,6 @@ export class FieldService {
       // Current comparison concerns the fixed TY3231 target; other heads are drawing context.
       if(head.model!==t.plan.model)throw new AppError(400,'確認対象H1の型式は変更できません');
       t.plan={...t.plan,drawing,orientation:head.orientation,lengthMeters:pipeLength(drawing,drawing.pipes.find(p=>p.id==='P1')!)/1000,revision:t.plan.revision+1};
-      t.plan.svg=planSvg(t.plan);
       t.requests.filter(r=>r.status==='open').forEach(r=>r.status='superseded');
       this.changed(t,'drawing_updated');return t;
     });
