@@ -3,7 +3,7 @@ import type { PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "./api.js";
 import { lengthInput, lengthText, parseLength, toMetres } from "./format.js";
 import {
-  BOX_KEYS, buildRun, dropOrphanFacts, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
+  BOX_KEYS, buildRun, dropOrphanFacts, dropSubjectFacts, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, topologyChanged, upsertFacts,
   type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
 } from "./model.js";
 import { Badge, Button, Callout, Field, Icon, Section } from "./ui.js";
@@ -43,7 +43,9 @@ const safeId = (text: string) => (text.replace(/\.[a-z0-9]+$/i, "").replace(/[^a
 
 export function DrawingInputs({ s, act, busy, setNotice }: Common) {
   const d = s.sourceDrawing;
-  const frozen = d?.approval === "approved";
+  // The server freezes the drawing with a confirmed run, as well as once it is approved.
+  const runConfirmed = s.baselinePlan?.confirmation === "confirmed";
+  const frozen = d?.approval === "approved" || runConfirmed;
   const [rev, setRev] = useState(d?.revision ?? "A");
   const [page, setPage] = useState(String(d?.page ?? 1));
   const [scale, setScale] = useState(d?.scale.value !== null && d?.scale.value !== undefined ? String(d.scale.value) : "");
@@ -72,6 +74,8 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
     }, setNotice);
   });
 
+  if (!d && runConfirmed) return <p className="fa-muted">The run was confirmed without a drawing, so this package cannot take one now. Start a new package to attach the sheet.</p>;
+
   if (!d) return <div className="fa-stack">
     <p className="fa-muted">Upload the approved sheet for this work (PDF, PNG or JPEG, up to 20 MB). It stays linked to every result.</p>
     <div className="fa-row2">
@@ -91,7 +95,7 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
       <span>Approval</span><strong>{d.approval === "approved" ? <Badge tone="green">Approved drawing</Badge> : d.approval === "superseded" ? <Badge tone="red">Superseded</Badge> : <Badge>Not reviewed</Badge>}</strong>
       <span>Scale</span><strong>{d.scale.basis === "confirmed_inputs" ? <>{d.scale.value} {d.scale.unit} <Badge tone="green">Confirmed</Badge></> : <Badge tone="amber">{d.scale.reason ?? "Not confirmed"}</Badge>}</strong>
     </div>
-    {frozen ? <p className="fa-muted">The approved drawing is frozen in this package. Start a new package for a new revision.</p> : <>
+    {frozen ? <p className="fa-muted">{runConfirmed ? "The drawing is frozen with the confirmed run." : "The approved drawing is frozen in this package."} Start a new package for a new revision.</p> : <>
       <div className="fa-row3">
         <Field label="Revision"><input value={rev} onChange={e => setRev(e.target.value)} maxLength={40} /></Field>
         <Field label="Page"><input value={page} inputMode="numeric" onChange={e => setPage(e.target.value)} /></Field>
@@ -124,11 +128,15 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
   const built = buildRun(nodes, s.baselinePlan?.id ?? "baseline");
   const problems = "problems" in built ? built.problems : [];
   const dirty = runChanged(nodes, saved, unit);
+  const drawingReady = s.sourceDrawing?.scale.basis === "confirmed_inputs";
 
   const save = () => act("run", async cur => {
     if ("problems" in built) return;
-    const keep = built.datums.filter(d => findFact(cur, d.field, d.subjectIds![0])?.value !== d.value);
-    await patchClearing(cur, { baselinePlan: built.plan, scope: built.scope, ...dropOrphanFacts(upsertFacts(cur, keep), built.plan) }, setNotice);
+    // Entity ids are renumbered from the run's shape, so after a shape change an id can name a different pipe, fitting or tie-in.
+    const reshaped = topologyChanged(nodes, runNodes(cur.baselinePlan));
+    const base = reshaped ? dropSubjectFacts(cur) : cur;
+    const keep = built.datums.filter(d => findFact(base, d.field, d.subjectIds![0])?.value !== d.value);
+    await patchClearing(cur, { baselinePlan: built.plan, scope: built.scope, ...dropOrphanFacts(upsertFacts(base, keep), built.plan) }, setNotice);
   });
   const confirm = () => {
     if (!s.baselinePlan) return;
@@ -185,9 +193,10 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
       {problems.length > 0 && <ul className="fa-problems">{problems.map(p => <li key={p}>{p}</li>)}</ul>}
       <div className="fa-actions">
         <Button busy={busy === "run"} disabled={!!busy || problems.length > 0} onClick={() => void save()}>Save run</Button>
-        <Button variant="primary" busy={busy === "confirm-run"} disabled={!!busy || !s.baselinePlan || !saved || dirty || problems.length > 0} onClick={confirm}>Confirm dimensions</Button>
+        <Button variant="primary" busy={busy === "confirm-run"} disabled={!!busy || !s.baselinePlan || !saved || dirty || !drawingReady || problems.length > 0} onClick={confirm}>Confirm dimensions</Button>
       </div>
       {s.baselinePlan && saved && dirty && problems.length === 0 && <p className="fa-muted small">Save the run first. Confirming freezes the saved run, not unsaved edits.</p>}
+      {s.baselinePlan && saved && !drawingReady && <p className="fa-muted small">Upload the drawing and confirm its scale first. Confirming the run also freezes the drawing.</p>}
     </>}
   </div>;
 }

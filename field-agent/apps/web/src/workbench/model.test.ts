@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WorkPackageSnapshot } from "@field-agent/core";
 import { countText, feetInches, lengthInput, lengthText, parseLength } from "./format.js";
-import { buildRun, callouts, dropOrphanFacts, findFact, groupChecks, requirements, routeOptions, runBlockers, runChanged, runNodes, upsertFacts, type RunNode } from "./model.js";
+import { buildRun, callouts, dropOrphanFacts, dropSubjectFacts, findFact, groupChecks, requirements, routeOptions, runBlockers, runChanged, runNodes, topologyChanged, upsertFacts, type RunNode } from "./model.js";
 import { sampleInputs } from "./sample.js";
 
 describe("display formatting", () => {
@@ -174,5 +174,22 @@ describe("run edits", () => {
     expect(runChanged([displayed[0], { ...displayed[1], x: displayed[1].x! + 0.1 }], saved, unit)).toBe(true);
     expect(runChanged([displayed[0], { ...displayed[1], kind: "tie_in" }], saved, unit)).toBe(true);
     expect(runChanged([displayed[0], { ...displayed[1], y: 0 }], saved, unit)).toBe(true);
+  });
+});
+
+describe("run reshaping", () => {
+  const ties: RunNode[] = [{ kind: "tie_in", x: 0, y: 0 }, { kind: "tie_in", x: 1000, y: 0 }];
+  it("counts a changed point type or count as a new shape, not a moved point", () => {
+    expect(topologyChanged(ties, ties)).toBe(false);
+    expect(topologyChanged(ties.map(n => ({ ...n, x: n.x === null ? null : n.x + 50 })), ties)).toBe(false);
+    expect(topologyChanged([{ kind: "open_end", x: 0, y: 0 }, ties[1]], ties)).toBe(true);
+    expect(topologyChanged(ties, null)).toBe(true);
+  });
+  it("drops only facts tied to plan entities", () => {
+    const facts = upsertFacts({ detailing: [], siteFacts: [] }, [
+      { field: "netCutOffset", value: 50, unit: "mm", subjectIds: ["t1"], confirmation: "confirmed", context: "detailing", source: "test" },
+      { field: "workAreaAccess", value: true, confirmation: "confirmed", context: "detailing", source: "test" },
+    ]);
+    expect(dropSubjectFacts(facts).detailing.map(f => f.field)).toEqual(["workAreaAccess"]);
   });
 });

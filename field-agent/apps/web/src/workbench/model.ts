@@ -68,6 +68,16 @@ export function dropOrphanFacts<T extends Pick<PackageInputs, "detailing" | "sit
   return { ...facts, detailing: facts.detailing.filter(live), siteFacts: facts.siteFacts.filter(live) };
 }
 
+/** True when the run's shape (point count or point types) differs, which renumbers its entity ids. */
+export function topologyChanged(a: RunNode[], b: RunNode[] | null): boolean {
+  return !b || a.length !== b.length || a.some((n, i) => n.kind !== b[i].kind);
+}
+
+/** Drops every fact tied to a plan entity, for when entity ids no longer name the same thing. */
+export function dropSubjectFacts<T extends Pick<PackageInputs, "detailing" | "siteFacts">>(facts: T): T {
+  return { ...facts, detailing: facts.detailing.filter(f => !f.subjectIds.length), siteFacts: facts.siteFacts.filter(f => !f.subjectIds.length) };
+}
+
 /** Compare edits with the saved run as displayed in the editor, without tolerating small user changes. */
 export function runChanged(a: RunNode[], b: RunNode[] | null, unit: "mm" | "in"): boolean {
   if (!b || a.length !== b.length) return true;
