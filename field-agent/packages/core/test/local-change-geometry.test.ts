@@ -28,7 +28,8 @@ function elbowPort(segmentId: string, endpoint: LocalElbowPort["endpoint"], node
 }
 
 function segment(id: string, startNodeId: string, endNodeId: string, od = 0.05, unit: LocalLength["unit"] = "m"): LocalPipeSegment {
-  return { id, startNodeId, endNodeId, outsideDiameter: length(od, unit) };
+  const datum = fact<"center_to_center" | "physical_pipe_end">("center_to_center");
+  return { id, startNodeId, endNodeId, outsideDiameter: length(od, unit), cutEndDatumAtStart: datum, cutEndDatumAtEnd: { ...datum } };
 }
 
 function ductBox(id: string, min: [number, number, number], max: [number, number, number], unit: LocalPoint3["unit"] = "m"): LocalDuctBox {
@@ -143,10 +144,53 @@ describe("local change deterministic geometry", () => {
     const plan = baseline("missing-offset");
     plan.nodes[0]!.tieInNetCutOffset = uncertain({ value: 0, unit: "m" });
     const result = evaluateLocalPlanGeometry(plan);
-    expect(result.totalCenterlineLengthM).toBeNull();
+    expect(result.totalCenterlineLengthM).toBe(4);
     expect(result.totalCutLengthM).toBeNull();
     expect(result.state).toBe("input_missing");
     expect(result.missingInputs).toContain("nodes.missing-offset-start.tieInNetCutOffset");
+  });
+
+  it("does not derive cut length when one or both endpoint datums are unconfirmed", () => {
+    const oneEnd = baseline("one-datum");
+    oneEnd.segments[0]!.cutEndDatumAtStart = uncertain("center_to_center");
+    const oneEndResult = evaluateLocalPlanGeometry(oneEnd);
+    expect(oneEndResult.segments[0]).toMatchObject({ centerlineLengthM: 4, cutLengthM: null, outsideDiameterM: 0.05, state: "input_missing" });
+    expect(oneEndResult.totalCenterlineLengthM).toBe(4);
+    expect(oneEndResult.totalCutLengthM).toBeNull();
+    expect(oneEndResult.ductClearances[0]?.state).toBe("collision");
+
+    const bothEnds = baseline("both-datums");
+    bothEnds.segments[0]!.cutEndDatumAtStart = uncertain("center_to_center");
+    bothEnds.segments[0]!.cutEndDatumAtEnd = uncertain("center_to_center");
+    const bothEndResult = evaluateLocalPlanGeometry(bothEnds);
+    expect(bothEndResult.segments[0]?.cutLengthM).toBeNull();
+    expect(bothEndResult.missingInputs).toEqual(expect.arrayContaining([
+      "segments.both-datums-pipe.cutEndDatumAtStart",
+      "segments.both-datums-pipe.cutEndDatumAtEnd",
+    ]));
+  });
+
+  it("rejects null/model endpoint datum facts and does not normalize physical-end datums", () => {
+    const nullDatum = baseline("null-datum");
+    nullDatum.segments[0]!.cutEndDatumAtStart = { value: null, confirmed: false, evidenceIds: [], source: "manual" };
+    expect(evaluateLocalPlanGeometry(nullDatum).totalCutLengthM).toBeNull();
+
+    const modelDatum = baseline("model-datum");
+    modelDatum.segments[0]!.cutEndDatumAtEnd = { ...fact("center_to_center"), source: "model" };
+    expect(evaluateLocalPlanGeometry(modelDatum).totalCutLengthM).toBeNull();
+
+    const physicalEnd = baseline("physical-end-datum");
+    physicalEnd.segments[0]!.cutEndDatumAtStart = fact("physical_pipe_end");
+    const physicalResult = evaluateLocalPlanGeometry(physicalEnd);
+    expect(physicalResult.state).toBe("unsupported");
+    expect(physicalResult.totalCenterlineLengthM).toBe(4);
+    expect(physicalResult.totalCutLengthM).toBeNull();
+
+    const inconsistent = baseline("inconsistent-datum");
+    inconsistent.segments[0]!.cutEndDatumAtEnd = fact("physical_pipe_end");
+    const inconsistentResult = evaluateLocalPlanGeometry(inconsistent);
+    expect(inconsistentResult.state).toBe("unsupported");
+    expect(inconsistentResult.segments[0]?.cutLengthM).toBeNull();
   });
 
   it("does not use model-origin confirmation as numeric evidence", () => {
@@ -164,6 +208,7 @@ describe("local change deterministic geometry", () => {
     expect(result.state).toBe("input_missing");
     expect(result.totalCutLengthM).toBeNull();
     expect(result.missingInputs.some(path => path.includes("kind"))).toBe(true);
+    expect(compareLocalPlanGeometry(evaluateLocalPlanGeometry(baseline("known-count-baseline")), result).elbowCountDelta).toBeNull();
   });
 
   it("keeps metrics invariant under a shared translation and 90-degree axis rotation", () => {

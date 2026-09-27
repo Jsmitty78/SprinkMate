@@ -22,6 +22,8 @@ The local workflow reports drawing lineage; centerline and cut-length arithmetic
 
 The numeric geometry supports axis-parallel straight segments, explicit 90-degree elbow ports, tie-in offsets, and axis-aligned duct boxes in one coordinate frame. A pipe cut uses centerline length less each confirmed fitting-port net takeout (`centerToFace - insertionOrThreadMakeup`) and explicit tie-in cut offsets. Missing product dimensions or cut-end datum remain unknown; no default makeup, fit-up allowance, or product compatibility is inferred. The BOM is derived from represented plan entities and geometry, then reconciled with supplied rows. An absent entity on one plan contributes a known zero; a missing expected row remains unknown; a conflicting supplied row fails accounting only.
 
+Cut-length arithmetic currently supports only explicitly confirmed `center_to_center` datums at both segment endpoints, evidenced for that segment and plan on the exact drawing revision. Graph node positions are centerline stations, and the supported fitting/tie-in takeouts are applied once. Missing, unconfirmed, model-sourced, wrong-subject, or stale datum evidence leaves dependent cut lengths and BOM cut comparisons unknown; independently known part counts and centerline lengths remain reportable. `physical_pipe_end` is outside this centerline model and remains unknown; no implicit conversion or duplicate takeout is applied.
+
 The duct calculation is a straight-pipe-radius envelope against the modeled box. It does not model full fitting bodies, irregular geometry, discharge obstruction, spacing, sprinkler coverage, or code clearance. A clear pipe envelope never resolves the separate NFPA obstruction/spacing checks.
 
 The limited source-backed clauses are:

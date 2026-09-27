@@ -142,6 +142,10 @@ function planGeometryFacts(request: ProjectEvaluationRequest, plan: ProjectLocal
     if (node.kind === "tie_in") use(node.tieInNetCutOffset, `nodes.${node.id}.tieInNetCutOffset`, node.id);
   }
   for (const segment of plan.segments) use(segment.outsideDiameter, `segments.${segment.id}.outsideDiameter`, segment.id);
+  for (const segment of plan.segments) {
+    use(segment.cutEndDatumAtStart, `segments.${segment.id}.cutEndDatumAtStart`, segment.id);
+    use(segment.cutEndDatumAtEnd, `segments.${segment.id}.cutEndDatumAtEnd`, segment.id);
+  }
   for (const fitting of plan.fittings) {
     use(fitting.kind, `fittings.${fitting.id}.kind`, fitting.id);
     for (const [index, port] of fitting.ports.entries()) {
@@ -253,6 +257,23 @@ function scopeState(request: ProjectEvaluationRequest): { state: LocalChangeVeri
 
 function maskGeometry(result: LocalPlanGeometryResult, issues: readonly string[]): LocalPlanGeometryResult {
   if (!issues.length) return result;
+  const datumPathFor = (segmentId: string) => `segments.${segmentId}.cutEndDatumAt`;
+  const datumIssues = issues.filter(issue => result.segments.some(segment => issue.startsWith(datumPathFor(segment.segmentId))));
+  const nonDatumIssues = issues.filter(issue => !datumIssues.includes(issue));
+  if (datumIssues.length && !nonDatumIssues.length) {
+    return {
+      ...result,
+      state: "input_missing",
+      totalCutLengthM: null,
+      segments: result.segments.map(segment => {
+        const relevant = datumIssues.filter(issue => issue.startsWith(datumPathFor(segment.segmentId)));
+        return relevant.length
+          ? { ...segment, cutLengthM: null, state: "input_missing", missingInputs: [...new Set([...segment.missingInputs, ...relevant])] }
+          : segment;
+      }),
+      missingInputs: [...new Set([...result.missingInputs, ...datumIssues])],
+    };
+  }
   return {
     ...result,
     state: "input_missing",
@@ -405,12 +426,12 @@ function bomDeltas(
     if (b?.kind === "pipe" && derivedB && (cutB === null || derivedB.cutLengthM === null)) missing.push(`${itemId}.proposedCutLength`);
     if (a?.kind === "pipe" && cutA !== null && derivedA?.cutLengthM !== null && derivedA?.cutLengthM !== undefined && cutA !== derivedA.cutLengthM) mismatches.push(`${itemId}.baselineCutLength`);
     if (b?.kind === "pipe" && cutB !== null && derivedB?.cutLengthM !== null && derivedB?.cutLengthM !== undefined && cutB !== derivedB.cutLengthM) mismatches.push(`${itemId}.proposedCutLength`);
-    const baselineSideVerified = !derivedA && !a || !!derivedA && !!a && qa !== null && (a.kind !== "pipe" || cutA !== null);
-    const proposedSideVerified = !derivedB && !b || !!derivedB && !!b && qb !== null && (b.kind !== "pipe" || cutB !== null);
+    const baselineSideVerified = !derivedA && !a || !!derivedA && !!a && qa !== null && (a.kind !== "pipe" || cutA !== null && derivedA.cutLengthM !== null);
+    const proposedSideVerified = !derivedB && !b || !!derivedB && !!b && qb !== null && (b.kind !== "pipe" || cutB !== null && derivedB.cutLengthM !== null);
     const baselineQuantity = qa ?? (!derivedA ? 0 : null);
     const proposedQuantity = qb ?? (!derivedB ? 0 : null);
-    const baselineCutLengthM = cutA ?? (derivedA ? derivedA.cutLengthM : 0);
-    const proposedCutLengthM = cutB ?? (derivedB ? derivedB.cutLengthM : 0);
+    const baselineCutLengthM = derivedA?.kind === "pipe" && derivedA.cutLengthM === null ? null : cutA ?? (derivedA ? derivedA.cutLengthM : 0);
+    const proposedCutLengthM = derivedB?.kind === "pipe" && derivedB.cutLengthM === null ? null : cutB ?? (derivedB ? derivedB.cutLengthM : 0);
     const state: LocalChangeVerificationState = baselineSideVerified && proposedSideVerified && !unknownRows.some(row => row.startsWith(`${itemId}.`)) ? "verified" : "input_missing";
     const kind = (derivedB ?? derivedA)?.kind ?? (b ?? a)!.kind;
     return {
@@ -650,15 +671,21 @@ export function evaluateLocalChange(request: ProjectEvaluationRequest): { rules:
 }
 
 function compareGeometry(baseline: LocalPlanGeometryResult, proposed: LocalPlanGeometryResult): ProjectLocalChangeReport["delta"] {
+  const elbowCountKnown = (result: LocalPlanGeometryResult) =>
+    ![...result.missingInputs, ...result.unsupported].some(path => path.startsWith("fittings[") && path.includes("].kind"));
   const state = baseline.state === "unsupported" || proposed.state === "unsupported" ? "unsupported" : baseline.state !== "verified" || proposed.state !== "verified" ? "input_missing" : "verified";
   return {
     baselinePlanId: baseline.planId,
     proposedPlanId: proposed.planId,
     state,
-    pipeCountDelta: state === "verified" ? proposed.segmentCount - baseline.segmentCount : null,
-    elbowCountDelta: state === "verified" ? proposed.elbowCount - baseline.elbowCount : null,
-    centerlineLengthDeltaM: state === "verified" ? proposed.totalCenterlineLengthM! - baseline.totalCenterlineLengthM! : null,
-    cutLengthDeltaM: state === "verified" ? proposed.totalCutLengthM! - baseline.totalCutLengthM! : null,
+    pipeCountDelta: proposed.segmentCount - baseline.segmentCount,
+    elbowCountDelta: elbowCountKnown(baseline) && elbowCountKnown(proposed) ? proposed.elbowCount - baseline.elbowCount : null,
+    centerlineLengthDeltaM: baseline.totalCenterlineLengthM !== null && proposed.totalCenterlineLengthM !== null
+      ? proposed.totalCenterlineLengthM - baseline.totalCenterlineLengthM
+      : null,
+    cutLengthDeltaM: baseline.totalCutLengthM !== null && proposed.totalCutLengthM !== null
+      ? proposed.totalCutLengthM - baseline.totalCutLengthM
+      : null,
   };
 }
 

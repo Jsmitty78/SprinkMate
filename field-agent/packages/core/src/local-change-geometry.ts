@@ -27,6 +27,9 @@ export interface LocalPipeSegment {
   startNodeId: string;
   endNodeId: string;
   outsideDiameter: Fact<LocalLength>;
+  /** The cut calculation accepts center-to-center graph endpoints only; other datums are not normalized. */
+  cutEndDatumAtStart: Fact<"center_to_center" | "physical_pipe_end">;
+  cutEndDatumAtEnd: Fact<"center_to_center" | "physical_pipe_end">;
 }
 
 export interface LocalElbowPort {
@@ -197,6 +200,7 @@ interface SegmentInternal {
   takeoutEndM?: number;
   outsideDiameterM?: number;
   missing: string[];
+  cutMissing: string[];
   unsupported: string[];
 }
 
@@ -245,10 +249,15 @@ export function evaluateLocalPlanGeometry(input: LocalPlanGeometry): LocalPlanGe
     if (!endNode) throw new LocalGeometryInputError(`Unresolved end node '${segment.endNodeId}'.`, `${path}.endNodeId`);
     if (segment.startNodeId === segment.endNodeId) throw new LocalGeometryInputError("Segment start and end nodes must differ.", path);
     const segmentMissing: string[] = [];
+    const cutMissing: string[] = [];
     const segmentUnsupported: string[] = [];
     const start = nodePoints.get(startNode.id);
     const end = nodePoints.get(endNode.id);
-    if (!start || !end) segmentMissing.push(...(!start ? [`${path}.start.position`] : []), ...(!end ? [`${path}.end.position`] : []));
+    if (!start || !end) {
+      const positionMissing = [...(!start ? [`${path}.start.position`] : []), ...(!end ? [`${path}.end.position`] : [])];
+      segmentMissing.push(...positionMissing);
+      cutMissing.push(...positionMissing);
+    }
     let axis: 0 | 1 | 2 | null = null;
     let centerlineLengthM: number | undefined;
     if (start && end) {
@@ -270,6 +279,7 @@ export function evaluateLocalPlanGeometry(input: LocalPlanGeometry): LocalPlanGe
       ...(centerlineLengthM !== undefined ? { centerlineLengthM } : {}),
       outsideDiameterM,
       missing: segmentMissing,
+      cutMissing,
       unsupported: segmentUnsupported,
     };
   });
@@ -316,9 +326,10 @@ export function evaluateLocalPlanGeometry(input: LocalPlanGeometry): LocalPlanGe
       if (port.nodeId !== centerNode.id || nodeId !== centerNode.id) throw new LocalGeometryInputError("Fitting port must reference the attached segment endpoint at this fitting center.", `${path}.ports[${portIndex}].nodeId`);
       const segmentData = internal.find(entry => entry.input.id === segment.id)!;
       if (!center) segmentData.missing.push(`${path}.center`);
+      if (!center) segmentData.cutMissing.push(`${path}.center`);
       if (segmentData.axis !== null) portAxes.push(segmentData.axis);
-      const centerToFace = readFact(port.centerToFace, `${path}.ports[${portIndex}].centerToFace`, segmentData.missing);
-      const makeup = readFact(port.insertionOrThreadMakeup, `${path}.ports[${portIndex}].insertionOrThreadMakeup`, segmentData.missing);
+      const centerToFace = readFact(port.centerToFace, `${path}.ports[${portIndex}].centerToFace`, segmentData.cutMissing);
+      const makeup = readFact(port.insertionOrThreadMakeup, `${path}.ports[${portIndex}].insertionOrThreadMakeup`, segmentData.cutMissing);
       if (centerToFace && makeup) {
         const net = toMeters(centerToFace, `${path}.ports[${portIndex}].centerToFace.value`) - toMeters(makeup, `${path}.ports[${portIndex}].insertionOrThreadMakeup.value`);
         if (net < 0) throw new LocalGeometryInputError("Insertion/thread makeup cannot exceed center-to-face dimension.", `${path}.ports[${portIndex}]`);
@@ -340,7 +351,7 @@ export function evaluateLocalPlanGeometry(input: LocalPlanGeometry): LocalPlanGe
       }
       if (node.kind === "tie_in") {
         const fact = node.tieInNetCutOffset;
-        const value = readFact(fact, `nodes.${node.id}.tieInNetCutOffset`, segment.missing);
+        const value = readFact(fact, `nodes.${node.id}.tieInNetCutOffset`, segment.cutMissing);
         if (value) {
           const net = toMeters(value, `nodes.${node.id}.tieInNetCutOffset.value`);
           if (node === segment.startNode) segment.takeoutStartM = net;
@@ -351,22 +362,37 @@ export function evaluateLocalPlanGeometry(input: LocalPlanGeometry): LocalPlanGe
   }
 
   const segmentResults: LocalSegmentMetric[] = internal.map(segment => {
-    const missingForSegment = [...new Set(segment.missing)];
-    const cutLengthM = segment.centerlineLengthM === undefined ? undefined : segment.centerlineLengthM - (segment.takeoutStartM ?? 0) - (segment.takeoutEndM ?? 0);
-    if (segment.takeoutStartM === undefined || segment.takeoutEndM === undefined) {
-      if (!missingForSegment.includes(`segments.${segment.input.id}.takeout`)) missingForSegment.push(`segments.${segment.input.id}.takeout`);
+    const missingForSegment = [...new Set([...segment.missing, ...segment.cutMissing])];
+    const startDatum = readFact(segment.input.cutEndDatumAtStart, `segments.${segment.input.id}.cutEndDatumAtStart`, segment.cutMissing);
+    const endDatum = readFact(segment.input.cutEndDatumAtEnd, `segments.${segment.input.id}.cutEndDatumAtEnd`, segment.cutMissing);
+    if (startDatum && startDatum !== "center_to_center") {
+      segment.unsupported.push(`segments.${segment.input.id}.cutEndDatumAtStart`);
+      unsupported.push(`segments.${segment.input.id}.cutEndDatumAtStart`);
     }
-    if (cutLengthM !== undefined && cutLengthM <= 0 && missingForSegment.length === 0 && segment.unsupported.length === 0) {
+    if (endDatum && endDatum !== "center_to_center") {
+      segment.unsupported.push(`segments.${segment.input.id}.cutEndDatumAtEnd`);
+      unsupported.push(`segments.${segment.input.id}.cutEndDatumAtEnd`);
+    }
+    const cutLengthM = segment.centerlineLengthM === undefined || segment.takeoutStartM === undefined || segment.takeoutEndM === undefined || segment.cutMissing.length > 0 || segment.unsupported.length > 0
+      ? undefined
+      : segment.centerlineLengthM - segment.takeoutStartM - segment.takeoutEndM;
+    // Datum checks are appended above, so include them in this segment's emitted missing paths.
+    missingForSegment.push(...segment.cutMissing);
+    const uniqueMissingForSegment = [...new Set(missingForSegment)];
+    if (segment.takeoutStartM === undefined || segment.takeoutEndM === undefined) {
+      if (!uniqueMissingForSegment.includes(`segments.${segment.input.id}.takeout`)) uniqueMissingForSegment.push(`segments.${segment.input.id}.takeout`);
+    }
+    if (cutLengthM !== undefined && cutLengthM <= 0) {
       throw new LocalGeometryInputError("Net takeouts must leave a positive pipe cut length.", `segments.${segment.input.id}`);
     }
-    const state = segment.unsupported.length ? "unsupported" : missingForSegment.length ? "input_missing" : "verified";
+    const state = segment.unsupported.length ? "unsupported" : uniqueMissingForSegment.length ? "input_missing" : "verified";
     return {
       segmentId: segment.input.id,
-      centerlineLengthM: state === "verified" ? segment.centerlineLengthM ?? null : null,
-      cutLengthM: state === "verified" ? cutLengthM ?? null : null,
-      outsideDiameterM: state === "verified" ? segment.outsideDiameterM ?? null : null,
+      centerlineLengthM: segment.centerlineLengthM ?? null,
+      cutLengthM: cutLengthM ?? null,
+      outsideDiameterM: segment.outsideDiameterM ?? null,
       state,
-      missingInputs: missingForSegment,
+      missingInputs: uniqueMissingForSegment,
     };
   });
 
@@ -445,6 +471,8 @@ export function evaluateLocalPlanGeometry(input: LocalPlanGeometry): LocalPlanGe
 }
 
 export function compareLocalPlanGeometry(baseline: LocalPlanGeometryResult, proposed: LocalPlanGeometryResult): LocalPlanGeometryDelta {
+  const elbowCountKnown = (result: LocalPlanGeometryResult) =>
+    ![...result.missingInputs, ...result.unsupported].some(path => path.startsWith("fittings[") && path.includes("].kind"));
   const state = baseline.state === "unsupported" || proposed.state === "unsupported"
     ? "unsupported"
     : baseline.state !== "verified" || proposed.state !== "verified"
@@ -454,9 +482,13 @@ export function compareLocalPlanGeometry(baseline: LocalPlanGeometryResult, prop
     baselinePlanId: baseline.planId,
     proposedPlanId: proposed.planId,
     state,
-    pipeCountDelta: state === "verified" ? proposed.segmentCount - baseline.segmentCount : null,
-    elbowCountDelta: state === "verified" ? proposed.elbowCount - baseline.elbowCount : null,
-    centerlineLengthDeltaM: state === "verified" ? proposed.totalCenterlineLengthM! - baseline.totalCenterlineLengthM! : null,
-    cutLengthDeltaM: state === "verified" ? proposed.totalCutLengthM! - baseline.totalCutLengthM! : null,
+    pipeCountDelta: proposed.segmentCount - baseline.segmentCount,
+    elbowCountDelta: elbowCountKnown(baseline) && elbowCountKnown(proposed) ? proposed.elbowCount - baseline.elbowCount : null,
+    centerlineLengthDeltaM: baseline.totalCenterlineLengthM !== null && proposed.totalCenterlineLengthM !== null
+      ? proposed.totalCenterlineLengthM - baseline.totalCenterlineLengthM
+      : null,
+    cutLengthDeltaM: baseline.totalCutLengthM !== null && proposed.totalCutLengthM !== null
+      ? proposed.totalCutLengthM - baseline.totalCutLengthM
+      : null,
   };
 }
