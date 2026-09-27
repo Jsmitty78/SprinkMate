@@ -49,6 +49,7 @@ export interface PlanView {
   unit: string;
   segments: { id: string; pieceIds: string[]; from: [number, number, number]; to: [number, number, number] }[];
   joints: { id: string; position: [number, number, number] }[];
+  context?: { id: string; kind: string; positions: [number, number, number][] }[];
 }
 export interface ChangeRow {
   id: string;

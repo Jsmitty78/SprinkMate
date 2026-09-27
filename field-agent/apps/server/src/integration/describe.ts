@@ -28,9 +28,12 @@ export function materialDescription(
   s: WorkPackageSnapshot,
   m: Material,
 ): string {
-  if (m.productId && m.productId !== UNSELECTED_PRODUCT) return m.productId;
-  const what =
-    m.kind === "pipe" ? "Pipe" : m.kind === "fitting" ? "Fitting" : m.kind;
+  if (m.productId && m.productId !== UNSELECTED_PRODUCT)
+    return m.kind === "pipe"
+      ? `${m.productId} (modeled spans; not purchasing stock)`
+      : m.productId;
+  if (m.kind !== "pipe" && m.kind !== "fitting") return m.productId ?? m.id;
+  const what = m.kind === "pipe" ? "Pipe" : "Fitting";
   const sizes = [
     ...new Set(
       m.entityIds

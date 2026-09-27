@@ -6,7 +6,6 @@ import { FieldService } from "../src/service.js";
 import { createApp } from "../src/api.js";
 import { WorkPackageStore } from "../src/work-packages/store.js";
 import { createIntegratedServices } from "../src/integration/runtime.js";
-import { ASSUMPTION_PREFIX } from "@field-agent/core";
 import { exportSnapshot } from "../src/integration/snapshot.js";
 import { renderPdf } from "../src/exports/pdf.js";
 import { csvFiles } from "../src/exports/csv.js";
@@ -78,7 +77,7 @@ it("refuses context that is connected into the work instead of dropping it", asy
 it("exports saved inputs with their basis, so a test assumption never reads as a measurement", async () => {
   const t = setup(), d = await drawing(t);
   const assumed = { id: "clearance", field: "requiredPipeClearance", value: 100, unit: "mm", subjectIds: [], unknownReason: null, confirmation: "confirmed" as const,
-    context: "observed" as const, source: { description: `${ASSUMPTION_PREFIX} software-test parameter, not a regulation`, assetId: null, page: null } };
+    context: "observed" as const, source: { description: "ASSUMPTION: software-test parameter, not a regulation", assetId: null, page: null } };
   t.packages.edit(d.id, { expectedRevision: 1, patch: { sourceDrawing: d.sourceDrawing, ...fs01Trace(), siteFacts: [assumed] } });
   await run(t, d.id);
   const snap = exportSnapshot(t.packages.get(d.id), t.detailStore.get(d.id)!)!;
@@ -112,7 +111,7 @@ it("gives an honest R2 partial package: requirement not purchase, projected leng
   expect(result.evaluations.find(e => /No executable rule pack/.test(e.reason))?.status).toBe("unknown");
   // No CPVC cure question and no CPVC procedure cited for a product that is not selected.
   expect(done.outputs.requests.some(r => /cure/i.test(r.question))).toBe(false);
-  expect(result.evaluations.find(e => /No catalog procedure applies/.test(e.reason))?.sourceRefs).toEqual([]);
+  expect(result.evaluations.find(e => /^Assembly has unresolved/.test(e.reason))?.sourceRefs).toEqual([]);
 
   const snap = exportSnapshot(t.packages.get(d.id), t.detailStore.get(d.id)!)!;
   expect(snap.cuts[0].centerline! * 1000).toBeCloseTo(3047.6613, 3);

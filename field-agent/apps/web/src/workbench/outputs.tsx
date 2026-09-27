@@ -46,15 +46,15 @@ export function MaterialsCuts({ result, current, revision, plan, callouts, detai
 }) {
   if (!result) return <div className="fa-empty"><Icon name="layers" size={28} /><p>No materials yet.</p><small>Generate from your inputs to see the materials, cut list and assembly for this run.</small></div>;
   const cutDetail = new Map(detail?.fabrication?.cuts.map(c => [c.pieceId, c]) ?? []);
-  const fittings = plan?.entities.filter(e => e.kind === "fitting") ?? [];
+  const fittings = plan?.entities.filter(e => e.kind === "fitting" && result.materials.some(m => m.entityIds.includes(e.id))) ?? [];
   return <div className="fa-stack">
     <div className="fa-headline"><div>{label && <strong>{label}</strong>}<Freshness current={current} revision={revision} resultRevision={result.inputRevision} /></div></div>
     {!current && <Callout title="These results are from older inputs">Regenerate before cutting. The numbers below are kept for comparison only.</Callout>}
     <Section title="Materials" count={result.materials.length}>
-      <table className="fa-table"><thead><tr><th>Item</th><th className="num">Qty</th></tr></thead>
+      <table className="fa-table"><thead><tr><th>Item</th><th className="num">Modeled qty</th></tr></thead>
         <tbody>{result.materials.map(m => <tr key={m.id}>
           <td>{isProduct(m.description) ? <><strong>{productName(m.description)}</strong><small className="mono">{productCode(m.description)}</small></>
-            : <><strong>{m.description.split("; ")[0]}</strong>{m.description.split("; ").slice(1).map(p => <small key={p}>{p}</small>)}</>}</td>
+            : <><strong>{m.description.split("; ")[0]}</strong>{m.description.split("; ").slice(1).map(p => <small key={p}>{p}</small>)}</>}<div className="fa-steptags">{m.entityIds.map(id => <button type="button" key={id} className="fa-tagbox small" aria-pressed={selectedPiece === id} onClick={() => onSelectPiece(selectedPiece === id ? null : id)}>{labelFor(callouts, id)}</button>)}</div></td>
           <td className="num">{m.quantity.value === null ? <span className="fa-unknown" title={m.quantity.reason}>Unknown<small>{m.quantity.reason}</small></span> : countText(m.quantity)}</td>
         </tr>)}</tbody></table>
     </Section>
@@ -93,13 +93,13 @@ export function MaterialsCuts({ result, current, revision, plan, callouts, detai
 
 const isProduct = (description: string) => !description.includes(";") && !/^(Pipe|Fitting), product not selected/.test(description);
 
-export function Assembly({ result, callouts, sources }: { result: PackageResult | undefined; callouts: Callouts; sources: Sources }) {
+export function Assembly({ result, callouts, sources, selectedPiece, onSelectPiece }: { result: PackageResult | undefined; callouts: Callouts; sources: Sources; selectedPiece?: string | null; onSelectPiece?: (id: string | null) => void }) {
   if (!result) return <div className="fa-empty"><p>No assembly steps yet.</p></div>;
   return <ol className="fa-steps">{result.assembly.map(a => <li key={a.id} className={a.unresolved.length ? "is-open" : ""}>
     <span className="fa-stepno">{a.step}</span>
     <div>
       <p>{a.instruction}</p>
-      <div className="fa-steptags">{a.pieceIds.map(id => <span key={id} className="fa-tagbox small">{callouts.piece.get(id) ?? id}</span>)}{a.jointIds.length > 0 && <span className="fa-muted small">{a.jointIds.length} joint{a.jointIds.length > 1 ? "s" : ""}</span>}</div>
+      <div className="fa-steptags">{a.pieceIds.map(id => <button type="button" key={id} className="fa-tagbox small" aria-pressed={selectedPiece === id} onClick={() => onSelectPiece?.(selectedPiece === id ? null : id)}>{callouts.piece.get(id) ?? id}</button>)}{a.jointIds.length > 0 && <span className="fa-muted small">{a.jointIds.length} joint{a.jointIds.length > 1 ? "s" : ""}</span>}</div>
       {a.procedureRef && <SourceLinks refs={[a.procedureRef]} sources={sources} />}
       {a.unresolved.map(u => <p key={u} className="fa-warn small"><Icon name="alert" size={12} /> {u}</p>)}
     </div>
@@ -134,8 +134,8 @@ export function RouteComparison({ routes, baseline, baselineResult, focusId, sel
       {selectedId ? "Your selection is kept for reference, but it cannot be used until the routes are regenerated." : "Regenerate before choosing a route."}
     </Callout>}
     {clearanceMissing && <Callout title="Clearance measurement needed">Enter the required clearance under Site evidence so the planner can keep routes clear of the duct.</Callout>}
-    {routes.length === 0 ? <Callout tone="red" title="No route fits the measured conditions" action={<Button busy={busy} onClick={onRegenerate}>Regenerate</Button>}>
-      {noneReason ?? "The planner found no route inside the work boundary."} Check the obstacle and work boundary measurements, then regenerate.
+    {routes.length === 0 ? <Callout tone="red" title="No generated alternative is available" action={<Button busy={busy} onClick={onRegenerate}>Regenerate</Button>}>
+      {noneReason ?? "Generate from confirmed inputs to search the supported templates."} Check the obstacle and work boundary measurements, then regenerate.
     </Callout> : <Section title="Proposed routes" count={routes.length}>
       <table className="fa-table fa-routes"><thead><tr><th>Route</th><th>Proposal</th><th>State</th></tr></thead>
         <tbody>{routes.map(r => {
@@ -143,7 +143,7 @@ export function RouteComparison({ routes, baseline, baselineResult, focusId, sel
           const delta = metresText(r.centerlineDeltaM, true);
           return <tr key={r.plan.id} className={`fa-selectable ${r.plan.id === focusId ? "is-on" : ""}`} onClick={() => onPreview(r.plan.id)} tabIndex={0} onKeyDown={e => { if (e.key === "Enter") onPreview(r.plan.id); }}>
             <td><span className="fa-route-letter">{r.letter}</span></td>
-            <td><strong>{r.fittings} elbow{r.fittings === 1 ? "" : "s"}</strong><small>{delta.known ? `${delta.primary} centerline` : `Length unknown: ${r.unknownReason}`}</small></td>
+            <td><strong>{r.fittings - baseFittings} added fitting{r.fittings - baseFittings === 1 ? "" : "s"}</strong><small>{delta.known ? `${delta.primary} centerline` : `Length unknown: ${r.unknownReason}`}</small></td>
             <td>{state}</td>
           </tr>;
         })}</tbody></table>
@@ -157,8 +157,8 @@ export function RouteComparison({ routes, baseline, baselineResult, focusId, sel
       <table className="fa-table"><thead><tr><th /><th className="num">Existing</th><th className="num">Route {focus.letter}</th></tr></thead>
         <tbody>
           <tr><td>Pipe centerline</td><td className="num fa-muted">—</td><td className="num"><Length q={focus.centerlineDeltaM === null ? { value: null, unit: "m", reason: focus.unknownReason } : { value: focus.centerlineDeltaM, unit: "m", basis: "proposed_inputs" }} signed /></td></tr>
-          <tr><td>Fittings</td><td className="num">{baseFittings}</td><td className="num">{focus.fittings}</td></tr>
-          <tr><td>Pieces to cut</td><td className="num">{baselineResult?.cuts.length ?? "Unknown"}</td><td className="num">{focus.result?.cuts.length ?? "Unknown"}</td></tr>
+          <tr><td>Fittings incl. retained context</td><td className="num">{baseFittings}</td><td className="num">{focus.fittings}</td></tr>
+          <tr><td>Modeled spans (closure may split them)</td><td className="num">{baselineResult?.cuts.length ?? "Unknown"}</td><td className="num">{focus.result?.cuts.length ?? "Unknown"}</td></tr>
           <tr><td>Assembly steps</td><td className="num">{baselineResult?.assembly.length ?? "Unknown"}</td><td className="num">{focus.result?.assembly.length ?? "Unknown"}</td></tr>
         </tbody></table>
       {focus.result && <CheckList groups={groupChecks(focus.result.evaluations).filter(g => g.subjectIds.length && g.status !== "pass").slice(0, 2)} sources={sources} compact />}
@@ -170,7 +170,7 @@ export function RouteComparison({ routes, baseline, baselineResult, focusId, sel
 export function PackageDelta({ detail, callouts, baselineResult }: { detail: DetailPlan | undefined; callouts: Callouts; baselineResult: PackageResult | undefined }) {
   const delta = detail?.delta;
   if (!delta) return null;
-  const name = (id: string) => { const [kind, product] = id.split(":"); return kind === "consumable" ? "Solvent cement" : productName(product); };
+  const name = (id: string) => { if (id.startsWith("unresolved-")) return `${id.slice(11)} requirements (unresolved)`; const [kind, product] = id.split(":"); return kind === "consumable" ? "Solvent cement" : productName(product); };
   return <Section title="Change from the original">
     <table className="fa-table"><thead><tr><th>Item</th><th className="num">Original</th><th className="num">Revised</th><th className="num">Change</th></tr></thead>
       <tbody>{delta.materials.map(m => <tr key={m.id}>

@@ -25,8 +25,7 @@ export interface ProfileOutput {
   required: { id: string; subjectIds: string[] }[];
   checks: CheckResult[];
   excluded: { id: string; reason: string }[];
-  /** Null when no executable rule pack covers the project's jurisdiction. */
-  project: ReturnType<typeof evaluateProject> | null;
+  project: ReturnType<typeof evaluateProject>;
 }
 export function evaluateProfile(
   s: WorkPackageSnapshot,
@@ -37,22 +36,15 @@ export function evaluateProfile(
 ): ProfileOutput {
   const adaptation = s.intent === "adapt_to_site" && plan.id !== baseline.id;
   const profile = !adaptation ? "drawing_preparation" : "site_adaptation";
-  // Retained context heads are outside the work: they are not selected products to check.
+  // Retained context (outside the scope) is shown, never checked as part of the work.
   const context = new Set(s.scope?.excludedEntityIds ?? []);
   const heads = s.baselinePlan!.entities.filter(
     (e) => e.kind === "head" && !context.has(e.id),
   );
-  // The San Francisco packs apply only to a San Francisco project. With the jurisdiction unknown the
-  // basis pack asks for it; with another jurisdiction no pack is run rather than one that does not apply.
-  const jurisdiction = fact<string>(s, "jurisdiction");
-  const otherJurisdiction =
-    jurisdiction.confirmed &&
-    jurisdiction.value !== null &&
-    jurisdiction.value !== "san_francisco";
   const tyco = heads.filter((e) => e.productId === "TY3231");
-  const supports = s.baselinePlan!.entities.filter(
-    (e) => e.kind === "support" && !context.has(e.id),
-  );
+  const supports = s.baselinePlan!.entities.filter((e) => e.kind === "support" && !context.has(e.id));
+  const jurisdiction = fact<string>(s, "jurisdiction");
+  const sfApplicable = jurisdiction.confirmed && jurisdiction.value === "san_francisco" && jurisdiction.evidenceIds.length > 0;
   const request: ProjectEvaluationRequest = {
     project: {
       id: s.projectId,
@@ -60,12 +52,12 @@ export function evaluateProfile(
       asOf: s.updatedAt.slice(0, 10),
     },
     selectedRulePacks: [
-      "sf-project-basis",
-      ...(supports.length ? ["sf-supports-2025" as const] : []),
+      ...(sfApplicable ? ["sf-project-basis" as const] : []),
+      ...(sfApplicable && supports.length ? ["sf-supports-2025" as const] : []),
       ...(tyco.length
         ? ["tyco-tfp171-head" as const, "tyco-tfp171-extra" as const]
         : []),
-      ...(adaptation ? ["sf-local-change-2025" as const] : []),
+      ...(sfApplicable && adaptation ? ["sf-local-change-2025" as const] : []),
     ],
     facts: {
       sfNfpa13: {
@@ -177,32 +169,45 @@ export function evaluateProfile(
     const e = request.evidence.find((e) => e.id === f.id);
     if (e) e.subjectIds.push(s.projectId);
   }
-  const project = otherJurisdiction ? null : evaluateProject(request);
+  const project = evaluateProject(request);
   const checks: CheckResult[] = [
-    !project
-      ? {
-          id: "PROJECT_BASIS",
-          subjectIds: [],
-          status: "unknown",
-          state: "unsupported",
-          reason:
-            "No executable rule pack for this project's jurisdiction; Sprink's code rule packs are for San Francisco only. Code rules are not evaluated for this project.",
-          sourceRefs: [],
-        }
-      : {
-          id: "PROJECT_BASIS",
-          subjectIds: [],
-          status:
-            project.basis?.status === "resolved"
-              ? "pass"
-              : project.basis?.status === "not_applicable"
-                ? "not_applicable"
-                : "unknown",
-          state:
-            project.basis?.status === "resolved" ? "verified" : "input_missing",
-          reason: project.basis?.reason ?? "Project basis unresolved",
-          sourceRefs: project.basis?.sourceRefs.map((r) => r.url) ?? [],
-        },
+    {
+      id: "PROJECT_BASIS",
+      subjectIds: [],
+      status:
+        project.basis?.status === "resolved"
+          ? "pass"
+          : project.basis?.status === "not_applicable"
+            ? "not_applicable"
+            : "unknown",
+      state:
+        project.basis?.status === "resolved" ? "verified" : "input_missing",
+      reason:
+        jurisdiction.confirmed && jurisdiction.value !== "san_francisco"
+          ? `No executable rule pack for jurisdiction "${jurisdiction.value}"; Sprink's code rule packs are for San Francisco only, so code rules are not evaluated.`
+          : (project.basis?.reason ?? "Project basis unresolved"),
+      sourceRefs: project.basis?.sourceRefs.map((r) => r.url) ?? [],
+    },
+    ...output.selectedProducts.filter(p => p.limitations?.length).map(p => ({
+      id: `PRODUCT-SUITABILITY-${p.id}`, subjectIds: input.pieces.filter(x => x.productId === p.id).map(x => x.id),
+      status: "unknown" as const, state: "input_missing", reason: p.limitations!.join(" "), sourceRefs: p.sourceIds,
+    })),
+    ...input.pieces.flatMap(p => ["requiredConnectionMethod", "requiredPipeSpecification"].flatMap(field => {
+      const requirement = fact<string>(s, field, p.id);
+      return requirement.confirmed && requirement.value ? [{
+        id: `SOURCE-REQUIREMENT-${p.id}-${field}`, subjectIds: [p.id], status: "unknown" as const,
+        state: "review_required", reason: `Source requirement: ${requirement.value}. Selection and project suitability require independent review.`,
+        sourceRefs: requirement.evidenceIds,
+      }] : [];
+    })),
+    ...input.pieces.flatMap(p => {
+      const required = fact<string>(s, "requiredConnectionMethod", p.id);
+      const product = output.selectedProducts.find(x => x.id === p.productId);
+      return required.confirmed && product && required.value !== product.connection ? [{
+        id: `MATERIAL-CONFLICT-${p.id}`, subjectIds: [p.id], status: "fail" as const, state: "conflict",
+        reason: "Selected product conflicts with the explicit source connection requirement; document a design change before using it.", sourceRefs: required.evidenceIds,
+      }] : [];
+    }),
     ...output.cuts.map((c) => ({
       id: `CUT-${c.pieceId}`,
       subjectIds: [c.pieceId],
@@ -228,16 +233,10 @@ export function evaluateProfile(
           : "verified",
       reason: output.operations.every((o) => o.status === "planned")
         ? "Supported procedure with supplied access, movement and cure confirmations"
-        : !output.operations.some((o) => o.sourceIds.length)
-          ? "No catalog procedure applies: select the product and connection, then detail the steps"
-          : "Assembly has unresolved movement, cure, geometry or unsupported fixed-end closure",
-      // Cite the catalog procedure only where a step actually uses it.
-      sourceRefs: [...new Set(output.operations.flatMap((o) => o.sourceIds))]
-        .length
-        ? output.sources.map((r) => r.id)
-        : [],
+        : "Assembly has unresolved method-specific conditions, geometry or fixed-end closure",
+      sourceRefs: output.sources.map((r) => r.id),
     },
-    ...(project?.rules ?? []).map((r) => ({
+    ...project.rules.map((r) => ({
       id: r.ruleId,
       subjectIds: r.subjectIds,
       status: r.status,
@@ -247,9 +246,9 @@ export function evaluateProfile(
       reason: r.reason,
       sourceRefs: r.sourceRefs.map((x) => x.url),
     })),
-    ...(project?.coverage ?? [])
+    ...project.coverage
       .filter(
-        (c) => c.state !== "supported" && (c.area === "nfpa13" || c.selected),
+        (c) => c.state !== "supported" && ((sfApplicable && c.area === "nfpa13") || c.selected),
       )
       .map((c) => ({
         id: `COVERAGE-${c.id}`,
@@ -285,15 +284,10 @@ export function evaluateProfile(
     checks,
     project,
     excluded: [
-      ...(otherJurisdiction
-        ? [
-            {
-              id: "sf-project-basis",
-              reason: `Jurisdiction is ${jurisdiction.value}; the San Francisco packs do not apply`,
-            },
-          ]
-        : []),
-      ...(!adaptation
+      ...(!sfApplicable ? [{ id: "sf-project-basis", reason: "No confirmed San Francisco jurisdiction; source drawing basis does not establish current applicability." },
+        { id: "sf-supports-2025", reason: "San Francisco applicability is unconfirmed or outside this project." },
+        { id: "sf-local-change-2025", reason: "San Francisco applicability is unconfirmed or outside this project." }] : []),
+      ...(sfApplicable && !adaptation
         ? [
             {
               id: "sf-local-change-2025",

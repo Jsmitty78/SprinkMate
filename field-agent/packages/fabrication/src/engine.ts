@@ -1,4 +1,5 @@
-import { CEMENT_ID, ELBOW_ID, PIPE_ID, PROCEDURE_SOURCE } from "./catalog.js";
+import { CEMENT_ID, PROCEDURE_SOURCE } from "./catalog.js";
+import { STEEL_ELBOW_SOURCE } from "./steel-catalog.js";
 import type {
   Catalog, CutRow, EndpointTakeout, FabricationInput, FabricationOutput, Joint,
   Length, Metric, Node, Operation, Piece, Value,
@@ -119,6 +120,10 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
       base.netTakeout = metric(0, "confirmed_inputs");
       return base;
     }
+    if (node.datum === "scope_interface") {
+      base.netTakeout = metric(null, "unknown", ["Scope interface is not a physical pipe end or confirmed joint datum", "Thread engagement/product evidence and physical length/elevation require detailing"]);
+      return base;
+    }
     if (node.datum === "tie_in") {
       const offset = read(input, node.netCutOffset, node.id);
       base.netTakeout = metric(offset.value ? toMeters(offset.value) : null, offset.basis, offset.reasons, offset.evidenceIds);
@@ -130,7 +135,7 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
     base.fittingId = fitting.id; base.portId = port.id;
     const product = products.get(fitting.productId);
     const pipe = products.get(piece.productId);
-    if (!product || product.kind !== "elbow_90" || !pipe || pipe.kind !== "pipe" || !product.compatiblePipeIds.includes(pipe.id)) {
+    if (!product || product.kind !== "elbow_90" || !pipe || pipe.kind !== "pipe" || !product.compatiblePipeIds.includes(pipe.id) || product.nominalSize !== pipe.nominalSize || product.connection !== pipe.connection) {
       base.netTakeout = metric(null, "unknown", [`Unsupported product connection: ${piece.productId} -> ${fitting.productId}`]); return base;
     }
     base.sourceIds = product.sourceIds;
@@ -141,6 +146,25 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
     });
     if (axes.some(a => a.length !== 1) || axes[0][0] === axes[1][0]) {
       base.netTakeout = metric(null, "unknown", [`90-degree fitting orientation unresolved or unsupported: ${fitting.id}`]); return base;
+    }
+    if (product.connection === "steel_threaded") {
+      const h = product.centerToFace;
+      if (h) base.centerToFaceM = toMeters(h);
+      const bound = port.threadMakeup;
+      if (!bound || bound.pipeProductId !== pipe.id || bound.fittingProductId !== product.id) {
+        base.netTakeout = metric(null, "unknown", ["Missing thread engagement bound to this pipe/fitting pair"]);
+        return base;
+      }
+      const engagement = read(input, bound.axialEngagement, `${fitting.id}/${port.id}`);
+      if (engagement.value && h) {
+        base.insertionM = toMeters(engagement.value);
+        if (base.insertionM <= 0 || base.insertionM >= base.centerToFaceM!) throw new Error(`Invalid thread engagement: ${fitting.id}/${port.id}`);
+        base.netTakeout = metric(base.centerToFaceM! - base.insertionM, engagement.basis, engagement.reasons, engagement.evidenceIds);
+      } else base.netTakeout = metric(null, "unknown", [...engagement.reasons, ...(!h ? ["Missing threaded center-to-face datum"] : [])], engagement.evidenceIds);
+      return base;
+    }
+    if (product.connection !== "cpvc_socket_solvent") {
+      base.netTakeout = metric(null, "unknown", ["Unsupported connection method"]); return base;
     }
     const g = product.centerToSocketBottom, h = product.centerToFace;
     if (!g || !h) { base.netTakeout = metric(null, "unknown", [`Missing socket datum: ${fitting.productId}`]); return base; }
@@ -165,7 +189,7 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
     const ends: [EndpointTakeout, EndpointTakeout] = [takeout(piece, "start"), takeout(piece, "end")];
     const combined = total([centerline, ...ends.map(t => t.netTakeout)]);
     const pipe = products.get(piece.productId);
-    const supported = pipe?.kind === "pipe";
+    const supported = pipe?.kind === "pipe" && pipe.connection !== "unsupported";
     const cut = !supported || combined.value === null ? null : centerline.value! - ends[0].netTakeout.value! - ends[1].netTakeout.value!;
     if (cut !== null && cut <= 0) throw new Error(`Takeouts leave no positive cut: ${piece.id}`);
     return { pieceId: piece.id, callout: i + 1, sourceSegmentIds: [...piece.sourceSegmentIds], productId: piece.productId,
@@ -176,7 +200,7 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
   const joints: Joint[] = [];
   for (const piece of input.pieces) for (const end of ["start", "end"] as const) {
     const node = nodes.get(end === "start" ? piece.startNodeId : piece.endNodeId)!;
-    if (node.datum === "physical_pipe_end") continue;
+    if (node.datum === "physical_pipe_end" || node.datum === "scope_interface") continue;
     const connection = portMap.get(`${piece.id}/${end}`);
     const id = connection ? `${connection.fitting.id}/${connection.port.id}` : `${piece.id}/${end}/tie-in`;
     const cut = cuts.find(c => c.pieceId === piece.id)!;
@@ -184,12 +208,16 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
     const axes = a && b ? axisOf(a, b) : [];
     const axis = axes.length === 1 ? axes[0] : null;
     const direction = axis === null ? null : `${(end === "start" ? b![axis] - a![axis] : a![axis] - b![axis]) > 0 ? "+" : "-"}${["X", "Y", "Z"][axis]}`;
-    const isSupported = catalog.evidenceClass === "manufacturer_document" && sources.has(PROCEDURE_SOURCE)
-      && piece.productId === PIPE_ID && connection?.fitting.productId === ELBOW_ID;
+    const pipe = products.get(piece.productId), elbow = connection && products.get(connection.fitting.productId);
+    const procedure = elbow?.kind === "elbow_90" ? elbow.procedureId : undefined;
+    const isSupported = catalog.evidenceClass === "manufacturer_document" && pipe?.kind === "pipe" && elbow?.kind === "elbow_90"
+      && elbow.compatiblePipeIds.includes(pipe.id) && elbow.nominalSize === pipe.nominalSize && elbow.connection === pipe.connection
+      && (procedure === "spears-fg3-socket-1in" ? pipe.connection === "cpvc_socket_solvent" && sources.has(PROCEDURE_SOURCE) && elbow.sourceIds.includes(PROCEDURE_SOURCE)
+        : procedure === "anvil-351-threaded" && pipe.connection === "steel_threaded" && sources.has(STEEL_ELBOW_SOURCE) && elbow.sourceIds.includes(STEEL_ELBOW_SOURCE));
     joints.push({ id, callout: joints.length + 1, pieceId: piece.id, end, nodeId: node.id,
       fittingId: connection?.fitting.id ?? null, portId: connection?.port.id ?? null,
       subassemblyId: piece.subassemblyId, location: connection?.port.location ?? "field", orientation: direction,
-      procedureId: isSupported ? "spears-fg3-socket-1in" : null,
+      procedureId: isSupported ? procedure! : null,
       reasons: unique([...cut.cutLength.reasons, ...(!isSupported ? ["Connection procedure not supported; field closure requires separate detailing"] : [])]),
     });
   }
@@ -198,9 +226,9 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
   for (const productId of unique(input.pieces.map(p => p.productId))) {
     const rows = cuts.filter(p => p.productId === productId);
     const supported = products.get(productId)?.kind === "pipe";
-    // Modeled pieces are not purchased lengths; without a product there is nothing to count.
+    // Modeled pieces are not purchased lengths; without a selected product there is nothing to count.
     materials.push({ id: `pipe:${productId}`, kind: "pipe", productId, entityIds: rows.map(r => r.pieceId),
-      quantity: supported ? metric(rows.length, "confirmed_inputs", [], [], "each")
+      quantity: productId !== UNSELECTED_PRODUCT ? metric(rows.length, supported ? "confirmed_inputs" : "unknown", supported ? [] : [pipeReason(productId)], [], "each")
         : metric(null, "unknown", [`${pipeReason(productId)}; purchase quantity is not established`], [], "each"),
       centerlineLength: total(rows.map(r => r.centerline)),
       cutLength: total(rows.map(r => r.cutLength)), status: !supported ? "unsupported" : rows.some(r => r.cutLength.value === null) ? "unresolved" : "supported",
@@ -220,10 +248,17 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
       quantity: metric(value.value, value.basis, value.reasons, value.evidenceIds, "each"), centerlineLength: null, cutLength: null,
       status: "unsupported", reasons: [accessory.reason || "Accessory installation is outside this catalog", ...value.reasons] });
   }
-  if (joints.some(j => j.procedureId)) materials.push({ id: "consumable:cement", kind: "consumable", productId: CEMENT_ID,
-    entityIds: joints.filter(j => j.procedureId).map(j => j.id), quantity: metric(null, "unknown", ["Cement purchase quantity is not estimated"], [], "each"),
+  if (input.nodes.some(n => n.datum === "scope_interface")) {
+    for (const kind of ["other", "support"] as const) materials.push({
+      id: `unresolved-${kind}`, kind, productId: null, entityIds: input.pieces.map(p => p.id),
+      quantity: metric(null, "unknown", [kind === "other" ? "Physical joints, closure components and purchasing stock unresolved" : "Support requirements and quantities unresolved"], [], "each"),
+      centerlineLength: null, cutLength: null, status: "unresolved", reasons: ["Drawing scope does not establish physical fabrication quantities"],
+    });
+  }
+  if (joints.some(j => j.procedureId === "spears-fg3-socket-1in")) materials.push({ id: "consumable:cement", kind: "consumable", productId: CEMENT_ID,
+    entityIds: joints.filter(j => j.procedureId === "spears-fg3-socket-1in").map(j => j.id), quantity: metric(null, "unknown", ["Cement purchase quantity is not estimated"], [], "each"),
     centerlineLength: null, cutLength: null, status: "unresolved", reasons: ["No stock or consumables optimization"] });
-  const operations = buildOperations(input, cuts, joints);
+  const operations = buildOperations(input, cuts, joints, catalog);
   const gaps = [
     ...cuts.flatMap(c => c.cutLength.reasons.map(reason => ({ subjectId: c.pieceId, reason }))),
     ...materials.flatMap(m => m.reasons.map(reason => ({ subjectId: m.id, reason }))),
@@ -236,37 +271,40 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
     siteEvidenceIds: [...input.siteEvidenceIds], evidenceClass: catalog.evidenceClass, frame: { ...input.frame },
     selectedProducts: structuredClone(catalog.products.filter(p => [...input.pieces, ...input.fittings].some(e => e.productId === p.id))),
     rounding: "none; metres in calculation; renderer must declare display rounding",
-    quantityBasis: "installed pieces; no stock nesting, waste, or procurement allowance",
+    quantityBasis: "modeled pieces/spans; physical splits and purchasing stock require separate detailing",
     fittings: input.fittings.map((f, i) => ({ ...structuredClone(f), callout: `F${i + 1}`,
       position: structuredClone(nodes.get(f.nodeId)!.position), jointIds: joints.filter(j => j.fittingId === f.id).map(j => j.id) })),
     materials, cuts, joints, operations,
     subassemblies: unique(input.pieces.map(p => p.subassemblyId)).map(id => ({ id,
       pieceIds: input.pieces.filter(p => p.subassemblyId === id).map(p => p.id), jointIds: joints.filter(j => j.subassemblyId === id).map(j => j.id) })),
-    gaps, sources: structuredClone(catalog.sources), evidence: structuredClone(input.evidence), constructionApproval: "not_assessed",
+    gaps, sources: structuredClone(catalog.sources.filter(source =>
+      catalog.products.some(p => p.sourceIds.includes(source.id) && [...input.pieces, ...input.fittings].some(e => e.productId === p.id))
+      || operations.some(o => o.sourceIds.includes(source.id)))), evidence: structuredClone(input.evidence), constructionApproval: "not_assessed",
   };
 }
 
-function buildOperations(input: FabricationInput, cuts: CutRow[], joints: Joint[]): Operation[] {
+function buildOperations(input: FabricationInput, cuts: CutRow[], joints: Joint[], catalog: Catalog): Operation[] {
   const operations: Operation[] = [];
   const access = read(input, input.assemblyConditions.workAreaAccess, input.planId);
   const cure = read(input, input.assemblyConditions.curePlan, input.planId);
   const accessReasons = access.value === true && access.basis === "confirmed_inputs" ? [] : ["Confirm work-area access", ...access.reasons];
-  const add = (code: string, pieceIds: string[], jointIds: string[], instruction: string, reasons: string[], supported = true) => {
+  const add = (code: string, pieceIds: string[], jointIds: string[], instruction: string, reasons: string[], supported = true, sourceIds = [PROCEDURE_SOURCE]) => {
     operations.push({ id: `op-${operations.length + 1}`, number: operations.length + 1, code, pieceIds, jointIds,
-      predecessorId: operations.at(-1)?.id ?? null, instruction, sourceIds: supported ? [PROCEDURE_SOURCE] : [],
+      predecessorId: operations.at(-1)?.id ?? null, instruction, sourceIds: supported ? sourceIds : [],
       status: !supported ? "unsupported" : reasons.length ? "needs_confirmation" : "planned", reasons: unique(reasons) });
   };
   for (const cut of cuts) {
-    const supported = cut.productId === PIPE_ID;
-    if (!supported) {
-      // No product-specific cutting or end preparation is invented for a product the catalog does not cover.
-      add("detail_cut_and_end_preparation", [cut.pieceId], [], `Detail cutting and end preparation for piece ${cut.callout} once its product and connection are selected.`,
-        [pipeReason(cut.productId), ...cut.cutLength.reasons], false);
-      continue;
-    }
+    const product = catalog.products.find(p => p.id === cut.productId);
+    const supported = product?.kind === "pipe" && product.preparation === "spears-fg3";
     const reasons = [...accessReasons, ...cut.cutLength.reasons,
       ...(cut.cutLength.basis === "proposed_inputs" ? ["Confirm proposed geometry before fabrication"] : []),
       ...(cut.disposition === "proposed_reuse" ? ["Reuse feasibility and condition require separate confirmation"] : [])];
+    if (!supported) {
+      add("resolve_preparation", [cut.pieceId], [], product ? "Confirm end preparation, threading method, tools and physical cut dimensions for the selected pipe."
+        : `Detail cutting and end preparation for piece ${cut.callout} once its product and connection are selected.`,
+        [...reasons, product ? "Pipe preparation needs a reviewed product-specific plan" : pipeReason(cut.productId)], false);
+      continue;
+    }
     add("cut_square", [cut.pieceId], [], `Cut piece ${cut.callout} square to the cut-list length with a suitable plastic-pipe tool.`, reasons, supported);
     add("deburr_bevel", [cut.pieceId], [], "Remove internal/external burrs and bevel the end approximately 10-15 degrees.", reasons, supported);
   }
@@ -281,6 +319,23 @@ function buildOperations(input: FabricationInput, cuts: CutRow[], joints: Joint[
       ...(cut.disposition === "proposed_reuse" ? ["Reuse feasibility and condition require separate confirmation"] : []),
       ...(movement.value === true && movement.basis === "confirmed_inputs" ? [] : ["Confirm full insertion and quarter-turn movement in the stated sequence", ...movement.reasons]),
       ...(cure.value?.trim() && cure.basis === "confirmed_inputs" ? [] : ["Confirm the set/cure plan for temperature, fit, moisture, test pressure, and new-work versus cut-in conditions", ...cure.reasons])];
+    if (joint.procedureId === "anvil-351-threaded") {
+      const review = input.assemblyConditions.threadedJointPlan?.[joint.id];
+      const fitting = input.fittings.find(f => f.id === joint.fittingId);
+      const boundReview = review?.pipeProductId === cut.productId && review?.fittingProductId === fitting?.productId ? review : undefined;
+      const plan = read(input, boundReview?.plan, joint.id);
+      const threadMovement = read(input, boundReview?.movement, joint.id);
+      // Fixed-end assembly is deliberately a separate owner/strategy (#29).
+      const threadedReasons = [...accessReasons, ...joint.reasons,
+        ...(cut.cutLength.basis === "proposed_inputs" ? ["Confirm proposed geometry before fabrication"] : []),
+        ...(threadMovement.value === true && threadMovement.basis === "confirmed_inputs" ? [] : ["Confirm product-bound threaded-joint rotation and wrench access", ...threadMovement.reasons]),
+        ...(plan.value?.trim() && plan.basis === "confirmed_inputs" ? [] : ["Confirm NPT end preparation, selected sealant, tools and product suitability", ...plan.reasons]),
+        ...(cut.disposition === "proposed_reuse" ? ["Confirm reuse condition"] : [])];
+      add("inspect_threads", [joint.pieceId], [joint.id], "Inspect and clean male/female threads; replace damaged components. Refer to Fig.351 page 4.", threadedReasons, true, [STEEL_ELBOW_SOURCE]);
+      add("apply_thread_sealant", [joint.pieceId], [joint.id], "Apply the selected compatible sealant to male threads as specified by Fig.351 page 4 and the sealant manufacturer.", threadedReasons, true, [STEEL_ELBOW_SOURCE]);
+      add("thread_joint", [joint.pieceId], [joint.id], `Assemble ${joint.id} in orientation ${joint.orientation ?? "unresolved"} under the reviewed joint plan; Fig.351 page 4 governs makeup. Rotation is not an axial cut datum.`, threadedReasons, true, [STEEL_ELBOW_SOURCE]);
+      continue;
+    }
     add("inspect_dry_fit_clean", [joint.pieceId], [joint.id], `Inspect ${joint.pieceId} and ${joint.fittingId}/${joint.portId}; check dry-fit interference, then clean and dry mating surfaces.`, reasons);
     add("apply_cement", [joint.pieceId], [joint.id], "Apply FS-5 to pipe and socket per FG-3; prevent cement pooling.", reasons);
     add("insert_rotate_hold", [joint.pieceId], [joint.id], `Immediately insert fully, rotating 1/4 turn during insertion. Align ${joint.orientation ?? "the orientation"}; hold 30 seconds. Inspect the continuous bead and remove exterior excess.`, reasons);

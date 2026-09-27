@@ -1,4 +1,3 @@
-import { planToLocal } from "@field-agent/core";
 import "./site.css";
 import type { Snapshot } from "../api.js";
 import { lengthText } from "../format.js";
@@ -11,14 +10,14 @@ import { contextIds, readBox, siteFrameOf } from "../model.js";
  */
 export function SiteViews({ s }: { s: Snapshot }) {
   const site = siteFrameOf(s);
-  const frame = site?.frame ?? null;
+  const frame = site && !site.reason ? site : null;
   const plan = s.baselinePlan;
   const context = contextIds(s);
   const pipes = (plan?.entities ?? []).filter(e => e.kind === "pipe" && !context.has(e.id)).flatMap(e => {
     const [a, b] = [e.ports[0]?.position, e.ports.at(-1)?.position];
     if (!a || !b) return [];
-    const [p, q] = frame ? [planToLocal(frame, a), planToLocal(frame, b)] : [a, b];
-    return [{ id: e.id, a: p, b: q, pinned: e.id === frame?.spanId }];
+    const [p, q] = frame ? [frame.toLocal!(a), frame.toLocal!(b)] : [a, b];
+    return [{ id: e.id, a: p, b: q, pinned: !!frame && Math.abs(frame.toLocal!(a).y) < 1 && Math.abs(frame.toLocal!(b).y) < 1 }];
   });
   const boxes = (["workEnvelope", "duct"] as const).map(prefix => ({ prefix, ...readBox(s, prefix) })).filter(b => b.box);
   if (!pipes.length && !boxes.length) return <p className="fa-muted">The views appear once the run or a box is saved.</p>;
@@ -48,7 +47,7 @@ export function SiteViews({ s }: { s: Snapshot }) {
     </figure>;
   };
   return <div className="fa-siteviews">
-    {view("x", "y", frame ? `Plan (X-Y, +Y to the ${frame.ySide} of the pipe${frame.ySide === "right" ? ", mirrored" : ""})` : "Plan (plan X-Y)")}
+    {view("x", "y", frame ? "Plan (X-Y, +Y to the left of the pipe)" : "Plan (plan X-Y)")}
     {view("x", "z", frame ? "Elevation (X-Z, pipe at Z = 0)" : "Elevation (plan X-Z)")}
     <p className="fa-muted small">Orange: obstacle. Blue: work boundary. Faded, dashed boxes are saved but not confirmed.</p>
   </div>;
