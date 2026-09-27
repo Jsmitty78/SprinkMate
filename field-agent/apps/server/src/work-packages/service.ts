@@ -23,7 +23,7 @@ export interface PackageRunContext {
 }
 export interface WorkPackageRunner {
   validateSelection?(snapshot: Readonly<WorkPackageSnapshot>): void;
-  execute(context: PackageRunContext): Promise<{ status: Extract<PackageRunStatus, 'completed' | 'waiting_input' | 'blocked'>; stopReason: string }>;
+  execute(context: PackageRunContext): Promise<{ status: Extract<PackageRunStatus, 'completed' | 'waiting_input' | 'blocked' | 'failed'>; stopReason: string }>;
 }
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -245,7 +245,7 @@ export class WorkPackageService {
   start(id: string, input: unknown) {
     const data = parse(StartPackageRunSchema, input), snapshot = this.snapshot(id);
     this.expected(snapshot, data.expectedRevision);
-    ensure(data.goal === snapshot.intent || data.goal === 'export_selected_package', 'goal_intent_mismatch');
+    ensure(data.goal === snapshot.intent || data.goal === 'export_selected_package' || (data.goal === 'read_site_evidence' && snapshot.intent === 'adapt_to_site' && snapshot.siteWork?.readingRequest), 'goal_intent_mismatch');
     if (snapshot.run?.status === 'running') {
       if (snapshot.run.goal !== data.goal) throw new PackageError(409, 'active_run_goal_conflict');
       return { run: snapshot.run, reused: true };
@@ -339,7 +339,7 @@ export class WorkPackageService {
           return this.saveAsset(this.bound(id, run.id), bytes, mimeType, filename, 'artifact');
         },
       });
-      ensure(['completed', 'waiting_input', 'blocked'].includes(result.status) && typeof result.stopReason === 'string' && result.stopReason.length > 0 && result.stopReason.length <= 8000, 'invalid_runner_result');
+      ensure(['completed', 'waiting_input', 'blocked', 'failed'].includes(result.status) && typeof result.stopReason === 'string' && result.stopReason.length > 0 && result.stopReason.length <= 8000, 'invalid_runner_result');
       const current = this.bound(id, run.id);
       current.run!.status = result.status; current.run!.stopReason = result.stopReason; current.run!.updatedAt = now();
       this.store.save(current);

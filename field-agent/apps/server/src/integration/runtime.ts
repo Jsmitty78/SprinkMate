@@ -39,6 +39,8 @@ import {
   type WorkPackageRunner,
 } from "../work-packages/service.js";
 import { WorkPackageStore } from "../work-packages/store.js";
+import { SiteWorkService } from "../work-packages/site-work.js";
+import { siteEnvelopeChecks } from "./site-envelope.js";
 import { WorkPackageExports } from "../exports/service.js";
 import {
   fabricationInput,
@@ -56,7 +58,7 @@ import { SourceStore } from "../sources/store.js";
 import { PackageError } from "../work-packages/validation.js";
 import { JevSourceSearch, type SourceSearch } from "../sources/semantic.js";
 
-export const INTEGRATION_VERSION = "scenario-integration-8-agent-selected-rules";
+export const INTEGRATION_VERSION = "scenario-integration-11-site-evidence";
 function generationRecovery(path: string, message: string): string {
   const action = path === "outsideDiameter" || path.startsWith("product")
     ? "Open drawing inputs, reopen the trace if confirmed, select a compatible pipe and fitting catalog pair, save and confirm the trace."
@@ -185,7 +187,7 @@ function summary(
       procedureRef: o.sourceIds.join(",") || null,
       unresolved: o.reasons,
     })),
-    evaluations: (d.profile?.checks ?? []).map((c) => ({
+    evaluations: [...(d.profile?.checks ?? []), ...siteEnvelopeChecks(s, api)].map((c) => ({
       id: safe(c.id),
       subjectIds: subjects(c.subjectIds),
       status: c.status,
@@ -321,7 +323,12 @@ export function createIntegratedServices(
       const s = packages.get(id),
         state = detailStore.get(id);
       if (!state) return null;
-      return exportSnapshot(s, state);
+      const result = exportSnapshot(s, state);
+      if(result?.siteReview) for(let i=0;i<result.siteReview.evidence.length;i++) {
+        const e=s.siteWork!.evidence[i];
+        result.siteReview.evidence[i].image=packages.sourceAsset(id,e.imageAssetId).bytes.toString('base64');
+      }
+      return result;
     },
   });
   const runner: WorkPackageRunner = {
@@ -376,13 +383,24 @@ export function createIntegratedServices(
       const requestId = (key: string) =>
         safe(`${initial.id}/${initial.inputRevision}/${key}`);
       const domain: DomainPort = {
+        evidenceImage: id => new SiteWorkService(packages).image(id),
+        saveReading: (id, runId, reading) => new SiteWorkService(packages).saveReading(id, runId, reading),
         ruleCatalog() { return getProjectRuleCatalog(); },
         async inspect(_packageId, query) {
           const s = current();
-          if (query.kind === "snapshot") return structuredClone({ ...s, workflow: domain.read(s.id) });
+          if (query.kind === "snapshot") return structuredClone({ ...s,
+            outputs: { requests:s.outputs.requests, refs:state.refs, detailInstruction:'Use results for saved outcomes; results with id=planId returns full fabrication details.' },
+            ...(s.siteWork ? {siteWork:{...s.siteWork,readings:s.siteWork.readings.map(r=>({id:r.id,evidenceId:r.evidenceId,reviewedAt:r.reviewedAt,acceptedIds:r.acceptedIds,notes:r.notes})),reviews:s.siteWork.reviews.map(({plan:_plan,...review})=>review)}}:{}), workflow: domain.read(s.id) });
           if (query.kind === "drawing") return { sourceDrawing: s.sourceDrawing, baselinePlan: s.baselinePlan, scope: s.scope, detailing: s.detailing, siteFacts: s.siteFacts };
           if (query.kind === "answers") return { requests: s.outputs.requests, answers: s.answers, detailing: s.detailing, siteFacts: s.siteFacts, warning: "An answer is not a confirmed field fact. Only explicit user fact edits confirm inputs." };
-          if (query.kind === "results") return structuredClone({ details: state.details, candidates: state.candidates, outputs: s.outputs, inputRevision: state.inputRevision });
+          if (query.kind === "results") {
+            // The full detail is retained and explicitly addressable. Avoid returning the same
+            // operations, fabrication evidence and geometry repeatedly in every Pi/JEV turn.
+            if (query.id) return structuredClone(state.details.find(d=>d.id===query.id||d.plan.id===query.id) ?? {error:'detail_not_found'});
+            return structuredClone({ details:state.details.map(d=>({id:d.id,planId:d.plan.id,ruleExecutions:d.ruleExecutions??[],profile:d.profile,delta:d.delta})),
+              candidateSearch:state.candidates && {state:state.candidates.state,reasons:state.candidates.reasons,rejected:state.candidates.rejected},
+              outputs:s.outputs,inputRevision:state.inputRevision,detailInstruction:'For full materials, cuts, joint operations and source evidence, inspect results with id=planId.' });
+          }
           const documents = sources.documents().filter(d => d.authorization.useWithAi && (!d.scope.projectId || d.scope.projectId === s.projectId));
           const allowed = new Set(documents.map(d => d.id));
           if (query.id && !allowed.has(query.id)) throw new Error("source_not_available_in_project");
@@ -594,7 +612,12 @@ export function createIntegratedServices(
                       const {coverage, ...result} = execution.result;
                       return {planId:d.plan.id,ruleExecutions:[{...execution,result}]};
                     }), limitations:"Other catalog checks are not implied executed. Inspect saved results for cumulative findings, catalog coverage, fabrication and source detail." }
-                : payload,
+                : action.operation === "derive_work_package"
+                  ? { plans:(payload as Detail[]).map(d=>({planId:d.plan.id,materials:d.fabrication.materials,
+                      cuts:d.fabrication.cuts.map(c=>({pieceId:c.pieceId,centerline:c.centerline,cutLength:c.cutLength})),
+                      gaps:d.fabrication.gaps,delta:d.delta})),
+                      detailInstruction:'All operations, joint evidence, formulas and sources remain available through inspect_saved_information results with id=planId.' }
+                  : payload,
           };
         },
         commit(action, result) {
@@ -781,10 +804,12 @@ export function createIntegratedServices(
           initial,
           context.run.id,
         ).done;
-        if (result.status === "failed") throw new Error(result.error);
+
         return {
           status:
-            result.status === "completed"
+            result.status === "failed"
+              ? "failed"
+              : result.status === "completed"
               ? "completed"
               : result.status === "waiting_input"
                 ? "waiting_input"

@@ -57,6 +57,12 @@ const json = async <T>(path: string, init?: RequestInit) => (await call(path, in
 const post = <T>(path: string, body: unknown) => json<T>(path, { method: "POST", body: JSON.stringify(body) });
 
 export const api = {
+  siteEvidence: (id: string, body: unknown) => post<Snapshot>(`/${encodeURIComponent(id)}/site-evidence`, body),
+  readingRequest: (id: string, body: unknown) => post<Snapshot>(`/${encodeURIComponent(id)}/reading-request`, body),
+  confirmReading: (id: string, body: unknown) => post<Snapshot>(`/${encodeURIComponent(id)}/reading-confirmation`, body),
+  measurement: (id: string, body: unknown) => post<Snapshot>(`/${encodeURIComponent(id)}/measurements`, body),
+  designerReview: (id: string, body: unknown) => post<Snapshot>(`/${encodeURIComponent(id)}/designer-reviews`, body),
+  siteWork: (id: string) => json<{fingerprint: string}>(`/${encodeURIComponent(id)}/site-work`),
   list: (projectId: string) => json<Summary[]>(`?projectId=${encodeURIComponent(projectId)}`),
   create: (projectId: string, intent: PackageIntent, title: string) => post<Snapshot>("", { projectId, intent, title }),
   copySiteChange: (id: string, expectedRevision: number, title: string) => post<Snapshot>(`/${encodeURIComponent(id)}/site-change`, { expectedRevision, title }),

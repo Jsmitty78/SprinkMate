@@ -1,3 +1,4 @@
+import { SiteSection } from './site/SiteSection.js';
 import { getLocale, tr, LanguageSwitch } from "./locale.js";
 import { adaptationFrame, geometryFactUsable, isSyntheticPackageFact } from "@field-agent/core";
 import { useEffect, useMemo, useState } from "react";
@@ -14,6 +15,7 @@ import { useIntake } from "./intake/useIntake.js";
 import "./intake/intake.css";
 import { Assembly, Checks, Freshness, MaterialsCuts, PackageDelta, RouteComparison, SourceLinks } from "./outputs.js";
 import { SiteShapeEditor } from "./site/SiteShapeEditor.js";
+import { SiteEvidence, SiteMeasurements, DesignerReviews } from "./site/SiteEvidence.js";
 import { PlanCanvas } from "./PlanCanvas.js";
 import { hasSampleData, sampleDrawing, sampleInputs } from "./sample.js";
 import { Badge, Button, Callout, Icon, Section, Spinner } from "./ui.js";
@@ -142,7 +144,7 @@ export function Workbench({ id, onHome, onOpen, onAuthFailure }: { id: string; o
           {active === "site" && <Button onClick={() => setSiteOpen(!siteOpen)} aria-expanded={siteOpen}>{tr("現況を入力")}</Button>}
         </div>
         <div className="wf-canvas-stage">
-          <SiteShapeEditor {...common} enabled={active === "site" && mode === "adapt" && !!baseline && (view !== "drawing" || mapped)} interactionKey={`${active}/${intake.tool}/${setupOpen}`} drawingBlocked={view === "drawing" && (!intake.savedTransform || intake.viewDirty || intake.traceDirty)}>{shapeOverlay => d && view === "drawing" ? <SheetView shapeOverlay={shapeOverlay} s={s} intake={intake} readOnly={!setupOpen} displayPlan={mapped ? drawingPlan : null} comparisonPlan={mapped && active === "site" && comparison === "overlay" && drawingPlan?.id !== baseline?.id ? baseline : null} selectedIds={selectedIds} context={context} onSelectPiece={onDrawingSelect} callouts={displayCallouts} /> :
+          <SiteShapeEditor {...common} enabled={active === "site" && mode === "adapt" && !!baseline && (view !== "drawing" || mapped)} interactionKey={`${active}/${intake.tool}/${setupOpen}`} drawingBlocked={view === "drawing" && (!intake.savedTransform || intake.viewDirty || intake.traceDirty)}>{shapeOverlay => d && view === "drawing" ? <SheetView shapeOverlay={shapeOverlay} s={s} intake={intake} readOnly={!setupOpen && intake.tool === "pan"} displayPlan={mapped ? drawingPlan : null} comparisonPlan={mapped && active === "site" && comparison === "overlay" && drawingPlan?.id !== baseline?.id ? baseline : null} selectedIds={selectedIds} context={context} onSelectPiece={onDrawingSelect} callouts={displayCallouts} /> :
             <PlanCanvas {...canvasProps} shapeOverlay={shapeOverlay} hideOriginal={active === "site" && comparison === "proposal"} empty={<div className="fa-empty big"><Icon name="drawing" size={34} /><h2>{tr("図面から作業を始める")}</h2><p>{tr("元図面と対象区間を登録してください。")}</p><div className="fa-actions center"><Button variant="primary" onClick={() => setSetupOpen(true)}>{tr("図面を登録")}</Button><Button disabled={disabled} busy={pkg.busy === "sample"} onClick={() => void loadSample()}>{tr("サンプルで試す")}</Button></div></div>} />}</SiteShapeEditor>
           {showSourceOnly && baseline && <div className="wf-map-note">{tr("この図面とモデルの位置合わせは未設定です。")}<button className="fa-link" onClick={() => setView("plan")}>{tr("配管モデルで対応箇所を見る")}</button></div>}
           {active === "materials" && mode === "adapt" && view === "plan" && !materialCurrent && (materialRoute || selectedId) && <div className="wf-map-note">{tr("Preview uses older inputs. Regenerate before using it.")}</div>}
@@ -160,6 +162,9 @@ export function Workbench({ id, onHome, onOpen, onAuthFailure }: { id: string; o
           <MaterialsCuts result={materialResult} current={materialCurrent} revision={s.inputRevision} plan={materialPlan} callouts={materialCallouts} detail={detailFor(materialPlan?.id)} selectedPiece={piece} onSelectPiece={selectPiece} sources={materialSources} label={materialLabel} selectedMaterial={group} onSelectMaterial={id => { setGroup(id); setPiece(null); if (!mapped) setView("plan"); }} context={(baseline?.entities ?? []).filter(e => context.has(e.id)).map(e => ({ id: e.id, kind: e.kind, label: sourceLabel(s, e.id) }))} projected={!!s.sourceDrawing?.view && baseline?.coordinateFrame.id === FRAME_ID} />
           {materialResult && materialPlan && <Section title={tr("組立手順")} defaultOpen={false}><Assembly result={materialResult} callouts={materialCallouts} sources={materialSources} selectedPiece={piece} onSelectPiece={selectPiece} /></Section>}
         </> : <>
+          <SiteEvidence s={s} pkg={pkg} />
+          {s.baselinePlan && <><SiteMeasurements s={s} pkg={pkg} /><SiteSection s={s} /></>}
+          {s.selectedPlan && <DesignerReviews s={s} pkg={pkg} />}
           {!s.changeRequest && <div className="wf-start-site"><Icon name="drawing" size={30} /><h2>{tr("図面と違うところを教えてください")}</h2><p>{tr("配管の位置を選び、写真・説明・実測値を入力すると変更案を検討できます。")}</p><Button variant="primary" onClick={() => setSiteOpen(true)}>{tr("現況を入力")}</Button></div>}
           {s.changeRequest && <section className="wf-observation"><small>{tr("Site report")}</small><p>{s.changeRequest.description}</p><Button variant="quiet" onClick={() => setSiteOpen(true)}>{tr("現況を追記")}</Button></section>}
           {focus && <section className="wf-proposal-summary">
@@ -216,7 +221,7 @@ function RunBanner({ s, busy, onCancel }: { s: Snapshot; busy: string; onCancel:
   const reason = run.stopReason === "runner_failed" ? "The server stopped without saying why (runner_failed). Check the inputs listed under Inputs, then try again." : run.stopReason ?? run.progress;
   return <div className={`fa-toast tone-${tone}`} role="status"><Icon name="alert" size={16} /><span><b>{tr(goalLabel(run.goal))} {run.status}.</b> {reason}</span></div>;
 }
-const goalLabel = (g: string) => g === "export_selected_package" ? "Export" : g === "adapt_to_site" ? "Route generation" : "Preparation";
+const goalLabel = (g: string) => g === "read_site_evidence" ? "Reading evidence" : g === "export_selected_package" ? "Export" : g === "adapt_to_site" ? "Route generation" : "Preparation";
 
 function RequestCallout({ s, request, act, busy, onGoToInputs }: { s: Snapshot; request: Snapshot["outputs"]["requests"][number]; act: ReturnType<typeof usePackage>["act"]; busy: string; onGoToInputs: () => void }) {
   const [reason, setReason] = useState("");
@@ -255,7 +260,8 @@ function ExportDialog({ s, artifacts, ready, busy, running, onCreate, onClose }:
     <div className="fa-modal-card">
       <div className="fa-modal-head"><h2>{tr("Export")}</h2><button type="button" className="fa-icon-btn" onClick={onClose} aria-label={tr("Close")}><Icon name="x" /></button></div>
       <p className="fa-muted">{tr("Exports are bound to one input revision and the")}{" "}{s.intent === "adapt_to_site" ? tr("selected route") : tr("prepared run")}{tr(". They are made by the server's exporter (the same bundle as the export API).")}</p>
-      {pending.length > 0 ? <Callout title={tr("Answer needed before export")} action={<Button onClick={onClose}>{tr("Close to answer")}</Button>}>{pending.map(request => <p key={request.id}>{request.question}</p>)}<p>{tr("Close this dialog to provide the requested input or explain why it is unavailable, then create the export again.")}</p></Callout> : artifacts.length > 0 ? <ul className="fa-downloads">{artifacts.map(a => <li key={a.id}>
+      {pending.length > 0 && <Callout title="未回答事項を含む確認用資料" action={<Button onClick={onClose}>{tr("Close to answer")}</Button>}>{pending.map(request => <p key={request.id}>{request.question}</p>)}<p>未確認事項は資料に残ります。出力しても承認済みにはなりません。</p></Callout>}
+      {artifacts.length > 0 ? <ul className="fa-downloads">{artifacts.map(a => <li key={a.id}>
         <div><strong>{tr(ARTIFACT_LABEL[a.kind]?.[0] ?? a.kind)}</strong><small>{tr("Rev")}{" "}{a.inputRevision}</small></div>
         <Button busy={downloading === a.id} onClick={() => void download(a)}><Icon name="download" size={14} />{tr("Download")}</Button>
       </li>)}</ul> : !ready ? <Callout title={tr("Nothing to export yet")}>{s.intent === "adapt_to_site" ? tr("Choose a route and build the revised package first.") : tr("Generate current materials and cuts first.")}</Callout>
@@ -263,7 +269,7 @@ function ExportDialog({ s, artifacts, ready, busy, running, onCreate, onClose }:
       {error && <Callout tone="red" title={tr("Download failed")}>{error}</Callout>}
       <div className="fa-actions end">
         <Button onClick={onClose}>{tr("Close")}</Button>
-        {ready && artifacts.length === 0 && <Button variant="primary" busy={busy === "export" || running} disabled={pending.length > 0} onClick={onCreate}>{tr("Create export for rev")}{" "}{s.inputRevision}</Button>}
+        {ready && artifacts.length === 0 && <Button variant="primary" busy={busy === "export" || running} onClick={onCreate}>{tr("Create export for rev")}{" "}{s.inputRevision}</Button>}
       </div>
     </div>
   </div>;

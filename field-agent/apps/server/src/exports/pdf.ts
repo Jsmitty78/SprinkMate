@@ -159,6 +159,19 @@ export async function renderPdf(s: ExportSnapshot, options: PdfOptions = {}): Pr
     page(); heading(s.title); paragraph(s.scope);
     paragraph('Construction approval: not established by this export. Selection, successful calculations and available files do not constitute approval.');
     paragraph('Drawing: ' + s.drawingReference);
+    if (s.siteReview) {
+      heading('Site change and designer response');
+      paragraph(s.siteReview.reason);
+      paragraph('Required review: supports, fixed-end assembly/access, head coverage and hydraulic impact. A recorded response does not turn unknown checks into passes.');
+      for (const e of s.siteReview.evidence) {
+        if(e.image) page();
+        paragraph(`${e.label} | page ${e.page} | ${e.synthetic?'SYNTHETIC TEST EVIDENCE':'Recorded source'}`);
+        if(e.image) { doc.image(Buffer.from(e.image,'base64'),left,y,{fit:[511,450]}); y+=465; }
+      }
+      s.siteReview.readings.forEach(reading => paragraph(reading));
+      if(s.siteReview.alternatives?.length){heading('Alternative comparison');paragraph('Metrics describe proposed centerlines, not approval or fabrication readiness. Historical calculations are labelled and must be revalidated after inputs change.');table(['Alternative','Geometry / delta','Cut dimensions','Calculation binding'],[125,110,150,126],s.siteReview.alternatives.map(a=>[a.label,a.metrics,a.cuts,a.binding]));}
+      for(const r of s.siteReview.reviews) { paragraph(`${r.decision} by ${r.reviewer} at ${r.recordedAt}; revision ${r.inputRevision}; ${r.current?'response to current geometry':'SUPERSEDED: re-review required'}\n${r.conditions}`);for(const c of r.checks??[])paragraph(`${c.topic}: ${c.answer||'UNCONFIRMED'}; evidence: ${c.evidence||'not supplied'}`); }
+    }
     table(['Binding', 'Value'], [150, 361], Object.entries(s.binding).map(([key, value]) => [key, String(value)]));
     if (s.inputFacts?.length) {
       heading('Saved source and site inputs');

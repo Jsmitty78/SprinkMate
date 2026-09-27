@@ -1,5 +1,5 @@
 export type Intent = 'prepare_from_drawing' | 'adapt_to_site';
-export type Goal = Intent | 'export_selected_package';
+export type Goal = Intent | 'export_selected_package' | 'read_site_evidence';
 export interface Version { inputRevision: number; configVersion: string }
 export const operations = [
   'prepare_drawing_model', 'derive_work_package', 'generate_change_candidates',
@@ -57,6 +57,8 @@ export interface RuleDescriptor {
   implementationStatus: string; executionFunction: string | null;
 }
 export interface DomainPort {
+  evidenceImage?(packageId: string): Promise<{ data: string; mimeType: string; metadata: unknown }>;
+  saveReading?(packageId: string, runId: string, reading: unknown): unknown;
   inspect?(packageId: string, query: {kind:'snapshot'|'drawing'|'sources'|'results'|'answers'; id?:string; query?:string}): unknown | Promise<unknown>;
   ruleCatalog?(packageId: string): RuleDescriptor[];
   // Return detached, validated domain state. Derive gaps and output references from saved data.
