@@ -1,5 +1,7 @@
 # 現場カメラエージェント
 
+The independent [Pi + JEV workflow connection](packages/workflow/README.md) provides the new two-scenario runner and reproducible connection fixtures. It is not yet connected to this older camera-workflow server/UI or the pending work-package services.
+
 配管1区間の図面と観測を照合し、追加撮影・計測・人による確認を経て、根拠と未解決事項を含む変更検討資料を作ります。
 
 **設備全体の適合判定は対象外。採用した限定ルールの判定は対象です。** 初版で採用するのは `TY3231_INSTALL_ORIENTATION_V1` だけです。図面との一致・不一致と、メーカーの方向条件への適合・不適合を独立に表示します。
