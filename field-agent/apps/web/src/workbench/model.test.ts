@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WorkPackageSnapshot } from "@field-agent/core";
 import { countText, feetInches, lengthInput, lengthText, parseLength } from "./format.js";
-import { buildRun, callouts, findFact, groupChecks, requirements, routeOptions, runBlockers, runNodes, upsertFacts } from "./model.js";
+import { buildRun, callouts, dropOrphanFacts, dropSubjectFacts, findFact, groupChecks, requirements, routeOptions, runBlockers, runChanged, runNodes, topologyChanged, upsertFacts, type RunNode } from "./model.js";
 import { sampleInputs } from "./sample.js";
 
 describe("display formatting", () => {
@@ -138,5 +138,58 @@ describe("routes and checks", () => {
     if ("problems" in built) throw new Error();
     const c = callouts(built.plan, { cuts: [{ pieceId: "p2", callout: 7 }], fittings: [{ id: "f1", callout: "F9" }] });
     expect([c.piece.get("p1"), c.piece.get("p2"), c.fitting.get("f1")]).toEqual(["1", "7", "F9"]);
+  });
+});
+
+describe("run edits", () => {
+  const three: RunNode[] = [{ kind: "open_end", x: 0, y: 0 }, { kind: "elbow", x: 609.6, y: 0 }, { kind: "open_end", x: 609.6, y: 457.2 }];
+  const two: RunNode[] = [{ kind: "open_end", x: 0, y: 0 }, { kind: "open_end", x: 609.6, y: 0 }];
+
+  it("drops facts for entities removed from a shortened run", () => {
+    const long = buildRun(three, "baseline", "test");
+    const short = buildRun(two, "baseline", "test");
+    if ("problems" in long || "problems" in short) throw new Error("bad run");
+    const before = upsertFacts({ detailing: [], siteFacts: [] }, long.datums.map(d => ({ ...d, confirmation: "confirmed" as const, source: "test" })));
+    expect(before.detailing.some(f => f.subjectIds.includes("p2"))).toBe(true);
+    const after = dropOrphanFacts(before, short.plan);
+    const ids = new Set(short.plan.entities.map(e => e.id));
+    expect(after.detailing.length).toBeGreaterThan(0);
+    expect(after.detailing.every(f => f.subjectIds.every(id => ids.has(id)))).toBe(true);
+  });
+
+  it("detects sub-millimetre edits before confirming dimensions", () => {
+    const saved: RunNode[] = [{ kind: "open_end", x: 0, y: 0 }, { kind: "open_end", x: 1000, y: 0 }];
+    expect(runChanged(saved, saved, "mm")).toBe(false);
+    for (const x of [1000.1, 1000.5, 999.9]) {
+      expect(runChanged([saved[0], { ...saved[1], x }], saved, "mm")).toBe(true);
+    }
+    expect(runChanged(two, three, "mm")).toBe(true);
+    expect(runChanged(three, null, "mm")).toBe(true);
+  });
+
+  it.each(["mm", "in"] as const)("allows untouched %s display rounding but detects edits to it", unit => {
+    const saved: RunNode[] = [{ kind: "open_end", x: 0, y: 0 }, { kind: "open_end", x: 1000.04, y: null }];
+    const displayed = saved.map(n => ({ ...n, x: parseLength(lengthInput(n.x, unit), unit), y: parseLength(lengthInput(n.y, unit), unit) }));
+    expect(runChanged(displayed, saved, unit)).toBe(false);
+    expect(runChanged([displayed[0], { ...displayed[1], x: displayed[1].x! + 0.1 }], saved, unit)).toBe(true);
+    expect(runChanged([displayed[0], { ...displayed[1], kind: "tie_in" }], saved, unit)).toBe(true);
+    expect(runChanged([displayed[0], { ...displayed[1], y: 0 }], saved, unit)).toBe(true);
+  });
+});
+
+describe("run reshaping", () => {
+  const ties: RunNode[] = [{ kind: "tie_in", x: 0, y: 0 }, { kind: "tie_in", x: 1000, y: 0 }];
+  it("counts a changed point type or count as a new shape, not a moved point", () => {
+    expect(topologyChanged(ties, ties)).toBe(false);
+    expect(topologyChanged(ties.map(n => ({ ...n, x: n.x === null ? null : n.x + 50 })), ties)).toBe(false);
+    expect(topologyChanged([{ kind: "open_end", x: 0, y: 0 }, ties[1]], ties)).toBe(true);
+    expect(topologyChanged(ties, null)).toBe(true);
+  });
+  it("drops only facts tied to plan entities", () => {
+    const facts = upsertFacts({ detailing: [], siteFacts: [] }, [
+      { field: "netCutOffset", value: 50, unit: "mm", subjectIds: ["t1"], confirmation: "confirmed", context: "detailing", source: "test" },
+      { field: "workAreaAccess", value: true, confirmation: "confirmed", context: "detailing", source: "test" },
+    ]);
+    expect(dropSubjectFacts(facts).detailing.map(f => f.field)).toEqual(["workAreaAccess"]);
   });
 });

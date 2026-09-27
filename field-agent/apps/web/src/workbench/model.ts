@@ -1,4 +1,5 @@
 import type { PackageInputs, PackagePlan, PackageResult, WorkPackageSnapshot } from "@field-agent/core";
+import { lengthInput, parseLength } from "./format.js";
 
 /**
  * Pure helpers between the work-package contract and the screen. Nothing here calculates cuts,
@@ -58,6 +59,30 @@ export function upsertFacts(s: Pick<WorkPackageSnapshot, "detailing" | "siteFact
     else siteFacts = [...siteFacts, fact];
   }
   return { detailing, siteFacts };
+}
+
+/** Drops facts tied to entities that are no longer in the plan, so a shortened run does not leave facts the server rejects as unknown_subject. */
+export function dropOrphanFacts<T extends Pick<PackageInputs, "detailing" | "siteFacts">>(facts: T, plan: Pick<Plan, "entities">): T {
+  const ids = new Set(plan.entities.map(e => e.id));
+  const live = (f: Fact) => f.subjectIds.every(id => ids.has(id));
+  return { ...facts, detailing: facts.detailing.filter(live), siteFacts: facts.siteFacts.filter(live) };
+}
+
+/** True when the run's shape (point count or point types) differs, which renumbers its entity ids. */
+export function topologyChanged(a: RunNode[], b: RunNode[] | null): boolean {
+  return !b || a.length !== b.length || a.some((n, i) => n.kind !== b[i].kind);
+}
+
+/** Drops every fact tied to a plan entity, for when entity ids no longer name the same thing. */
+export function dropSubjectFacts<T extends Pick<PackageInputs, "detailing" | "siteFacts">>(facts: T): T {
+  return { ...facts, detailing: facts.detailing.filter(f => !f.subjectIds.length), siteFacts: facts.siteFacts.filter(f => !f.subjectIds.length) };
+}
+
+/** Compare edits with the saved run as displayed in the editor, without tolerating small user changes. */
+export function runChanged(a: RunNode[], b: RunNode[] | null, unit: "mm" | "in"): boolean {
+  if (!b || a.length !== b.length) return true;
+  const off = (p: number | null, q: number | null) => p !== parseLength(lengthInput(q, unit), unit);
+  return a.some((n, i) => n.kind !== b[i].kind || off(n.x, b[i].x) || off(n.y, b[i].y));
 }
 
 /** A 6-number box fact (duct.min.x … duct.max.z) in mm, or null for each missing coordinate. */
