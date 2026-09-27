@@ -14,7 +14,10 @@
     "hono": "^4.9.0",
     "pdfkit": "0.20.2",
     "sharp": "^0.34.0",
-    "typebox": "^1.0.0"
+    "typebox": "^1.0.0",
+    "@field-agent/fabrication": "workspace:*",
+    "@field-agent/planning": "workspace:*",
+    "@field-agent/workflow": "workspace:*"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

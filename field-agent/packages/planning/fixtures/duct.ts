@@ -13,7 +13,7 @@ export function ductFixture(): GenerateInput {
         { id: "a", kind: "tie_in", position: fact(p(0, 0, 0)), tieInNetCutOffset: fact({ value: 0.05, unit: "m" }) },
         { id: "b", kind: "tie_in", position: fact(p(10, 0, 0)), tieInNetCutOffset: fact({ value: 0.05, unit: "m" }) },
       ],
-      segments: [{ id: "pipe", startNodeId: "a", endNodeId: "b", outsideDiameter: fact({ value: 0.2, unit: "m" }), productId: "synthetic-pipe" }],
+      segments: [{ id: "pipe", startNodeId: "a", endNodeId: "b", outsideDiameter: fact({ value: 0.2, unit: "m" }), cutEndDatumAtStart: fact("center_to_center"), cutEndDatumAtEnd: fact("center_to_center"), productId: "synthetic-pipe" }],
       fittings: [],
       ducts: [{ id: "duct", roomId: "room", geometry: fact({ kind: "axis_aligned_box", min: p(4, -0.4, -0.5), max: p(6, 0.4, 0.5) }) }],
       heads: [{ headId: "head", attachedNodeId: "b", position: fact(p(10, 0, 0)) }],

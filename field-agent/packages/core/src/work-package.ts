@@ -2,7 +2,7 @@ import { Type, type Static } from 'typebox';
 
 const id = Type.String({ minLength: 1, maxLength: 120, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.-]*$' });
 const text = Type.String({ minLength: 1, maxLength: 8000 });
-const choices = <const T extends string[]>(...values: T) => Type.Union(values.map(value => Type.Literal(value)));
+const choices = <const T extends string[]>(...values: T) => Type.Enum<T>(values);
 const nullableText = Type.Union([text, Type.Null()]);
 const ids = Type.Array(id, { uniqueItems: true, maxItems: 5000 });
 const revision = Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
@@ -19,7 +19,7 @@ const port = object({ id, position: Type.Union([point, Type.Null()]), unknownRea
 const endpoint = object({ entityId: id, portId: id });
 export const PackagePlanSchema = object({
   id, coordinateFrame: frame, confirmation: Type.Union([Type.Literal('proposed'), Type.Literal('confirmed')]),
-  entities: list(object({ id, kind: choices('pipe', 'fitting', 'head', 'support', 'tie_in', 'unsupported'), productId: Type.Union([id, Type.Null()]), ports: list(port) })),
+  entities: list(object({ id, kind: choices('pipe', 'fitting', 'head', 'support', 'tie_in', 'unsupported'), productId: Type.Union([text, Type.Null()]), ports: list(port) })),
   connections: list(object({ id, from: endpoint, to: endpoint })),
 });
 const source = object({ description: text, assetId: Type.Union([id, Type.Null()]), page: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]) });
