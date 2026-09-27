@@ -52,6 +52,8 @@ export interface ValidationReport {
   planRevision: number;
   checkedAt: string;
   rule: RuleResult;
+  /** All adopted conditions; rule remains the orientation result for older clients. */
+  rules: RuleResult[];
   comparison: PlanComparison;
   measurements: MeasurementValidation[];
   missingInputs: string[];
