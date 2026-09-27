@@ -1,6 +1,6 @@
 # Sprink — 開発・API資料
 
-製品概要・機能デモ・最新の起動手順は [Sprink README](../README.md) を参照してください。この文書の観測・限定ルールAPIは、現場検査機能の詳細です。
+製品概要・機能デモは [Sprink README](../README.md) を参照してください。この文書の観測・限定ルールAPIは、現場検査機能の詳細です。
 
 The integrated [Pi + Astra + JEV workflow](packages/workflow/README.md) connects both work-package flows to the existing server, saved source library and PDF/CSV output. See the [current execution design](docs/pi-rule-selection-design.md).
 
@@ -8,26 +8,71 @@ The integrated [Pi + Astra + JEV workflow](packages/workflow/README.md) connects
 
 **設備全体の適合判定は対象外。採用した限定ルールの判定は対象です。** TFP171に基づくメーカー条件10項目を採用しています。各条件と図面比較の結果を独立に表示します。実装済みの範囲とNFPA側の残件は [ルール台帳](docs/rule-inventory.md) を参照してください。
 
-## 起動
+## Run locally
 
-Node.js 22.19以上、pnpm 10を使用します。
+Requires **Node.js 22.19+**, **pnpm 10.17.1**, an OpenAI API key with access to the configured `gpt-6-astra` model, and a JEV/TypeSafe API key. Model access is required; the app does not automatically switch to another model. Agent runs and reference retrieval call external services.
 
 ```sh
+git clone https://github.com/my-name-is-yu/InnovationCup.git
 cd InnovationCup/sprink
 pnpm install --frozen-lockfile
 cp .env.example .env.local
-# .env.local に OPENAI_API_KEY / TYPESAFE_API_KEY を設定
-pnpm test
-pnpm typecheck
+```
+
+Fill in the two keys in `.env.local`, then:
+
+```sh
 pnpm build
 pnpm start
 ```
 
-http://127.0.0.1:4310 を開き、初回起動で生成される `.data/access-token` の内容を接続画面へ入力します。このトークンはアプリへの接続専用です。モデルの認証情報を入力しないでください。アプリ用トークンを確認するコマンドは `cat .data/access-token` です。ブラウザのタブを閉じると接続用のsessionStorageも消えます。
+Open <http://127.0.0.1:4310>. In another terminal, from `sprink`, read the generated application connection token:
 
-開発時は `pnpm dev`。APIは4310、Viteは5173、`/api` はViteからAPIへ転送します。ビルド後のWebはAPIサーバーが同じoriginで配信します。`pnpm start` 後にWebを初めてビルドした場合はサーバーを再起動します。
+```sh
+cat .data/access-token
+```
 
-## 最初に試す流れ
+Enter that token on the connection screen. API keys belong only in `.env.local`, never in the browser connection form. `.env.local` and `.data/` are ignored by Git; local keys take precedence over inherited environment variables.
+
+### Try a sample
+
+- **Drawing preparation:** create a work package, choose “Prepare from a drawing”, then use the sample drawing. Confirm its inputs before generating materials and assembly information.
+- **Site change:** create an “Adapt to site conditions” package, use the sample, review the obstruction and measurements, then generate and compare proposals.
+- **Reference search:** register documents you are authorized to use. The manufacturer PDF library visible in the recording is not bundled with a fresh checkout. For fictional test passages, import the included demo library:
+
+```sh
+pnpm sources:import --demo --project sprink-demo
+```
+
+The [demo sources](demo-sources/README.md) contain invented provisions and display a demonstration label. They are not NFPA or manufacturer requirements. See [source-library documentation](docs/ask-sprink.md) for source registration.
+
+### Development and checks
+
+Run these commands from `sprink`:
+
+```sh
+pnpm dev        # API on 4310; Vite on 5173
+pnpm test
+pnpm typecheck
+pnpm build
+```
+
+See [testing guidance](docs/testing.md). [Recorded live workflow verification](docs/verification/pi-astra-jev-rule-loop.md) is separate from automated regression tests; running the opt-in live harness uses paid provider calls.
+
+## Repository guide
+
+| Path | Contents |
+| --- | --- |
+| [`apps/web`](apps/web) | Sprink web interface. |
+| [`apps/server`](apps/server) | API, source retrieval, uploads, storage and exports. |
+| [`packages/workflow`](packages/workflow) | Pi/Astra agent tools and JEV rule selection. |
+| [`packages/core`](packages/core) | Contracts, rule catalog and deterministic checks. |
+| [`packages/planning`](packages/planning) | Route planning and site-change calculations. |
+| [`packages/fabrication`](packages/fabrication) | Materials, cut calculations and assembly information. |
+| [`docs`](docs) | Engineering contracts, test guidance and verification records. |
+| [`docs/media`](../docs/media) | README demo GIFs and the technical-design slide. |
+
+## 現場検査APIを試す流れ
 
 テストの範囲と unit テストを残す基準は [テスト方針](docs/testing.md) を参照してください。
 
