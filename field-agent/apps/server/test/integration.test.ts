@@ -516,3 +516,31 @@ it("labels only baseline cuts as drawing projections, not generated alternatives
     }
   }
 });
+
+it("does not label a typed run as a drawing projection when a sheet view is saved", async () => {
+  const t = setup(), s = await create(t, 3, false, input => {
+    Object.assign(input, fs01Adaptation(input.sourceDrawing!.assetId));
+    input.sourceDrawing!.view = fs01View;
+    input.sourceDrawing!.scale.value = MM_PER_PT;
+    const room = { ...input.baselinePlan!.coordinateFrame, id: "room" };
+    input.baselinePlan!.coordinateFrame = room;
+    input.scope!.coordinateFrame = room;
+  });
+  await run(t, s.id);
+  const projection = "Projected plan length from the drawing, so physical length and elevation are not verified";
+  expect(t.detailStore.get(s.id)!.details[0].fabrication.cuts[0].cutLength.reasons).not.toContain(projection);
+});
+
+it("lists every entity outside the affected span as retained context in adaptation", async () => {
+  const t = setup(), s = await create(t, 3, false, input => {
+    Object.assign(input, fs01Adaptation(input.sourceDrawing!.assetId));
+    input.scope!.excludedEntityIds = input.scope!.excludedEntityIds.filter(id => id !== "P28");
+    input.scope!.includedEntityIds.push("P28");
+  });
+  await run(t, s.id);
+  const ids = exportSnapshot(t.packages.get(s.id), t.detailStore.get(s.id)!)!.retainedContext.map(r => r.id);
+  expect(ids).toContain("P28");
+  expect(ids).not.toContain("P27");
+  expect(ids).not.toContain("H1");
+  expect(ids).not.toContain("H3");
+});
