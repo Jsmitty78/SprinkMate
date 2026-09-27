@@ -1,0 +1,28 @@
+{
+  "provenance": "Hand-authored representative HTTP response fixtures, not captured live JEV responses or model accuracy evidence.",
+  "stageEvidence": {
+    "model": "jev-1.13.0",
+    "answers": { "next_action": {
+      "type": "choice", "choice": "stage_evidence:product-sheet", "confidence": 0.74,
+      "probabilities": {
+        "request_input:joint_datum": 0.1,
+        "request_input:assembly_access": 0.05,
+        "stage_evidence:product-sheet": 0.8,
+        "needs_clarification": 0.05
+      }
+    } },
+    "usage": { "input_tokens": 0, "output_tokens": 0 }
+  },
+  "askJointDatum": {
+    "model": "jev-1.13.0",
+    "answers": { "next_action": {
+      "type": "choice", "choice": "request_input:joint_datum", "confidence": 0.02,
+      "probabilities": {
+        "request_input:joint_datum": 0.55,
+        "request_input:assembly_access": 0.4,
+        "needs_clarification": 0.05
+      }
+    } },
+    "usage": { "input_tokens": 0, "output_tokens": 0 }
+  }
+}

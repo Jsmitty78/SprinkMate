@@ -8,9 +8,11 @@ import { timingSafeEqual, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import { RULE } from '@field-agent/core';
+import { RULE, ADOPTED_RULES, SfProjectFactsSchema, RuleContextSchema, checkSchema, resolveSfNfpa13Edition, evaluateProject } from '@field-agent/core';
 import { AppError, type Observation } from './models.js';
 import { FieldService, safeId } from './service.js';
+import { defaultWorkPackages, workPackageRouter } from './work-packages/router.js';
+import type { WorkPackageService } from './work-packages/service.js';
 
 /** Serialize asynchronous upload/replay operations for each task, including retry races. */
 class TaskCommands {
@@ -21,7 +23,7 @@ class TaskCommands {
     try {return await next;} finally {if(this.tails.get(id)===next)this.tails.delete(id);}
   }
 }
-export function createApp(service:FieldService,options:{token:string;webDir?:string;workPackageExports?:WorkPackageExports}) {
+export function createApp(service:FieldService,options:{token:string;webDir?:string;workPackages?:WorkPackageService;workPackageExports?:WorkPackageExports}) {
   if(options.token.length<16) throw new Error('Application token must contain at least 16 characters');
   const app=new Hono(), commands=new TaskCommands();
   app.use('*',async(c,next)=>{await next();c.header('X-Content-Type-Options','nosniff');c.header('Referrer-Policy','no-referrer');});
@@ -33,7 +35,22 @@ export function createApp(service:FieldService,options:{token:string;webDir?:str
   app.use('/api/*',bodyLimit({maxSize:21*1024*1024,onError:c=>c.json({error:'送信データが大きすぎます'},413)}));
   const op=(header:string|undefined)=>safeId(header??randomUUID());
   app.get('/api/health',c=>c.json({ok:true,ruleId:RULE.id}));
-  app.get('/api/rules',c=>c.json([RULE]));
+  app.get('/api/rules',c=>c.json(ADOPTED_RULES));
+  app.post('/api/rules/evaluate',async c=>{
+    const input=await c.req.json();
+    try { return c.json(evaluateProject(input)); }
+    catch(error) {
+      if(error instanceof Error&&error.name==='ProjectInputError')throw new AppError(400,error.message);
+      throw error;
+    }
+  });
+  // Stateless edition lookup; it neither sets a task's adopted code nor returns compliance.
+  app.post('/api/rules/san-francisco/resolve-edition',async c=>{
+    const input=await c.req.json();
+    if(!input||!checkSchema(SfProjectFactsSchema,input.facts)||!checkSchema(RuleContextSchema,input.context))
+      throw new AppError(400,'許可情報と根拠の形式が不正です');
+    return c.json(resolveSfNfpa13Edition(input.facts,input.context));
+  });
   app.get('/api/tasks',c=>c.json(service.listTasks()));
   app.post('/api/tasks',async c=>{
     const body=await c.req.json();
@@ -104,6 +121,7 @@ export function createApp(service:FieldService,options:{token:string;webDir?:str
       }
     });
   });
+  app.route('/api/work-packages',workPackageRouter(options.workPackages??defaultWorkPackages(service.store)));
   if(options.workPackageExports) app.route('/api/work-packages',exportRoutes(options.workPackageExports));
   app.all('/api/*',c=>c.json({error:'APIが見つかりません'},404));
   app.onError((error,c)=>{
