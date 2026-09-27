@@ -1,4 +1,7 @@
 import { afterEach, expect, it } from "vitest";
+import { deriveWorkPackage, fabricationCatalog } from "@field-agent/fabrication";
+import { fabricationInput, planningPlan } from "../src/integration/model.js";
+import { evaluateProfile } from "../src/integration/profiles.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -226,4 +229,36 @@ it("gives an honest R2 partial package: requirement not purchase, projected leng
   expect(bom.toString()).toContain('"retained_context","h1","head H1: retained context, not part of this work","","","not_purchased"');
   expect(cuts.toString()).toMatch(/"centerline_length"\r\n[\s\S]*"3\.04766/);
   expect((await renderPdf(snap)).subarray(0, 5).toString()).toBe("%PDF-");
+});
+
+
+it.each(["detailing", "siteFacts"] as const)("preserves scoped source requirements in %s through product API edits and conflict evaluation", async bucket => {
+  const t = setup(), d = await drawing(t);
+  const trace = fs01Trace();
+  const facts = [
+    ["requiredConnectionMethod", "steel_threaded"],
+    ["requiredPipeSpecification", "Schedule 40"],
+  ].map(([field, value]) => ({ id: field, field, value, subjectIds: ["p1"], unit: null, unknownReason: null,
+    confirmation: "confirmed", provenance: "confirmed_evidence", context: bucket === "detailing" ? "detailing" : "observed",
+    source: { description: "FS-01 specification checked against drawing", assetId: d.sourceDrawing.assetId, page: 1 } }));
+  const saved = t.packages.edit(d.id, { expectedRevision: 1, patch: { sourceDrawing: d.sourceDrawing, ...trace,
+    baselinePlan: { ...trace.baselinePlan!, confirmation: "proposed" }, [bucket]: facts } });
+  const selected = structuredClone(saved.baselinePlan!);
+  selected.entities.find(e => e.id === "p1")!.productId = "spears/CP-010";
+  const response = await t.app.request(`/api/work-packages/${d.id}`, { method: "PATCH",
+    headers: { Authorization: "Bearer intake-test-token", "Content-Type": "application/json" },
+    body: JSON.stringify({ expectedRevision: saved.inputRevision, patch: { baselinePlan: selected, [bucket]: facts } }) });
+  expect(response.status).toBe(200);
+  const reloaded = t.packages.get(d.id);
+  expect(reloaded[bucket]).toEqual(facts);
+  const input = fabricationInput(reloaded, reloaded.baselinePlan!);
+  const fabrication = deriveWorkPackage(input, fabricationCatalog(reloaded.configVersion));
+  const plan = planningPlan(reloaded, input);
+  const profile = evaluateProfile(reloaded, input, fabrication, plan, plan);
+  expect(profile.checks.find(c => c.id === "MATERIAL-CONFLICT-p1")).toMatchObject({ status: "fail", sourceRefs: ["requiredConnectionMethod"] });
+  for (const f of facts) expect(profile.checks.find(c => c.id === `SOURCE-REQUIREMENT-p1-${f.field}`)?.reason).toContain(f.value);
+  const output = exportSnapshot(reloaded, { inputRevision: reloaded.inputRevision, configVersion: reloaded.configVersion, refs: [], details: [{ id: "saved-source-check", input, fabrication, plan, profile }] })!;
+  for (const f of facts) expect(output.inputFacts).toContainEqual(expect.objectContaining({ field: f.field, value: f.value, provenance: "confirmed_evidence" }));
+  const replacedSource = t.packages.edit(d.id, { expectedRevision: reloaded.inputRevision, patch: { sourceDrawing: { ...reloaded.sourceDrawing!, revision: "B" } } });
+  expect(replacedSource[bucket]).toEqual([]);
 });

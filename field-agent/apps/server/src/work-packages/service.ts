@@ -25,7 +25,7 @@ export interface WorkPackageRunner {
 }
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-const sourceFields = new Set(['sourceLabel', 'nominalSize', 'materialRequirement', 'materialRequirement.material']);
+const sourceFields = new Set(['sourceLabel', 'nominalSize', 'materialRequirement', 'materialRequirement.material', 'requiredConnectionMethod', 'requiredPipeSpecification']);
 
 /** Reopening is a separate review action, never permission to replace a confirmed graph in the same patch. */
 function isDrawingReopen(before: WorkPackageSnapshot, after: WorkPackageSnapshot): boolean {

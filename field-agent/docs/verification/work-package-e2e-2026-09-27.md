@@ -112,3 +112,14 @@ meaning. Legacy `ASSUMPTION:` records are also treated as synthetic.
 The integrated tree passes 43 files / 843 tests, typecheck, build and diff checks.
 Browser E2E was not repeated during this conflict resolution. The existing Vite
 large-chunk warning remains.
+
+## Server-side source requirement preservation
+
+The server invalidator now includes `requiredConnectionMethod` and
+`requiredPipeSpecification` among source facts preserved during product edits.
+Two regression cases (detailing and observed facts) failed before the fix and
+pass after it: authenticated product PATCH, persisted reload, source requirement
+and connection-conflict evaluation, and exported provenance. Changing the drawing
+revision still removes these stale source requirements. The full suite passes
+43 files / 845 tests, with typecheck and diff checks passing. Browser E2E and the
+web build were not repeated for this server-only correction.
