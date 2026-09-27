@@ -239,7 +239,7 @@ export class UploadService {
       catch (e) { if (prior) { /* restore is not attempted: the previous revision can be indexed again */ } throw e; }
       this.sources.setRegions(docId, regionsFor(this.sources.sections(docId), ex));
       // Ready only once the document is actually found by search.
-      if (!this.sources.searchable(docId)) { this.sources.remove(docId); throw new UploadError(500, 'not_searchable', 'The document was stored but could not be found by search, so it was removed. Retry indexing.'); }
+      if (!this.sources.searchable(docId)) { this.sources.remove(docId); throw new UploadError(500, 'not_searchable', 'The document sections were not fully stored, so the incomplete import was removed. Retry indexing.'); }
       return this.save({ ...this.get(id), status: 'ready', docId: doc.id, indexedRevision: rev.rev, timings: { ...u.timings, indexMs: Math.round(performance.now() - t0) } });
     } catch (e) {
       const status = e instanceof SourceError || e instanceof UploadError ? e.status : 500;

@@ -1,3 +1,4 @@
+import { scriptedSearch } from './fixtures/source-search.js';
 import { deriveFixedEndClosure, spearsCatalog } from "@field-agent/fabrication";
 import { fs01View, MM_PER_PT } from "./fs01-fixture.js";
 import { fs01Adaptation } from "./fixtures/fs01-adaptation.js";
@@ -25,11 +26,12 @@ function setup(choice?: ChoiceClient, testStream = integrationStream) {
   const dir = mkdtempSync(join(tmpdir(), "real-pi-integration-"));
   const field = new FieldService(dir);
   const events: string[] = [];
+  const sourceQueries: Array<{ query: string; keys: string[] }> = [];
   const toolResults: { name: string; result: unknown }[] = [];
   const integrated = createIntegratedServices(
     new WorkPackageStore(field.store.db),
     dir,
-    { choice: choice ?? integrationChoice, testStream, onEvent: (_id, e) => { events.push(e.type); if (e.type === "tool_execution_end") toolResults.push({name:e.toolName,result:e.result}); } },
+    { sourceSearch: { async select(query, rows) { sourceQueries.push({ query, keys: rows.map(p => p.doc.id) }); return scriptedSearch.select(query, rows); } }, choice: choice ?? integrationChoice, testStream, onEvent: (_id, e) => { events.push(e.type); if (e.type === "tool_execution_end") toolResults.push({name:e.toolName,result:e.result}); } },
   );
   const app = createApp(field, {
     token: "integration-test-token",
@@ -42,7 +44,7 @@ function setup(choice?: ChoiceClient, testStream = integrationStream) {
     field.store.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  return { ...integrated, field, events, toolResults, app };
+  return { ...integrated, field, events, toolResults, sourceQueries, app };
 }
 async function create(
   t: ReturnType<typeof setup>,
@@ -542,6 +544,7 @@ it("returns scoped registered passages and detailed saved results to Pi without 
   expect(text).toContain("this-project");
   expect(text).toContain("Inspect physical ends before cutting");
   expect(text).not.toContain("other-project");
+  expect(t.sourceQueries).toContainEqual({ query: "cut", keys: ["this-project"] });
   expect(text).toContain("cutLength");
   expect(text).toContain("ruleExecutions");
   expect(text).toContain("sourceRefs");

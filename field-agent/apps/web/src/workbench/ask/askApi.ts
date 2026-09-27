@@ -24,16 +24,8 @@ export interface AttachmentView {
 }
 export interface ConditionCheck { question: string; name: string; value: number | null; unit: string; origin: Origin | null; detail: string | null; op: string; limit: number; result: "met" | "not_met" | "unknown" }
 export interface ExceptionStatus { key: string; sectionId: string; parentSectionId: string; status: "applies" | "does_not_apply" | "unknown"; checks: ConditionCheck[]; note: string }
-export interface Calculation {
-  toolId: string; title: string; script: { module: string; fn: string; version: string };
-  status: "ok" | "missing_inputs" | "out_of_scope" | "invalid_input";
-  inputs: Array<{ name: string; label: string; value: number | string | null; unit: string | null; origin: Origin; detail: string }>;
-  outputs: Array<{ name: string; label: string; value: number | string | null; unit: string | null }>;
-  missing: string[]; message: string; limits: string; ms: number;
-}
 export interface AskAnswer {
   id: string; question: string; askedAt: string;
-  classification: { kind: "source" | "calculation" | "both"; reason: string };
   context: {
     projectId: string | null; packageTitle: string | null; standard: string | null;
     edition: { value: string | null; status: "resolved" | "answered" | "unknown"; reason: string; script?: string };
@@ -41,15 +33,14 @@ export interface AskAnswer {
     siteCondition: { id: string; description: string } | null;
     facts: ContextFact[];
   };
-  status: "answered" | "needs_input" | "no_source" | "calculation_only";
+  status: "answered" | "needs_input" | "no_source";
   summary: string;
   explanation: Claim[]; unresolved: Claim[]; exceptions: ExceptionStatus[];
   missing: string[]; followUps: FollowUp[]; sources: Citation[];
   conflicts: Array<{ topic: string; resolution: string; items: Array<{ key: string; position: string; label: string }> }>;
   excluded: Array<{ docId: string; title: string; edition: string; reason: string }>;
-  calculation: Calculation | null;
   attachments: AttachmentView[];
-  timings: { retrievalMs: number; calculationMs: number; compositionMs: number; modelMs: null; totalMs: number };
+  timings: { retrievalMs: number; compositionMs: number; modelMs: number; totalMs: number };
 }
 export interface AskRequest {
   question: string; packageId?: string; selectedElementId?: string;

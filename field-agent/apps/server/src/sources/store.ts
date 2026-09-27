@@ -21,7 +21,6 @@ export class SourceStore {
       CREATE TABLE IF NOT EXISTS source_sections (key TEXT PRIMARY KEY, doc_id TEXT NOT NULL, ord INTEGER NOT NULL, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS source_sections_doc ON source_sections(doc_id, ord);
       CREATE TABLE IF NOT EXISTS source_notes (section_key TEXT NOT NULL, data TEXT NOT NULL);
-      CREATE VIRTUAL TABLE IF NOT EXISTS source_fts USING fts5(section_key UNINDEXED, doc_id UNINDEXED, section_id, heading, body, tokenize = 'porter unicode61');
     `);
   }
 
@@ -43,10 +42,8 @@ export class SourceStore {
     this.db.transaction(() => {
       this.db.prepare('INSERT INTO source_documents(id,data,content,sha256) VALUES(?,?,?,?)').run(doc.id, JSON.stringify(doc), content, sha256);
       const ins = this.db.prepare('INSERT INTO source_sections(key,doc_id,ord,data) VALUES(?,?,?,?)');
-      const fts = this.db.prepare('INSERT INTO source_fts(section_key,doc_id,section_id,heading,body) VALUES(?,?,?,?,?)');
       for (const s of sections) {
         ins.run(s.key, s.docId, s.order, JSON.stringify(s));
-        fts.run(s.key, s.docId, s.sectionId, s.heading, s.text);
       }
       const note = this.db.prepare('INSERT INTO source_notes(section_key,data) VALUES(?,?)');
       for (const n of resolvedNotes) note.run(n.sectionKey, JSON.stringify(n));
@@ -74,13 +71,6 @@ export class SourceStore {
   notes(key: string): ExplanationNote[] {
     return (this.db.prepare('SELECT data FROM source_notes WHERE section_key=?').all(key) as { data: string }[]).map(r => JSON.parse(r.data));
   }
-  /** Full-text search with BM25 ranking. The query is built by retrieve.ts from escaped terms only. */
-  search(match: string, limit = 60, docIds?: string[]): Array<{ key: string; docId: string; rank: number }> {
-    if (docIds) return (this.db.prepare('SELECT section_key AS key, doc_id AS docId, bm25(source_fts, 0, 0, 4, 3, 1) AS rank FROM source_fts WHERE source_fts MATCH ? AND doc_id IN (SELECT value FROM json_each(?)) ORDER BY rank LIMIT ?')
-      .all(match, JSON.stringify(docIds), limit) as Array<{ key: string; docId: string; rank: number }>);
-    return (this.db.prepare('SELECT section_key AS key, doc_id AS docId, bm25(source_fts, 0, 0, 4, 3, 1) AS rank FROM source_fts WHERE source_fts MATCH ? ORDER BY rank LIMIT ?')
-      .all(match, limit) as Array<{ key: string; docId: string; rank: number }>);
-  }
   /** Records where each passage sits on its uploaded page images, for highlighting in the viewer. */
   setRegions(docId: string, regions: Record<string, NonNullable<SourceSection['regions']>>) {
     const upd = this.db.prepare('UPDATE source_sections SET data=? WHERE key=? AND doc_id=?');
@@ -88,20 +78,19 @@ export class SourceStore {
       for (const s of this.sections(docId)) if (regions[s.key]) upd.run(JSON.stringify({ ...s, regions: regions[s.key] }), s.key, docId);
     })();
   }
-  /** True when every section of the document is in the full-text index and a search finds it. */
+  /** Registered sections, not a lexical probe, determine readiness for semantic search. */
   searchable(docId: string): boolean {
+    const doc = this.document(docId);
     const sections = this.sections(docId);
-    const indexed = (this.db.prepare('SELECT count(*) AS n FROM source_fts WHERE doc_id=?').get(docId) as { n: number }).n;
-    if (!sections.length || indexed !== sections.length) return false;
-    const probe = sections.map(s => `${s.heading} ${s.text}`.toLowerCase().match(/[a-z]{5,}/g) ?? []).flat()[0];
-    if (!probe) return true;
-    return this.search(`"${probe}"`, 200).some(h => h.docId === docId);
+    return !!doc && sections.length > 0 && sections.length === doc.sectionCount;
   }
   remove(id: string) {
     this.db.transaction(() => {
       const keys = (this.db.prepare('SELECT key FROM source_sections WHERE doc_id=?').all(id) as { key: string }[]).map(r => r.key);
       for (const k of keys) this.db.prepare('DELETE FROM source_notes WHERE section_key=?').run(k);
-      this.db.prepare('DELETE FROM source_fts WHERE doc_id=?').run(id);
+      // Old databases may still carry the retired derived index; remove deleted documents there too.
+      if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='source_fts'").get())
+        this.db.prepare('DELETE FROM source_fts WHERE doc_id=?').run(id);
       this.db.prepare('DELETE FROM source_sections WHERE doc_id=?').run(id);
       this.db.prepare('DELETE FROM source_documents WHERE id=?').run(id);
     })();

@@ -1,6 +1,6 @@
 # Ask Sprink
 
-Ask Sprink lets a fitter type a practical question in the drawing workspace ("A duct is blocking this branch. What rules do I need to check before changing the route?"), see the passages that apply for this project, understand when they apply, open the original passage, and get calculations from the existing scripts, shown separately.
+Ask Sprink lets a fitter type a practical question in the drawing workspace ("A duct is blocking this branch. What rules do I need to check before changing the route?"), see the passages that apply for this project, understand when they apply, open the original passage.
 
 Documents and job-site photos can be uploaded, dragged in, pasted or taken with a phone camera. A reference document is read (native PDF text, or OCR for scans and images), reviewed and corrected by a person, then indexed into the library; answers cite the exact revision and open the original page with the passage highlighted. A site photo attached to a question is context only, never a code source.
 
@@ -39,38 +39,41 @@ It answers only from the project's source library. When nothing in the library s
 ## 2. How it works
 
 ```
-question ──► classify (source / calculation / both)
+question ──► JEV source search
           ├─► context: package facts (project, sample, derived) + your measurements and answers
-          ├─► retrieval: SQLite FTS5 + field vocabulary ─► applicability (edition, jurisdiction, product, project)
-          │        └─► expand: exceptions, notes, referenced tables, definitions, commentary, amendments
-          ├─► tools: validated inputs ─► existing script ─► result with inputs and script version
-          └─► compose from stored notes ─► server checks every citation and claim ─► answer
+          ├─► retrieval: JEV Choice + Noul over registered clauses ─► applicability (edition, jurisdiction, product, project)
+          │        └─► expand: explicit exceptions, notes, references and amendments
+          └─► retrieve stored original text and exact citations ─► answer
 ```
 
-Three layers are stored and shown separately:
+Source text and reviewed metadata stay separate:
 
-1. **Source text**, exactly as imported, split into sections (`source_sections`, `source_fts`).
+1. **Source text**, exactly as imported, split into sections (`source_sections`).
 2. **Notes** that explain a section in plain language (`source_notes`). They are labelled "Sprink note (interpretation, not source text)". Notes may also record the conditions an exception depends on, and a topic/position used to spot disagreements.
-3. **Scripts**, reached only through the tool registry in `apps/server/src/sources/tools.ts`. Nothing in a document or question is executed.
+Ask has no classification or direct calculation route. Its former cut-length and pipe/duct-clearance wrappers, numeric question parser and calculation UI were removed. Pi business calculations and the independent 47-rule selection/execution workflow are unchanged.
 
 ### Retrieval
 
-- Exact terms and section numbers are matched as typed. Natural-language wording is matched through a curated field vocabulary (for example "duct is blocking" → obstruction, "move the pipe" → relocated/route change), because the stack has no embedding model. A section must match at least half of the question's concepts, so one generic word never counts as a match.
+- Ask sends the registered clause identifiers and text to pinned `jev-1.13.0`. Choice ranks passages; a Noul checks whether the batch contains an answer, and per-passage Nouls select supporting passages. Both existence and support must exceed 0.5; the highest-ranked passage is never a fallback for a missing answer. No BM25 shortlist, synonym dictionary, or keyword relevance filter runs in Ask.
+- Every eligible clause is evaluated. Batches contain at most 255 candidates, with at most four requests in flight per selection. The conservative UTF-8 byte budget reserves serialization headroom below the official 64k total and 32k state-plus-longest-question token limits. A single oversized clause returns `source_section_too_large` and must be re-sectioned; it is never truncated. If an answer requires combining evidence across batches and no individual batch establishes existence, the lookup conservatively returns no supporting source.
+- JEV evaluates supplied text; it does not browse or fetch sources. Keys returned by the service are validated against that request and resolved to stored originals. Missing credentials, timeouts, invalid responses and API failures return errors without legacy fallback or automatic retries. `TYPESAFE_API_KEY` in `field-agent/.env.local` takes precedence over the inherited environment, as in the existing rule workflow.
+- Other projects and sources without AI authorization are never sent. Applicable and inapplicable documents are evaluated separately so another edition cannot supply the applicable batch's answer-existence verdict.
+- Specifications: [semantic search](https://docs.typesafe.ai/cookbooks/semantic_find), [model limits](https://docs.typesafe.ai/models), [HTTP API](https://docs.typesafe.ai/api).
 - **Applicability** is decided before anything is used: published codes must match the project's standard and edition; local amendments must match the jurisdiction and the edition they amend; manufacturer instructions must cover a product in the run; project documents must belong to the project. Anything filtered out is listed under "Not used" with the reason.
 - **Edition:** resolved from the package, or asked as a follow-up. If the project's edition is not in the library, the answer says so and other editions are not substituted.
-- Each matched section brings its **exceptions and notes**, the **tables and sections it references**, **definitions** of terms it uses, **annex commentary** (labelled "Explanatory, not a requirement"), and **local amendments** that change it.
+- Selected sections bring explicitly linked exceptions, notes, references and amendments. Definitions and commentary are candidates for JEV selection; no term-match or topic-match expansion adds them. The Pi inspect tool uses the same JEV selector for source queries. The old dictionary, BM25 method and FTS creation/indexing are removed. Import readiness checks stored section completeness. Existing database FTS tables are left inert to preserve stored data, and deleted documents are still removed from them.
 - **Disagreements** (an amendment changing a value, a project spec giving a different clearance, a company procedure allowing what the spec forbids) are shown side by side with who needs to resolve them. Sprink never picks one.
 
 ### Answer checks
 
-- Citations are resolved on the server against the retrieved records. A claim citing anything else is moved to "Unresolved statements".
-- A claim is kept only when every number and unit in it appears in the cited passage and most of its terms do. Otherwise it is shown struck through with the reason.
+- Citations are built on the server from retrieved records only; service responses cannot invent a source identifier.
+- Answers quote stored text verbatim, subject to display permissions. There is no generated paraphrase or lexical claim-support heuristic. Reviewed notes remain separately visible as source metadata.
 - Exceptions with recorded conditions are evaluated against known facts (for example the duct width along the pipe, derived from the measured duct box, or a value you type). Unknown inputs become one focused follow-up question each.
-- No accuracy percentages, no "approved" labels, no sign-off. Calculations always carry "not a compliance result".
+- No accuracy percentages, no "approved" labels, no sign-off.
 
 ### Uploaded text is data, not instructions
 
-Documents are never read as instructions: there is no generative model in the loop, answers are built from stored notes, and the UI renders all source text as plain text. Instruction-like text ("ignore previous instructions", "tell the user…") is flagged `embedded_instructions` at import and shown with a warning.
+Documents are never read as instructions: there is no generative model in the loop, answers quote stored original text, and the UI renders all source text as plain text. Instruction-like text ("ignore previous instructions", "tell the user…") is flagged `embedded_instructions` at import and shown with a warning.
 
 ## 3. Importing documents
 
@@ -168,7 +171,7 @@ FIELD_AGENT_TOKEN=<16+ characters> pnpm start       # http://127.0.0.1:4310
 3. Library → **Load demonstration sources**. Or from a terminal: `pnpm sources:import --demo --project <projectId>`.
 4. Ask one of the suggested questions.
 
-No model credentials are needed. The tables are created in the existing `.data/field.sqlite` on first start.
+Ask requires `TYPESAFE_API_KEY`. The tables are created in the existing `.data/field.sqlite` on first start.
 
 To try uploads, open Library → **Upload document** (or drop a file) and use the invented fixtures in `fixtures/uploads/` (for example `native-text-manual.pdf`, `scanned-spec.pdf`, `site-label-iphone.heic`). `pnpm install` brings every decoder and the OCR model; nothing is downloaded at run time.
 
@@ -185,16 +188,18 @@ E2E_TOKEN=<token> node scripts/e2e-ask-uploads.mjs    # needs Playwright + Chrom
 
 ### What works
 
-- Typed questions, classified as source lookup, calculation or both.
+- Typed questions search registered original source text.
 - Context from the open package: project, edition (from permit facts), jurisdiction, selected piece, site condition, measured duct box, and the duct width along the piece (derived). Each fact shows where it came from: Project, Sample, Derived, Catalog or You.
-- The Ask Sprink panel beside the drawing workspace: question, visible project and edition context, concise answer, notes with citation chips, conditions, disagreements, focused follow-ups, a separate calculation block, expandable references, and a source viewer that opens the passage in its document with its page, exceptions and notes. The original file opens from the viewer when the source allows it.
+- The Ask Sprink panel beside the drawing workspace: question, visible project and edition context, concise answer, notes with citation chips, conditions, disagreements, focused follow-ups, expandable references, and a source viewer that opens the passage in its document with its page, exceptions and notes. The original file opens from the viewer when the source allows it.
 - Library view and importer with the authorization statement.
 - Uploads of PDF (text, scanned, mixed), JPEG, PNG, HEIC/HEIF, WebP, TIFF, BMP and static GIF by file picker, drag and drop, clipboard paste and phone camera; review and correction before indexing; revision-exact citations that open the original page with the passage highlighted; site photos as context only.
 - The question, measurements and attachments are kept in the browser if a request fails or the page reloads; failed uploads and questions have Retry.
 
 ### What was tested
 
-`apps/server/test/ask.test.ts` (14 tests) covers:
+JEV migration verification: workspace typecheck, 48 files / 871 tests, and web build passed without paid API calls. After updating to main `932c05f` (including Pi fix `3d23fa2`), server typecheck and 60 workflow/work-package/integration tests passed. The integration tests explicitly confirm that Pi uses the shared selector and excludes other projects. Search decisions are scripted in downstream regressions; live JEV quality and the running server remain unverified.
+
+`apps/server/test/semantic.test.ts` checks the JEV protocol, no-answer behavior, malformed responses and bounded batching without calling a paid API. `apps/server/test/ask.test.ts` uses scripted selection decisions to cover downstream behavior:
 
 | Required check | Result |
 | --- | --- |
@@ -203,15 +208,14 @@ E2E_TOKEN=<token> node scripts/e2e-ask-uploads.mjs    # needs Playwright + Chrom
 | An exception changes or qualifies the answer | Pass: duct 2000 mm wide (derived) → does not apply; 450 mm and 4 fittings → appears to apply, and the qualification sits under the requirement |
 | The wrong edition is not silently substituted | Pass: a 2016 project gets no 2022 or 2025 text, and is told the 2016 text is missing |
 | An unsupported question produces an honest no-source response | Pass: sidewall spacing → "I couldn't find a supporting source in the project library." |
-| A calculation uses the existing script with visible inputs | Pass: cut for 2400 mm C-C = 2333.3 mm; drop 600 mm → 83.3 mm gap; script name and content hash shown; bad units and unknown inputs rejected |
 | Source links open the correct passage | Pass: each citation link returns that passage with its page; the original file contains it |
 | Instructions inside documents cannot override behavior | Pass: the demo passage and a newly uploaded document with injected instructions are flagged and change nothing |
 
-Also: authorization refusals, OCR and damaged-table flags, excerpt and reference-only limits, and invented citations or wrong numbers removed from answers. The whole workspace suite passes (`pnpm test`), with `pnpm typecheck` and `pnpm build`. The panel was driven in Chromium against `pnpm start` at 1600×1000 and 390×844 with no console errors and no horizontal overflow. Screenshots are in `docs/ui/ask-*.png`.
+Also: authorization refusals, OCR and damaged-table flags, excerpt and reference-only limits, and unknown service identifiers rejected. Historical pre-migration verification included the workspace suite, typecheck and build. The panel was driven in Chromium against `pnpm start` at 1600×1000 and 390×844 with no console errors and no horizontal overflow. Screenshots are in `docs/ui/ask-*.png`.
 
 ### Upload flow tests
 
-`apps/server/test/uploads.test.ts` (22 tests) runs the real decoders and OCR on the fixtures, with no mocks except one test that edits the stored OCR confidence to simulate an unreadable scan:
+`apps/server/test/uploads.test.ts` (22 tests) runs the real decoders and OCR on the fixtures, with scripted JEV selection and one stored OCR-confidence edit to simulate an unreadable scan:
 
 | Check | Result |
 | --- | --- |
@@ -228,7 +232,7 @@ Also: authorization refusals, OCR and damaged-table flags, excerpt and reference
 | Refusals | Pass: unsupported, locked, damaged, animated, oversized, duplicate |
 | Retry | Pass: work interrupted by a restart is retried |
 
-`scripts/e2e-ask-uploads.mjs` drives the built app in Chromium against a live server (real decoders and OCR). 28 of 28 checks pass: both PDFs indexed through the review screen, unclear OCR blocked, answers from the uploads, citation opens page 2 highlighted, each format uploaded through picker, drag and drop or paste and previewed, HEIC and EXIF JPEG upright, photos as context, failed question and failed upload retried (the failures are simulated by aborting the request in the browser), question and attachments survive a reload, no-source answer, calculation, phone layout without overflow, no console errors. Screenshots: `docs/ui/ask-upload-*.png`.
+`scripts/e2e-ask-uploads.mjs` drives the built app in Chromium against a live server (real decoders and OCR). Historical pre-JEV verification passed 28 of 28 checks: both PDFs indexed through the review screen, unclear OCR blocked, answers from the uploads, citation opens page 2 highlighted, each format uploaded through picker, drag and drop or paste and previewed, HEIC and EXIF JPEG upright, photos as context, failed question and failed upload retried (the failures are simulated by aborting the request in the browser), question and attachments survive a reload, no-source answer, the former calculation UI, phone layout without overflow, no console errors. Screenshots: `docs/ui/ask-upload-*.png`.
 
 ### Latency (measured)
 
@@ -242,11 +246,7 @@ Upload flow, one local run on a clean server (in-container CPU, first request in
 | `site-duct-rotated.jpg` | 1.8 s (OCR 0.4 s) | n/a |
 | `two-page.tiff` | 3.5 s | n/a |
 
-In the browser, choosing the native PDF to the review screen took 2.9 s and the scanned PDF 6.4 s. Question to answer, with 8 uploaded and demo documents: retrieval and composition 2 to 14 ms on the server, 68 to 116 ms in the browser including rendering. **Model generation: none**, because no generative model is in the stack (`modelMs: null`).
-
-Demo library only (earlier measurement):
-
-Local, demo library of 6 documents and 27 sections, 40 requests over 8 questions through the HTTP API: **p50 about 3 ms, p95 about 6 ms** end to end; retrieval p95 about 3 ms. The test prints the numbers on every run. This is far inside "answers in seconds", but it is measured on a tiny library on one machine; re-measure with the real document set.
+The extraction timings above are historical, before the JEV migration. They do not measure current search latency. The old local-search latency loop was removed. JEV transport time is reported in `timings.modelMs`; live API quality, latency and browser behavior after this migration have not been verified by a paid run.
 
 ### Sources loaded
 
@@ -255,10 +255,9 @@ Only the six demonstration documents in `demo-sources/` (stand-ins for NFPA 13 2
 ### Blocked by missing documents or access
 
 - **Real answers need real documents.** No NFPA 13, SFFD, Spears or project text is loaded. Importing NFPA text needs a licence that covers storage, indexing and AI use; that has not been confirmed.
-- **Notes for real documents.** Plain-language notes, exception conditions and topics are authored per section. For a newly imported document without notes, Ask Sprink still retrieves and cites the passages but shows "Read the source wording" instead of a summary, and cannot evaluate exception conditions or spot value disagreements automatically (explicit amendments are still linked).
-- **No generative model or embeddings in the stack.** Explanations come from stored notes, and meaning search uses a field vocabulary. If a model is added later, its output goes through the same citation and support checks (`validateClaims`), which the tests already exercise with an adversarial composer.
+- **Notes for real documents.** Plain-language notes, exception conditions and topics are authored per section. For a newly imported document without notes, Ask Sprink still retrieves and cites the passages but quotes the original text, and cannot evaluate exception conditions or spot value disagreements automatically (explicit amendments are still linked).
+- **JEV selection is not a generated answer.** Answers use verbatim source text with stored citations; reviewed notes remain separate metadata. No script is selected or executed from a retrieved passage; the independent Pi rule loop is unchanged.
 - **OCR is English only** and reads text, not drawings: there is no vision model to describe what a photo shows.
 - **The HEIC fixture was produced with libheif/x265**, not shot on an iPhone. It has the same HEVC coding and `irot` rotation as an iPhone portrait photo; a real iPhone photo has not been tested.
 - Page highlighting uses the extracted line boxes; a passage whose text was corrected heavily may lose its highlight and open at the page instead.
 - **Permit records.** The edition comes from the package's confirmed permit facts; attaching the actual permit record is future work.
-- Calculations cover straight axis-parallel pipe and an axis-aligned duct box, and NPS 1 CPVC 4206-010S elbows, which is what the existing script and catalog support.

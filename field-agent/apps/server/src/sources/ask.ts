@@ -1,8 +1,15 @@
+import { JevSourceSearch, type SourceSearch } from './semantic.js';
 import { randomUUID } from 'node:crypto';
 import { resolveSfNfpa13Edition, type Evidence, type Fact, type SfProjectFacts, type WorkPackageSnapshot } from '@field-agent/core';
-import { conceptHits, conflicts as findConflicts, expand, planQuery, relevant, type Conflict, type Retrieved, type Role } from './retrieve.js';
+import { conflicts as findConflicts, expand, type Conflict, type Retrieved, type Role } from './retrieve.js';
 import type { SourceStore } from './store.js';
-import { pipeDuctClearance, straightCutLength, toMm, type Box, type CalculationResult, type Origin, type Point } from './tools.js';
+type Origin = 'project' | 'sample' | 'you' | 'derived';
+interface Point { x: number; y: number; z: number }
+interface Box { min: Point; max: Point }
+const toMm = (value: number, unit: string): number | null => {
+  const factor = ({ mm: 1, m: 1000, in: 25.4, ft: 304.8 } as Record<string, number>)[unit];
+  return factor && Number.isFinite(value) ? value * factor : null;
+};
 import { QUALITY_LABEL, SOURCE_TYPE_LABEL, type ExplanationCondition, type SourceDocument } from './types.js';
 
 export const NO_SOURCE = "I couldn't find a supporting source in the project library.";
@@ -51,7 +58,6 @@ export interface ConditionCheck { question: string; name: string; value: number 
 export interface ExceptionStatus { key: string; sectionId: string; parentSectionId: string; status: 'applies' | 'does_not_apply' | 'unknown'; checks: ConditionCheck[]; note: string }
 export interface AskAnswer {
   id: string; question: string; askedAt: string;
-  classification: { kind: 'source' | 'calculation' | 'both'; reason: string };
   context: {
     projectId: string | null; packageTitle: string | null; standard: string | null;
     edition: { value: string | null; status: 'resolved' | 'answered' | 'unknown'; reason: string; script?: string };
@@ -59,7 +65,7 @@ export interface AskAnswer {
     siteCondition: { id: string; description: string } | null;
     facts: ContextFact[];
   };
-  status: 'answered' | 'needs_input' | 'no_source' | 'calculation_only';
+  status: 'answered' | 'needs_input' | 'no_source';
   summary: string;
   explanation: Claim[];
   unresolved: Claim[];
@@ -69,53 +75,21 @@ export interface AskAnswer {
   sources: Citation[];
   conflicts: Array<Conflict & { items: Array<{ key: string; position: string; label: string }> }>;
   excluded: Array<{ docId: string; title: string; edition: string; reason: string }>;
-  calculation: CalculationResult | null;
   attachments: AttachmentView[];
-  /** No language model is part of this stack: explanations come from reviewed notes or the source wording. */
-  timings: { retrievalMs: number; calculationMs: number; compositionMs: number; modelMs: null; totalMs: number };
+  /** JEV selects evidence; answers quote stored source wording. */
+  timings: { retrievalMs: number; compositionMs: number; modelMs: number; totalMs: number };
 }
 
-/** Pluggable explanation writer. The default uses stored notes; any writer's claims are re-validated. */
-export type Composer = (items: Retrieved[], question: string) => Array<Omit<Claim, 'status' | 'reason' | 'id'>>;
-
-const REQUIREMENT_WORDS = /\b(shall|must|required|not required|not permitted|prohibited|at least|not more than|not exceed|no more than|minimum|maximum|within)\b/i;
-
-/**
- * Reviewed notes where they exist. Where a passage has no note (for example a document the team
- * just uploaded), its own wording is quoted instead: the requirement sentences, never a paraphrase,
- * and never more than the source's display permission allows.
- */
-export const notesComposer: Composer = (items, question) => {
-  const plan = planQuery(question);
-  return items
-    .filter(r => ['main', 'referenced', 'amendment', 'related'].includes(r.role))
-    .flatMap((r): ReturnType<Composer> => {
-      if (r.notes.length) return [{ text: r.notes[0].text, citations: [r.section.key], kind: 'note' as const }];
-      const pointer = { text: `${r.section.sectionId}: ${r.section.heading}. Read the source wording.`, citations: [r.section.key], kind: 'pointer' as const };
-      const a = r.doc.authorization;
-      // Tables are shown whole; text that reads like instructions to an assistant is never quoted as an answer.
-      if (a.display === 'reference_only' || r.section.kind === 'table' || r.section.table || r.section.flags.includes('embedded_instructions')) return [pointer];
-      const sentences = r.section.text.replace(/\s+/g, ' ').split(/(?<=[.;])\s+(?=[A-Z0-9(])/).map(x => x.trim()).filter(x => x.length > 12);
-      const scored = sentences.map(x => ({ x, hits: plan.concepts.filter(k => k.patterns.some(p => p.test(x))).length, req: REQUIREMENT_WORDS.test(x) }))
-        .filter(x => x.req || x.hits > 0).sort((p, q) => (q.hits + (q.req ? 1 : 0)) - (p.hits + (p.req ? 1 : 0))).slice(0, 2);
-      if (!scored.length) return [pointer];
-      const limit = a.display === 'excerpt' ? a.maxQuoteChars! : Infinity;
-      return sentences.filter(x => scored.some(y => y.x === x))
-        .map(x => ({ text: x.length > limit ? `${x.slice(0, limit)}…` : x, citations: [r.section.key], kind: 'quote' as const }));
-    });
-};
-
-// ------------------------------------------------------------------ classification
-
-const CALC = /\b(how long|cut length|cut it|what length|cent(er|re)[- ]to[- ]cent(er|re)|c-c|calculate|compute|will (it|the pipe|this|the branch) (still )?(clear|fit)|does (it|the pipe|this|the branch) clear|how (much|far) (room|gap|space|clearance)|gap between|clear the duct|if (i|we) (drop|lower|raise|move))\b/i;
-const SOURCE = /\b(rules?|requirements?|required|code|allowed|permitted|may (i|we)|can (i|we)|need to|have to|shall|must|standard|spec(ification)?|procedure|exception|minimum|maximum|what does|which|before|who)\b/i;
-
-export function classify(question: string): AskAnswer['classification'] {
-  const calc = CALC.test(question), source = SOURCE.test(question);
-  if (calc && source) return { kind: 'both', reason: 'The question asks for a value and for the rule behind it.' };
-  if (calc) return { kind: 'calculation', reason: 'The question asks for a computed value.' };
-  return { kind: 'source', reason: 'The question asks what the documents require.' };
-}
+/** Quotes are retrieved verbatim; no keyword-based sentence selection. */
+const sourceClaims = (items: Retrieved[]): Claim[] => items
+  .map((r, i): Claim => {
+    const base = { id: `c${i + 1}`, status: 'supported' as const };
+    const a = r.doc.authorization;
+    if (a.display === 'reference_only' || r.section.table || r.section.flags.includes('embedded_instructions'))
+      return { ...base, text: `${r.section.sectionId}: ${r.section.heading}. Read the source wording.`, citations: [r.section.key], kind: 'pointer' };
+    const limit = a.display === 'excerpt' ? a.maxQuoteChars! : Infinity;
+    return { ...base, text: r.section.text.length > limit ? `${r.section.text.slice(0, limit)}…` : r.section.text, citations: [r.section.key], kind: 'quote' };
+  });
 
 // ------------------------------------------------------------------ context
 
@@ -123,8 +97,6 @@ const LENGTH_UNITS = new Set(['mm', 'm', 'in', 'ft']);
 const MEASUREMENTS: Record<string, { label: string; kind: 'length' | 'count' }> = {
   obstructionWidth: { label: 'Duct width along the original pipe', kind: 'length' },
   addedFittings: { label: 'Fittings the new route adds', kind: 'count' },
-  verticalOffset: { label: 'Vertical move of the pipe (negative is down)', kind: 'length' },
-  centerToCenter: { label: 'Center-to-center length', kind: 'length' },
 };
 
 export class AskInputError extends Error {}
@@ -222,7 +194,7 @@ function buildContext(req: AskRequest, snapshot: WorkPackageSnapshot | null): Co
     if (typeof m.value !== 'number' || !Number.isFinite(m.value)) throw new AskInputError(`${spec.label} must be a number.`);
     if (spec.kind === 'length' && !LENGTH_UNITS.has(m.unit)) throw new AskInputError(`${spec.label} needs a length unit (mm, m, in or ft).`);
     if (spec.kind === 'count' && (m.unit !== 'count' || !Number.isInteger(m.value) || m.value < 0)) throw new AskInputError(`${spec.label} must be a whole number.`);
-    if (spec.kind === 'length' && m.name !== 'verticalOffset' && m.value <= 0) throw new AskInputError(`${spec.label} must be greater than 0.`);
+    if (spec.kind === 'length' && m.value <= 0) throw new AskInputError(`${spec.label} must be greater than 0.`);
     put({ name: m.name, label: spec.label, value: m.value, unit: m.unit, origin: 'you', detail: 'Entered by you in Ask Sprink' });
   }
   return { snapshot, facts, values, standard, edition, jurisdiction, productIds, selected, duct };
@@ -276,47 +248,6 @@ function applicability(doc: SourceDocument, ctx: Context): { ok: boolean; reason
   }
 }
 
-// ------------------------------------------------------------------ claims
-
-const CLAIM_STOP = new Set('about after again along also because before being below between both could does each either from have into least more most must only other over same shall should since some such than that their them then there these they this those through under until upon very were what when where which while with within without would your after the and for not may'.split(' '));
-const numberTokens = (t: string) => [...t.matchAll(/(\d+(?:\.\d+)?)\s*(mm|m|psi|hours?|ft|in)?\b/gi)].map(m => ({ n: m[1], unit: (m[2] ?? '').toLowerCase() }));
-
-/** A cited passage supports a claim when every number (with its unit) and most content words appear in it. */
-export function supports(claim: string, passages: string[]): { ok: boolean; reason?: string } {
-  const hay = passages.join('\n').toLowerCase().replace(/\s+/g, ' ');
-  for (const t of numberTokens(claim)) {
-    const re = new RegExp(`(^|[^\\d.])${t.n.replace('.', '\\.')}${t.unit ? `\\s*${t.unit}` : '(?![\\d.])'}`, 'i');
-    if (!re.test(hay)) return { ok: false, reason: `The value ${t.n}${t.unit ? ` ${t.unit}` : ''} does not appear in the cited passage.` };
-  }
-  const words = [...new Set(claim.toLowerCase().match(/[a-z][a-z-]{4,}/g) ?? [])].filter(w => !CLAIM_STOP.has(w));
-  if (!words.length) return { ok: true };
-  const found = words.filter(w => hay.includes(w.slice(0, Math.max(5, w.length - 3))));
-  return found.length / words.length >= 0.6 ? { ok: true } : { ok: false, reason: 'The cited passage does not contain most of the terms this statement uses.' };
-}
-
-export function validateClaims(drafts: ReturnType<Composer>, retrieved: Map<string, Retrieved>): { supported: Claim[]; unresolved: Claim[] } {
-  const supported: Claim[] = [], unresolved: Claim[] = [];
-  drafts.forEach((d, i) => {
-    const id = `c${i + 1}`;
-    const cited = d.citations.map(k => retrieved.get(k));
-    if (!d.citations.length) return unresolved.push({ ...d, id, status: 'unresolved', reason: 'No source was cited.' });
-    // Citation ids are resolved against stored, retrieved records only; anything else is rejected.
-    if (cited.some(c => !c)) return unresolved.push({ ...d, id, citations: d.citations.filter(k => retrieved.has(k)), status: 'unresolved', reason: 'A cited section is not one of the retrieved source records.' });
-    if (d.kind === 'pointer') return supported.push({ ...d, id, status: 'supported' });
-    if (d.kind === 'quote') {
-      // A quotation must be the source's words exactly (whitespace aside), or it is not a quotation.
-      const flat = (t: string) => t.replace(/\s+/g, ' ').trim();
-      const q = flat(d.text.replace(/…$/, ''));
-      const ok = cited.some(c => flat(c!.section.text).includes(q));
-      return ok ? supported.push({ ...d, id, status: 'supported' }) : unresolved.push({ ...d, id, status: 'unresolved', reason: 'The quoted wording is not in the cited passage.' });
-    }
-    const check = supports(d.text, cited.map(c => `${c!.section.heading}\n${c!.section.text}`));
-    if (!check.ok) return unresolved.push({ ...d, id, status: 'unresolved', reason: check.reason });
-    supported.push({ ...d, id, status: 'supported' });
-  });
-  return { supported, unresolved };
-}
-
 // ------------------------------------------------------------------ citations
 
 const ROLE_ORDER: Role[] = ['main', 'amendment', 'exception', 'referenced', 'footnote', 'related', 'definition', 'commentary'];
@@ -350,24 +281,6 @@ function citation(r: Retrieved): Citation {
     regions: up && a.display === 'full' ? (r.section.regions ?? []) : [],
   };
 }
-
-// ------------------------------------------------------------------ question parsing for calculations
-
-function parseQuestionNumbers(q: string): { verticalOffset?: { value: number; unit: string }; centerToCenter?: { value: number; unit: string } } {
-  const unit = (u: string) => (u === '"' || u === 'inch' || u === 'inches') ? 'in' : (u === 'feet' || u === 'foot' || u === "'") ? 'ft' : u;
-  const out: ReturnType<typeof parseQuestionNumbers> = {};
-  const mv = /\b(drop|lower|raise|lift|move)\w*\s+(?:it|the pipe|the branch|the line)?\s*(up|down)?\s*(?:by\s+)?(\d+(?:\.\d+)?)\s*(mm|m|in|inch(?:es)?|ft|feet|foot|"|')/i.exec(q);
-  if (mv) {
-    const down = /drop|lower/i.test(mv[1]) || mv[2]?.toLowerCase() === 'down';
-    out.verticalOffset = { value: (down ? -1 : 1) * Number(mv[3]), unit: unit(mv[4].toLowerCase()) };
-  }
-  const cc = /(\d+(?:\.\d+)?)\s*(mm|m|in|inch(?:es)?|ft|feet|"|')\s*(?:c-c|c to c|cent(?:er|re)[- ]to[- ]cent(?:er|re))/i.exec(q)
-    ?? /(?:c-c|cent(?:er|re)[- ]to[- ]cent(?:er|re))\D{0,12}(\d+(?:\.\d+)?)\s*(mm|m|in|inch(?:es)?|ft|feet|"|')/i.exec(q);
-  if (cc) out.centerToCenter = { value: Number(cc[1]), unit: unit(cc[2].toLowerCase()) };
-  return out;
-}
-
-// ------------------------------------------------------------------ site photos: context, never authority
 
 function attachmentContext(inputs: AttachmentInput[], req: AskRequest, ctx: Context, followUps: FollowUp[], missing: string[]): AttachmentView[] {
   const confirmations = req.answers?.observations ?? {};
@@ -408,61 +321,45 @@ function attachmentContext(inputs: AttachmentInput[], req: AskRequest, ctx: Cont
 
 // ------------------------------------------------------------------ main flow
 
-export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSnapshot | null, composer: Composer = notesComposer, attachmentInputs: AttachmentInput[] = []): AskAnswer {
+export async function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSnapshot | null, attachmentInputs: AttachmentInput[] = [], search: SourceSearch = new JevSourceSearch()): Promise<AskAnswer> {
   const t0 = performance.now();
   if (typeof req.question !== 'string' || !req.question.trim()) throw new AskInputError('Type a question.');
   if (req.question.length > 1000) throw new AskInputError('Keep the question under 1000 characters.');
   const question = req.question.trim();
   const ctx = buildContext(req, snapshot);
-  const classification = classify(question);
+  let modelMs = 0;
   const followUps: FollowUp[] = [], missing: string[] = [];
   const excluded: AskAnswer['excluded'] = [];
   const attachments = attachmentContext(attachmentInputs, req, ctx, followUps, missing);
-
-  // Values typed into the question itself are the user's too.
-  const parsed = parseQuestionNumbers(question);
-  for (const [name, v] of Object.entries(parsed)) {
-    // A value typed into the panel wins over one read from the question text.
-    if (!v || ctx.values.get(name)?.origin === 'you') continue;
-    if (!LENGTH_UNITS.has(v.unit)) continue;
-    const f: ContextFact = { name, label: MEASUREMENTS[name].label, value: v.value, unit: v.unit, origin: 'you', detail: 'From your question' };
-    ctx.facts.push(f); ctx.values.set(name, f);
-  }
 
   // ---------------- retrieval
   const r0 = performance.now();
   let items: Retrieved[] = [];
   const mainKeys = new Set<string>();
-  if (classification.kind !== 'calculation') {
-    const plan = planQuery(question);
+  {
     const docs = store.documents();
     const docById = new Map(docs.map(d => [d.id, d]));
     const verdicts = new Map(docs.map(d => [d.id, applicability(d, ctx)]));
     const blocked = new Set<string>();
+    const eligible = docs.filter(d => d.authorization.useWithAi && (!d.scope.projectId || d.scope.projectId === snapshot?.projectId));
+    const passages = eligible.flatMap(doc => store.sections(doc.id).map(section => ({ doc, section })));
+    const started = performance.now();
+    // Keep other editions from contributing to an applicable batch's existence verdict.
+    const keys = new Set((await Promise.all([true, false].map(ok =>
+      search.select(question, passages.filter(p => verdicts.get(p.doc.id)!.ok === ok))))).flat());
+    modelMs += performance.now() - started;
     const mains: Retrieved[] = [];
-    const seen = new Set<string>();
-    // Applicable documents are searched on their own first, so passages from other editions or projects cannot crowd them out;
-    // a second search finds inapplicable matches only to report them under "Not used".
-    const okIds = docs.filter(d => verdicts.get(d.id)!.ok).map(d => d.id);
-    const hits = plan.match ? [...store.search(plan.match, 60, okIds), ...store.search(plan.match, 60).filter(h => !verdicts.get(h.docId)?.ok)] : [];
-    for (const hit of hits) {
-      const section = store.section(hit.key)!, doc = docById.get(hit.docId)!;
-      const top = section.parentKey ? store.section(section.parentKey)! : section;
-      if (seen.has(top.key)) continue;
-      const hits = conceptHits(plan, top).concat(section === top ? [] : conceptHits(plan, section));
-      if (!relevant(plan, [...new Set(hits)])) continue;
-      seen.add(top.key);
+    for (const { doc, section } of passages.filter(p => keys.has(p.section.key))) {
       const verdict = verdicts.get(doc.id)!;
       if (!verdict.ok) {
         if (verdict.blockedBy) blocked.add(verdict.blockedBy);
         if (!excluded.some(e => e.docId === doc.id)) excluded.push({ docId: doc.id, title: doc.title, edition: doc.edition, reason: verdict.reason });
         continue;
       }
-      if (top.kind === 'definition' || top.kind === 'commentary') continue; // attached to the passages they explain
-      if (mains.length < 8) mains.push({ section: top, doc, role: 'main', score: hit.rank, notes: store.notes(top.key) });
+      mains.push({ section, doc, role: section.kind === 'definition' || section.kind === 'commentary' ? section.kind : 'main', score: 0, notes: store.notes(section.key) });
     }
     for (const m of mains) mainKeys.add(m.section.key);
-    items = expand(store, mains, docs.filter(d => verdicts.get(d.id)!.ok));
+    items = expand(store, mains, eligible.filter(d => verdicts.get(d.id)!.ok));
     if (blocked.has('edition') || blocked.has('standard')) {
       const editions = [...new Set(docs.filter(d => d.type === 'published_code').map(d => d.edition))].sort().reverse();
       followUps.push({ id: 'edition', field: 'nfpa13Edition', kind: 'choice', question: 'Which NFPA 13 edition applies to this permit?',
@@ -509,42 +406,10 @@ export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSn
     }
   }
 
-  // ---------------- calculation through the validated tool registry
-  const c0 = performance.now();
-  let calculation: CalculationResult | null = null;
-  if (classification.kind !== 'source') {
-    const wantsCut = /\bcut\b|cent(er|re)[- ]to[- ]cent(er|re)|c-c|length/i.test(question);
-    if (wantsCut) {
-      const cc = ctx.values.get('centerToCenter');
-      calculation = straightCutLength({ centerToCenter: cc && typeof cc.value === 'number' ? { value: cc.value, unit: cc.unit!, origin: cc.origin as Origin, detail: cc.detail } : null });
-    } else {
-      const off = ctx.values.get('verticalOffset');
-      const offMm = off && typeof off.value === 'number' ? toMm(off.value, off.unit ?? 'mm') : null;
-      calculation = pipeDuctClearance({
-        segment: ctx.selected, duct: ctx.duct,
-        verticalOffsetMm: off && offMm !== null ? { value: offMm, origin: off.origin as Origin, detail: off.detail } : null,
-      });
-    }
-    if (calculation.status === 'missing_inputs') {
-      for (const m of calculation.missing) missing.push(`${m}, for the ${calculation.title.toLowerCase()} calculation.`);
-      if (calculation.toolId === 'straight_cut_length') followUps.push({ id: 'centerToCenter', field: 'centerToCenter', kind: 'measurement', question: 'What is the center-to-center length between the two elbows?', unit: 'mm' });
-    }
-  }
-  const calculationMs = performance.now() - c0;
-
   // ---------------- explanation, validated against the stored passages
-  const byKey = new Map(items.map(i => [i.section.key, i]));
   const k0 = performance.now();
-  const drafts = composer(items, question);
-  // An exception that appears to apply qualifies the requirement it belongs to, right below it.
-  for (const e of exceptions.filter(x => x.status === 'applies')) {
-    const ex = byKey.get(e.key), note = ex?.notes[0]?.text;
-    if (!ex || !note) continue;
-    const parentKey = ex.section.parentKey;
-    const at = drafts.findIndex(d => parentKey !== null && d.citations.includes(parentKey));
-    drafts.splice(at < 0 ? drafts.length : at + 1, 0, { text: `${e.sectionId} appears to apply: ${note}`, citations: [e.key], kind: 'note' });
-  }
-  const { supported, unresolved } = validateClaims(drafts, byKey);
+  const supported = sourceClaims(items);
+  const unresolved: Claim[] = [];
   const compositionMs = performance.now() - k0;
   const sources = items.map(citation).sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role));
   const label = (key: string) => { const s = sources.find(x => x.key === key)!; return `${s.sectionId} (${s.edition})`; };
@@ -554,10 +419,7 @@ export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSn
   const hasSources = items.some(i => i.role === 'main' || mainKeys.has(i.section.key));
   let status: AskAnswer['status'];
   let summary: string;
-  if (classification.kind === 'calculation') {
-    status = calculation?.status === 'ok' ? 'calculation_only' : 'needs_input';
-    summary = calculation?.status === 'ok' ? `${calculation.message} This is a calculation, not a check that the installation complies.` : calculation?.message ?? 'No calculation matched this question.';
-  } else if (!hasSources) {
+  if (!hasSources) {
     status = followUps.length ? 'needs_input' : 'no_source';
     summary = NO_SOURCE + (followUps.length ? ' Answer the question below so the right edition or jurisdiction can be searched.' : '')
       + (excluded.length && !followUps.length ? ` Matching passages exist only in documents that do not apply here (${excluded.map(e => `${e.title} ${e.edition}`).join('; ')}).` : '');
@@ -569,25 +431,24 @@ export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSn
     const quoted = supported.filter(c => c.kind === 'quote').length;
     const open = exceptions.filter(e => e.status === 'unknown');
     summary = `${supported.length} point${supported.length === 1 ? '' : 's'} from ${docs} document${docs === 1 ? '' : 's'} in the project library${ctx.edition.value ? `, project edition ${ctx.edition.value}` : ''}.`
-      + (quoted ? ` ${quoted === supported.length ? 'All are' : `${quoted} ${quoted === 1 ? 'is' : 'are'}`} quoted from the source because no reviewed note exists yet.` : '')
+      + (quoted ? ` ${quoted === supported.length ? 'All are' : `${quoted} ${quoted === 1 ? 'is' : 'are'}`} quoted directly from the source.` : '')
       + (applied.length ? ` ${applied.map(e => e.sectionId).join(', ')} appears to apply and changes what is required.` : '')
       + (open.length ? ` ${open.map(e => e.sectionId).join(', ')} may change this; read ${open.length === 1 ? 'its' : 'their'} wording.` : '')
       + (editionGap ? ` ${editionGap}` : '')
       + (conflicts.length ? ` ${conflicts.length} disagreement${conflicts.length === 1 ? '' : 's'} between sources need${conflicts.length === 1 ? 's' : ''} resolving.` : '');
-    if (calculation?.status === 'ok') summary += ` Calculation: ${calculation.message}`;
   }
 
   const totalMs = performance.now() - t0;
   return {
-    id: randomUUID(), question, askedAt: new Date().toISOString(), classification,
+    id: randomUUID(), question, askedAt: new Date().toISOString(),
     context: {
       projectId: snapshot?.projectId ?? null, packageTitle: (snapshot as { title?: string } | null)?.title ?? null, standard: ctx.standard,
       edition: ctx.edition, jurisdiction: ctx.jurisdiction, selectedElementId: ctx.selected?.id ?? null,
       siteCondition: snapshot?.changeRequest ? { id: snapshot.changeRequest.id, description: snapshot.changeRequest.description } : null,
       facts: ctx.facts,
     },
-    status, summary, explanation: supported, unresolved, exceptions, missing, followUps, sources, conflicts, excluded, calculation, attachments,
-    timings: { retrievalMs: round(retrievalMs), calculationMs: round(calculationMs), compositionMs: round(compositionMs), modelMs: null, totalMs: round(totalMs) },
+    status, summary, explanation: supported, unresolved, exceptions, missing, followUps, sources, conflicts, excluded, attachments,
+    timings: { retrievalMs: round(retrievalMs), compositionMs: round(compositionMs), modelMs: round(modelMs), totalMs: round(totalMs) },
   };
 }
 const round = (n: number) => Math.round(n * 10) / 10;
