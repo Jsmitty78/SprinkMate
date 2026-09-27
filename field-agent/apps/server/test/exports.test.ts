@@ -169,3 +169,24 @@ describe('CSV and HTTP boundaries', () => {
     expect((await app.request(path, { method: 'POST', headers, body: '{' })).status).toBe(400);
   });
 });
+
+it('keeps CSV growth linear and package metadata separate from quantity rows', () => {
+  const make = (n: number) => {
+    const s = exportFixture();
+    s.inputFacts = Array.from({ length: n }, (_,i) => ({ id: `fact-${i}`, field: 'nominalSize', value: '2 inch', unit: null, subjectIds: ['P0'], confirmation: 'confirmed', provenance: 'confirmed_evidence', context: 'detailing', unknownReason: null, source: { description: 'unique provenance marker', assetId: null, page: 1 } }));
+    s.materials = Array.from({ length: n }, (_,i) => ({ ...s.materials[0], id: `material-${i}` }));
+    s.cuts = Array.from({ length: n }, (_,i) => ({ ...s.cuts[0], pieceId: `piece-${i}` }));
+    return csvFiles(s);
+  };
+  const small = make(100), large = make(200);
+  for (const key of ['bom', 'cuts'] as const) {
+    expect(large[key].length).toBeLessThan(small[key].length * 2.2);
+    const text = small[key].toString();
+    expect(text.match(/unique provenance marker/g)).toHaveLength(100);
+    const rows = text.trim().split('\r\n');
+    expect(rows).toHaveLength(102);
+    expect(rows[1]).toContain('"package_metadata"');
+    expect(rows[1]).not.toContain('"known"');
+    expect(rows.slice(2).every(row => !row.includes('unique provenance marker'))).toBe(true);
+  }
+});

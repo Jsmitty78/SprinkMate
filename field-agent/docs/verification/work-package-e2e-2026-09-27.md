@@ -69,3 +69,22 @@ Field measurements, steel thread engagement, physical fixed-end assembly,
 practitioner review and construction approval remain unverified. Unknown facts
 were not promoted to evidence. Raster/rotation/unit variants were covered by
 automated tests, not all repeated manually in the browser during this run.
+
+## PR review follow-up
+
+The five review findings have dedicated regression coverage:
+
+- The intake save path preserves scoped source requirements, nominal provenance
+  and synthetic site assumptions during product-only changes. Geometry edits
+  still invalidate scoped facts and the change request; carried nominal sizes
+  retain their provenance. Newly read source labels use confirmed evidence.
+- Confirmed lengths with unsupported units render as Unknown, not zero.
+- Fractional nominal sizes such as `1-1/2"`, `1 1/2 in` and `1/2 inch` participate
+  in catalog conflict checks; matching sizes and invalid denominators are covered.
+- CSV package-wide provenance, unresolved items and protected context appear once
+  in a `package_metadata` row. Quantity rows retain their revision binding and
+  record type. A 100/200-fact and row regression checks linear output growth.
+
+The follow-up suite passed 41 files / 823 tests, including authenticated export
+and stale-artifact integration checks. The four manual browser workflows above
+were not repeated for this follow-up.

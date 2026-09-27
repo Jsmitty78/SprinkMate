@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "./api.js";
-import { lengthInput, lengthText, millimetres, parseLength, toMetres } from "./format.js";
+import { lengthInput, lengthText, millimetres, parseLength, toMetres, UNKNOWN } from "./format.js";
 import {
   showCpvcInputs, showSfInputs, activeDetailingPlan, BOX_KEYS, buildRun, inScope, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
   alignedFrameInputs, exactFrameLengthInput, evidenceSpec, factProvenance, PROVENANCE_LABELS, type Provenance, syncRunDraft, type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
@@ -158,8 +158,9 @@ export function FactRow({ s, act, busy, unit, setNotice, spec }: Common & { spec
     field: spec.field, subjectIds: spec.subject ? [spec.subject] : [], value: parsed, unit: spec.kind.type === "length" ? "mm" : null,
     ...evidenceSpec(findFact(cur, spec.field, spec.subject), provenance, source), context: provenance === "synthetic_assumption" ? "detailing" : spec.context ?? "detailing",
   }]), setNotice));
+  const metres = typeof f?.value === "number" ? toMetres(f.value, f.unit ?? "mm") : null;
   const shown = f?.value === null || f?.value === undefined ? null
-    : spec.kind.type === "length" && typeof f.value === "number" ? (unit === "mm" ? millimetres(toMetres(f.value, f.unit ?? "mm")!) : lengthText({ value: f.value, unit: f.unit ?? "mm", basis: "confirmed_inputs" }).primary)
+    : spec.kind.type === "length" && typeof f.value === "number" ? (unit === "mm" ? (metres === null ? UNKNOWN : millimetres(metres)) : lengthText({ value: f.value, unit: f.unit ?? "mm", basis: "confirmed_inputs" }).primary)
     : spec.kind.type === "bool" ? (f.value ? spec.kind.yes : spec.kind.no)
     : spec.kind.type === "choice" ? spec.kind.options.find(o => o[0] === f.value)?.[1] ?? String(f.value) : String(f.value);
 

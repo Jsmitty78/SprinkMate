@@ -51,7 +51,7 @@ import {
 import { evaluateProfile, type ProfileOutput } from "./profiles.js";
 import { exportSnapshot } from "./snapshot.js";
 
-export const INTEGRATION_VERSION = "scenario-integration-4-source-provenance";
+export const INTEGRATION_VERSION = "scenario-integration-5-review-fixes";
 function generationRecovery(path: string, message: string): string {
   const action = path === "outsideDiameter" || path.startsWith("product")
     ? "Open drawing inputs, reopen the trace if confirmed, select a compatible pipe and fitting catalog pair, save and confirm the trace."

@@ -59,3 +59,14 @@ it.each(["spears/CP-010", "wheatland/a53-sch40-black-nps2"])("flags explicit cop
   expect(profile.checks.find(c => c.id === "MATERIAL-CONFLICT-p1")).toMatchObject({ status: "fail", sourceRefs: ["ui-materialRequirement.material"] });
   expect(profile.project.basis).toBeUndefined();
 });
+
+it.each(['1-1/2"', '1 1/2 in', 'NPS 1-1/2', '1/2 inch', '1.5 inches'])("detects source size conflict for %s", async value => {
+  const s = await saved();
+  s.detailing.find(f => f.field === "nominalSize")!.value = value;
+  expect(evaluate(s, "spears/CP-010").checks.find(c => c.id === "NOMINAL-SIZE-CONFLICT-p1")).toMatchObject({ status: "fail" });
+});
+it.each(['2/2 in', '1 0/2"', '1/0 in', 'unknown'])("does not invent a size conflict for matching or unparseable %s", async value => {
+  const s = await saved();
+  s.detailing.find(f => f.field === "nominalSize")!.value = value;
+  expect(evaluate(s, "spears/CP-010").checks.some(c => c.id === "NOMINAL-SIZE-CONFLICT-p1")).toBe(false);
+});

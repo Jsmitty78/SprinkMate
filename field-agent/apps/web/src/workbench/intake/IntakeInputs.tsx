@@ -6,7 +6,7 @@ import { factStatus, patchClearing, type Act, type Unit } from "../inputs.js";
 import { dropOrphanFacts, dropSubjectFacts, evidenceSpec, factProvenance, findFact, PROVENANCE_LABELS, upsertFacts, type FactSpec, type Provenance } from "../model.js";
 import { PRODUCT_SETS, productSetOf, applyRunProducts } from "../products.js";
 import { Badge, Button, Callout, Field, Icon, Section } from "../ui.js";
-import { buildTracePlan, FRAME_ID, sheetDistance, spanLengths, type LengthUnit, type TraceNodeKind } from "./sheet.js";
+import { buildTracePlan, FRAME_ID, sheetDistance, spanLengths, type LengthUnit, type TraceNodeKind, type BuiltTrace } from "./sheet.js";
 import type { Intake, IntakeTool } from "./useIntake.js";
 
 interface Props { s: Snapshot; act: Act; busy: string; unit: Unit; setNotice: (t: string) => void; intake: Intake; showSheet: () => void }
@@ -16,6 +16,25 @@ const UNITS: LengthUnit[] = ["ft", "in", "mm", "m"];
 const KIND_LABEL: Record<TraceNodeKind, string> = { interface: "Interface", elbow: "Turn (elbow)", open_end: "Open end" };
 
 const safeId = (text: string) => (text.replace(/\.[a-z0-9]+$/i, "").replace(/[^a-zA-Z0-9_.-]+/g, "-").replace(/^[^a-zA-Z0-9]+/, "") || "drawing").slice(0, 100);
+/** Product selections do not invalidate source facts or site geometry. */
+export function intakeTracePatch(cur: Snapshot, built: BuiltTrace): Partial<PackageInputs> {
+  const geometry = (entities: BuiltTrace["plan"]["entities"]) => entities.map(({ productId: _productId, ...entity }) => entity);
+  const graphChanged = JSON.stringify(geometry(built.plan.entities)) !== JSON.stringify(geometry(cur.baselinePlan?.entities ?? []))
+    || JSON.stringify(built.plan.connections) !== JSON.stringify(cur.baselinePlan?.connections)
+    || JSON.stringify(built.plan.coordinateFrame) !== JSON.stringify(cur.baselinePlan?.coordinateFrame);
+  const base = graphChanged ? dropSubjectFacts(cur) : cur;
+  const kept = { detailing: base.detailing.filter(f => f.field !== "sourceLabel"), siteFacts: base.siteFacts.filter(f => f.field !== "sourceLabel") };
+  const labels: FactSpec[] = built.labels.map(l => ({ field: "sourceLabel", value: l.label, subjectIds: [l.subjectId], confirmation: "confirmed", provenance: "confirmed_evidence", context: "detailing", source: `Label read by you from ${cur.sourceDrawing!.drawingId} p${cur.sourceDrawing!.page}; application IDs are separate`, assetId: cur.sourceDrawing!.assetId, page: cur.sourceDrawing!.page }));
+  // The nominal size applies to the traced spans, whatever their new ids are.
+  const nominal = findFact(cur, "nominalSize", cur.scope?.includedEntityIds.find(id => id.startsWith("p")));
+  const pipes = built.scope.includedEntityIds.filter(id => built.plan.entities.find(e => e.id === id)?.kind === "pipe");
+  const carry: FactSpec[] = graphChanged && nominal && typeof nominal.value === "string" ? [{ field: "nominalSize", value: nominal.value, subjectIds: pipes, confirmation: nominal.confirmation, provenance: nominal.provenance, context: "detailing", source: nominal.source.description, assetId: nominal.source.assetId, page: nominal.source.page }] : [];
+  return {
+    baselinePlan: built.plan, scope: built.scope, ...(graphChanged ? { changeRequest: null } : {}),
+    ...dropOrphanFacts(upsertFacts(kept, [...labels, ...carry]), built.plan),
+  };
+}
+
 /** Upload, work area, scale, plan frame, trace and source requirements: the shared drawing intake. */
 export function IntakeInputs(props: Props) {
   const { s, act, busy, setNotice, intake, showSheet } = props;
@@ -83,19 +102,7 @@ export function IntakeInputs(props: Props) {
         built.plan = applyRunProducts(cur.baselinePlan, cur.scope.includedEntityIds, set);
         built.scope = cur.scope;
       }
-      const graphChanged = JSON.stringify(built.plan.entities) !== JSON.stringify(cur.baselinePlan?.entities)
-        || JSON.stringify(built.plan.connections) !== JSON.stringify(cur.baselinePlan?.connections);
-      const base = graphChanged ? dropSubjectFacts(cur) : cur;
-      const kept = { detailing: base.detailing.filter(f => f.field !== "sourceLabel"), siteFacts: base.siteFacts.filter(f => f.field !== "sourceLabel") };
-      const labels: FactSpec[] = built.labels.map(l => ({ field: "sourceLabel", value: l.label, subjectIds: [l.subjectId], confirmation: "confirmed", context: "detailing", source: `Label read by you from ${cur.sourceDrawing!.drawingId} p${cur.sourceDrawing!.page}; application IDs are separate`, assetId: cur.sourceDrawing!.assetId, page: cur.sourceDrawing!.page }));
-      // The nominal size applies to the traced spans, whatever their new ids are.
-      const nominal = findFact(cur, "nominalSize", cur.scope?.includedEntityIds.find(id => id.startsWith("p")));
-      const pipes = built.scope.includedEntityIds.filter(id => built.plan.entities.find(e => e.id === id)?.kind === "pipe");
-      const carry: FactSpec[] = nominal && typeof nominal.value === "string" ? [{ field: "nominalSize", value: nominal.value, subjectIds: pipes, confirmation: nominal.confirmation, context: "detailing", source: nominal.source.description, assetId: nominal.source.assetId, page: nominal.source.page }] : [];
-      Object.assign(patch, {
-        baselinePlan: built.plan, scope: built.scope, ...(graphChanged ? { changeRequest: null } : {}),
-        ...dropOrphanFacts(upsertFacts(kept, [...labels, ...carry]), built.plan),
-      });
+      Object.assign(patch, intakeTracePatch(cur, built));
     } else if (traced && !t) throw new Error("Set the scale before saving the trace. The trace stays in this browser until then.");
     await patchClearing(cur, patch, setNotice);
     if (traced && t) intake.markTraceSaved();

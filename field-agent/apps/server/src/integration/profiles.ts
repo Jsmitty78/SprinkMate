@@ -173,8 +173,12 @@ export function evaluateProfile(
   };
   const sourceFields = ["requiredConnectionMethod", "requiredPipeSpecification", "materialRequirement", "materialRequirement.material", "nominalSize"];
   const nominal = (value: string | null) => {
-    const match = value?.trim().toLowerCase().match(/^(?:nps\s*)?(\d+(?:\.\d+)?)\s*(?:inch(?:es)?|in|")?$/);
-    return match ? Number(match[1]) : null;
+    const text = value?.trim().toLowerCase().replace(/^nps\s*/, "").replace(/\s*(?:inch(?:es)?|in|["″])$/, "").trim();
+    if (!text) return null;
+    if (/^\d+(?:\.\d+)?$/.test(text)) return Number(text);
+    const fraction = text.match(/^(?:(\d+)[ -]+)?(\d+)\/(\d+)$/);
+    if (!fraction || Number(fraction[3]) === 0) return null;
+    return Number(fraction[1] ?? 0) + Number(fraction[2]) / Number(fraction[3]);
   };
   const checks: CheckResult[] = [
     {
