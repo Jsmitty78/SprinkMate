@@ -9,6 +9,8 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { RULE, ADOPTED_RULES, SfProjectFactsSchema, RuleContextSchema, checkSchema, resolveSfNfpa13Edition, evaluateProject } from '@field-agent/core';
 import { AppError, type Observation } from './models.js';
 import { FieldService, safeId } from './service.js';
+import { defaultWorkPackages, workPackageRouter } from './work-packages/router.js';
+import type { WorkPackageService } from './work-packages/service.js';
 
 /** Serialize asynchronous upload/replay operations for each task, including retry races. */
 class TaskCommands {
@@ -19,7 +21,7 @@ class TaskCommands {
     try {return await next;} finally {if(this.tails.get(id)===next)this.tails.delete(id);}
   }
 }
-export function createApp(service:FieldService,options:{token:string;webDir?:string}) {
+export function createApp(service:FieldService,options:{token:string;webDir?:string;workPackages?:WorkPackageService}) {
   if(options.token.length<16) throw new Error('Application token must contain at least 16 characters');
   const app=new Hono(), commands=new TaskCommands();
   app.use('*',async(c,next)=>{await next();c.header('X-Content-Type-Options','nosniff');c.header('Referrer-Policy','no-referrer');});
@@ -117,6 +119,7 @@ export function createApp(service:FieldService,options:{token:string;webDir?:str
       }
     });
   });
+  app.route('/api/work-packages',workPackageRouter(options.workPackages??defaultWorkPackages(service.store)));
   app.all('/api/*',c=>c.json({error:'APIが見つかりません'},404));
   app.onError((error,c)=>{
     if(error instanceof AppError)return c.json({error:error.message},error.status as ContentfulStatusCode);

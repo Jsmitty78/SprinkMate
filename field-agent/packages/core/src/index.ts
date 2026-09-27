@@ -8,3 +8,4 @@ export * from "./local-change-contract.js";
 export * from "./local-change-geometry.js";
 export * from "./project-schemas.js";
 export { evaluateProject } from "./project-evaluator.js";
+export * from "./work-package.js";
