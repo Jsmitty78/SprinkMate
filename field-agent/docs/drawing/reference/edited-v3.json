@@ -1,0 +1,680 @@
+{
+  "version": 1,
+  "width": 18965.3333,
+  "height": 18965.3333,
+  "source": {
+    "id": "itd-fs01-mezzanine",
+    "document": "FM32361 / FS-01",
+    "title": "FIRE SPRINKLER PLAN - MEZZANINE",
+    "url": "https://apps.itd.idaho.gov/Apps/NonHwyConstructionProjects/PDFS/FM32361_ITB_Drawings_Fire_Sprinkler_Plan.pdf",
+    "page": 1,
+    "sha256": "a21d5748d0b7f15bea1da772fdb41a424651cb1e717534177b5144c6d51eef1f",
+    "cropPdfPoints": [
+      1460,
+      1500,
+      2020,
+      2060
+    ],
+    "mmPerPdfPoint": 33.86666666666666,
+    "scale": "1/8 inch = 1 foot (1:96)",
+    "method": "PDF vector path extraction; symbol-edge endpoints extended to symbol centers; T-junctions split",
+    "scope": "FS-01 mezzanine plan only; main floor and details excluded",
+    "coordinateTolerancePdfPoints": 0.02,
+    "physicalAccuracy": "unverified"
+  },
+  "nodes": [
+    {
+      "id": "N1",
+      "x": 5931.7467,
+      "y": 16781.9493
+    },
+    {
+      "id": "N2",
+      "x": 6297.168,
+      "y": 10534.904
+    },
+    {
+      "id": "N3",
+      "x": 7973.2293,
+      "y": 5811.52
+    },
+    {
+      "id": "N4",
+      "x": 8582.4907,
+      "y": 3373.7973
+    },
+    {
+      "id": "N5",
+      "x": 8582.8293,
+      "y": 1781.7253
+    },
+    {
+      "id": "N6",
+      "x": 8582.8293,
+      "y": 5811.52
+    },
+    {
+      "id": "N7",
+      "x": 8582.8293,
+      "y": 5963.92
+    },
+    {
+      "id": "N8",
+      "x": 8582.8293,
+      "y": 7182.7813
+    },
+    {
+      "id": "N9",
+      "x": 8582.8293,
+      "y": 8858.8427
+    },
+    {
+      "id": "N10",
+      "x": 9192.0907,
+      "y": 8858.8427
+    },
+    {
+      "id": "N11",
+      "x": 9192.0907,
+      "y": 9620.504
+    },
+    {
+      "id": "N12",
+      "x": 9192.0907,
+      "y": 10534.904
+    },
+    {
+      "id": "N13",
+      "x": 9192.0907,
+      "y": 12668.1653
+    },
+    {
+      "id": "N14",
+      "x": 9192.0907,
+      "y": 15715.488
+    },
+    {
+      "id": "N15",
+      "x": 9192.0907,
+      "y": 16781.9493
+    },
+    {
+      "id": "N16",
+      "x": 10106.152,
+      "y": 7182.7813
+    },
+    {
+      "id": "N17",
+      "x": 10410.952,
+      "y": 4745.0587
+    },
+    {
+      "id": "N18",
+      "x": 10410.952,
+      "y": 5963.92
+    },
+    {
+      "id": "N19",
+      "x": 11325.352,
+      "y": 1781.7253
+    },
+    {
+      "id": "N20",
+      "x": 11325.352,
+      "y": 2605.024
+    },
+    {
+      "id": "N21",
+      "x": 11629.8133,
+      "y": 3068.9973
+    },
+    {
+      "id": "N22",
+      "x": 11629.8133,
+      "y": 6109.5467
+    },
+    {
+      "id": "N23",
+      "x": 11629.8133,
+      "y": 7030.3813
+    },
+    {
+      "id": "N24",
+      "x": 11630.152,
+      "y": 2605.024
+    },
+    {
+      "id": "N25",
+      "x": 11630.152,
+      "y": 8858.8427
+    },
+    {
+      "id": "N26",
+      "x": 12544.2133,
+      "y": 8858.8427
+    },
+    {
+      "id": "N27",
+      "x": 12544.2133,
+      "y": 9620.504
+    },
+    {
+      "id": "N28",
+      "x": 12544.2133,
+      "y": 12668.1653
+    },
+    {
+      "id": "N29",
+      "x": 12544.2133,
+      "y": 15715.488
+    },
+    {
+      "id": "N30",
+      "x": 12544.2133,
+      "y": 16781.9493
+    },
+    {
+      "id": "N31",
+      "x": 14067.8747,
+      "y": 3366.6853
+    },
+    {
+      "id": "N32",
+      "x": 14067.8747,
+      "y": 6261.9467
+    },
+    {
+      "id": "N33",
+      "x": 14525.0747,
+      "y": 1781.7253
+    },
+    {
+      "id": "N34",
+      "x": 14525.0747,
+      "y": 3366.6853
+    },
+    {
+      "id": "N35",
+      "x": 14525.0747,
+      "y": 6261.608
+    },
+    {
+      "id": "N36",
+      "x": 14525.0747,
+      "y": 8858.8427
+    },
+    {
+      "id": "N37",
+      "x": 15286.736,
+      "y": 8858.8427
+    },
+    {
+      "id": "N38",
+      "x": 15286.736,
+      "y": 9620.504
+    },
+    {
+      "id": "N39",
+      "x": 15286.736,
+      "y": 12668.1653
+    },
+    {
+      "id": "N40",
+      "x": 15286.736,
+      "y": 15715.488
+    },
+    {
+      "id": "N41",
+      "x": 15286.736,
+      "y": 16781.9493
+    },
+    {
+      "id": "N42",
+      "x": 15654.1893,
+      "y": 16781.9493
+    },
+    {
+      "id": "N43",
+      "x": 10850,
+      "y": 16781.9493
+    },
+    {
+      "id": "N44",
+      "x": 14200,
+      "y": 16781.9493
+    }
+  ],
+  "pipes": [
+    {
+      "id": "P1",
+      "from": "N10",
+      "to": "N11",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P2",
+      "from": "N1",
+      "to": "N15",
+      "diameter": 80,
+      "nominalInches": 3
+    },
+    {
+      "id": "P3",
+      "from": "N15",
+      "to": "N43",
+      "diameter": 80,
+      "nominalInches": 3
+    },
+    {
+      "id": "P4",
+      "from": "N30",
+      "to": "N44",
+      "diameter": 80,
+      "nominalInches": 3
+    },
+    {
+      "id": "P5",
+      "from": "N41",
+      "to": "N42",
+      "diameter": 80,
+      "nominalInches": 3
+    },
+    {
+      "id": "P6",
+      "from": "N5",
+      "to": "N4",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P7",
+      "from": "N19",
+      "to": "N20",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P8",
+      "from": "N25",
+      "to": "N26",
+      "diameter": 100
+    },
+    {
+      "id": "P9",
+      "from": "N36",
+      "to": "N37",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P10",
+      "from": "N9",
+      "to": "N10",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P11",
+      "from": "N33",
+      "to": "N34",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P12",
+      "from": "N34",
+      "to": "N35",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P13",
+      "from": "N35",
+      "to": "N36",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P14",
+      "from": "N2",
+      "to": "N12",
+      "diameter": 25,
+      "nominalInches": 1
+    },
+    {
+      "id": "P15",
+      "from": "N14",
+      "to": "N15",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P16",
+      "from": "N13",
+      "to": "N14",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P17",
+      "from": "N11",
+      "to": "N12",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P18",
+      "from": "N12",
+      "to": "N13",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P19",
+      "from": "N16",
+      "to": "N8",
+      "diameter": 25,
+      "nominalInches": 1
+    },
+    {
+      "id": "P20",
+      "from": "N17",
+      "to": "N18",
+      "diameter": 25,
+      "nominalInches": 1
+    },
+    {
+      "id": "P21",
+      "from": "N18",
+      "to": "N7",
+      "diameter": 25,
+      "nominalInches": 1
+    },
+    {
+      "id": "P22",
+      "from": "N3",
+      "to": "N6",
+      "diameter": 25,
+      "nominalInches": 1
+    },
+    {
+      "id": "P23",
+      "from": "N4",
+      "to": "N6",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P24",
+      "from": "N6",
+      "to": "N7",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P25",
+      "from": "N7",
+      "to": "N8",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P26",
+      "from": "N8",
+      "to": "N9",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P27",
+      "from": "N27",
+      "to": "N28",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P28",
+      "from": "N28",
+      "to": "N29",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P29",
+      "from": "N29",
+      "to": "N30",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P30",
+      "from": "N26",
+      "to": "N27",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P31",
+      "from": "N23",
+      "to": "N25",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P32",
+      "from": "N22",
+      "to": "N23",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P33",
+      "from": "N21",
+      "to": "N22",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P34",
+      "from": "N20",
+      "to": "N24",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P35",
+      "from": "N24",
+      "to": "N21",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P36",
+      "from": "N40",
+      "to": "N41",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P37",
+      "from": "N39",
+      "to": "N40",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P38",
+      "from": "N38",
+      "to": "N39",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P39",
+      "from": "N37",
+      "to": "N38",
+      "diameter": 50,
+      "nominalInches": 2
+    },
+    {
+      "id": "P40",
+      "from": "N32",
+      "to": "N35",
+      "diameter": 25,
+      "nominalInches": 1
+    },
+    {
+      "id": "P41",
+      "from": "N31",
+      "to": "N34",
+      "diameter": 25,
+      "nominalInches": 1
+    },
+    {
+      "id": "P42",
+      "from": "N43",
+      "to": "N30",
+      "diameter": 80,
+      "nominalInches": 3
+    },
+    {
+      "id": "P43",
+      "from": "N44",
+      "to": "N41",
+      "diameter": 80,
+      "nominalInches": 3
+    },
+    {
+      "id": "P44",
+      "from": "N43",
+      "to": "N44",
+      "diameter": 25
+    }
+  ],
+  "heads": [
+    {
+      "id": "H1",
+      "nodeId": "N27",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H2",
+      "nodeId": "N38",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H3",
+      "nodeId": "N28",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H4",
+      "nodeId": "N39",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H5",
+      "nodeId": "N29",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H6",
+      "nodeId": "N40",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H7",
+      "nodeId": "N11",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H8",
+      "nodeId": "N13",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H9",
+      "nodeId": "N14",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H10",
+      "nodeId": "N2",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H11",
+      "nodeId": "N16",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H12",
+      "nodeId": "N3",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H13",
+      "nodeId": "N4",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H14",
+      "nodeId": "N17",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H15",
+      "nodeId": "N21",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H16",
+      "nodeId": "N23",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H17",
+      "nodeId": "N22",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H18",
+      "nodeId": "N32",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H19",
+      "nodeId": "N31",
+      "orientation": "upright",
+      "model": "UNSPECIFIED"
+    },
+    {
+      "id": "H20",
+      "nodeId": "N30",
+      "orientation": "pendent",
+      "model": "UNSPECIFIED"
+    }
+  ],
+  "walls": [],
+  "doors": [],
+  "rooms": []
+}

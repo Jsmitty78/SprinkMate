@@ -2,10 +2,10 @@ import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { RULE, ADOPTED_RULES, HEAD_FACT_FIELDS, HeadFactsPatchSchema, emptyFacts, validateRules, comparePlan, validateMeasurement as checkMeasurement, MeasurementSchema, checkSchema, type HeadFacts, type Measurement, type Orientation } from '@field-agent/core';
+import { referenceDrawing, exampleDrawing, validateDrawing, pipeLength, RULE, ADOPTED_RULES, HEAD_FACT_FIELDS, HeadFactsPatchSchema, emptyFacts, validateRules, comparePlan, validateMeasurement as checkMeasurement, MeasurementSchema, checkSchema, type HeadFacts, type Measurement, type Orientation } from '@field-agent/core';
 import { Store, digest } from './store.js';
-import { AppError, type TaskSnapshot, type Observation, type EvidenceRequest, type Candidate, type Artifact, type Finding } from './models.js';
-import { planSvg, sceneSvg } from './drawing.js';
+import { AppError, type TaskSnapshot, type Observation, type EvidenceRequest, type Artifact } from './models.js';
+import { sceneSvg } from './drawing.js';
 
 const fields = HEAD_FACT_FIELDS;
 const now=()=>new Date().toISOString();
@@ -45,8 +45,13 @@ export class FieldService {
       }
     })();
   }
-  getTask(id:string) { return this.store.get(safeId(id)); }
-  listTasks() { return this.store.list().map(({id,title,state,revision,updatedAt})=>({id,title,state,revision,updatedAt})); }
+  getTask(id:string) {
+    const task=this.store.get(safeId(id));
+    // Legacy records acquire an editable sample in memory; evidence stays untouched.
+    if(!task.plan.drawing)task.plan.drawing=exampleDrawing(task.plan.orientation);
+    return task;
+  }
+  listTasks() { return this.store.listSummaries(); }
   private active(id:string) { const task=this.getTask(id); if(task.state==='cancelled') throw new AppError(409,'この仕事はキャンセル済みです'); return task; }
   private changed(task:TaskSnapshot,type:string) {
     task.revision++; task.updatedAt=now(); task.validation=null; task.artifact=null;
@@ -54,13 +59,15 @@ export class FieldService {
     task.validation=this.evaluate(task);
     this.store.save(task); this.store.event(task.id,type,{revision:task.revision});
   }
-  createTask(input:{id?:string;title?:string;planOrientation?:string}={}) {
+  createTask(input:{id?:string;title?:string;planOrientation?:string;reference?:boolean}={}) {
     const id=safeId(input.id??randomUUID());
     const orientation=input.planOrientation??'pendent';
     if(!['pendent','upright','sideways'].includes(orientation)) throw new AppError(400,'図面方向が不正です');
     return this.store.operation(id,'create',input,()=>{
-      const plan={revision:1,targetId:'H1',model:'TY3231',orientation,lengthMeters:2};
-      const task:TaskSnapshot={id,title:requireText(input.title??'配管1区間の現場確認','title'),targetId:'H1',revision:1,createdAt:now(),updatedAt:now(),state:'active',plan:{...plan,svg:planSvg(plan)},facts:emptyFacts(),candidates:[],findings:[],observations:[],measurements:[],requests:[],validation:null,artifact:null};
+      const drawing=input.reference?referenceDrawing():exampleDrawing(orientation);
+      const target=drawing.heads.find(h=>h.id==='H1')!;
+      const plan={revision:1,targetId:'H1',model:target.model,orientation:target.orientation,lengthMeters:pipeLength(drawing,drawing.pipes.find(p=>p.id==='P1')!)/1000,drawing};
+      const task:TaskSnapshot={id,title:requireText(input.title??'配管1区間の現場確認','title'),targetId:'H1',revision:1,createdAt:now(),updatedAt:now(),state:'active',plan,facts:emptyFacts(),candidates:[],findings:[],observations:[],measurements:[],requests:[],validation:null,artifact:null};
       this.store.save(task); this.store.event(id,'created',{revision:1}); return task;
     });
   }
@@ -68,9 +75,24 @@ export class FieldService {
     if(!['pendent','upright','sideways'].includes(orientation)) throw new AppError(400,'図面方向が不正です');
     return this.store.operation(id,opId,{orientation,baseRevision},()=>{
       const t=this.active(id); if(t.revision!==baseRevision) throw new AppError(409,'仕事が更新されています');
-      t.plan={...t.plan,orientation,revision:t.plan.revision+1}; t.plan.svg=planSvg(t.plan);
+      const drawing=t.plan.drawing!;
+      drawing.heads.find(h=>h.id===t.targetId)!.orientation=orientation as 'pendent'|'upright'|'sideways';
+      t.plan={...t.plan,orientation,drawing,revision:t.plan.revision+1};
       t.requests.filter(r=>r.status==='open').forEach(r=>r.status='superseded');
       this.changed(t,'plan_updated'); return t;
+    });
+  }
+  updateDrawing(id:string,input:unknown,baseRevision:number,opId:string=randomUUID()) {
+    let drawing: ReturnType<typeof validateDrawing>;
+    try {drawing=validateDrawing(input);} catch(error) {throw new AppError(400,error instanceof Error?error.message:'図面が不正です');}
+    return this.store.operation(id,opId,{drawing,baseRevision},()=>{
+      const t=this.active(id);if(t.revision!==baseRevision)throw new AppError(409,'仕事が更新されています。下書きを書き出してから最新の図面を読み直してください。');
+      const head=drawing.heads.find(h=>h.id===t.targetId)!;
+      // Current comparison concerns the fixed TY3231 target; other heads are drawing context.
+      if(head.model!==t.plan.model)throw new AppError(400,'確認対象H1の型式は変更できません');
+      t.plan={...t.plan,drawing,orientation:head.orientation,lengthMeters:pipeLength(drawing,drawing.pipes.find(p=>p.id==='P1')!)/1000,revision:t.plan.revision+1};
+      t.requests.filter(r=>r.status==='open').forEach(r=>r.status='superseded');
+      this.changed(t,'drawing_updated');return t;
     });
   }
   async addObservation(id:string,metadata:Omit<Observation,'assetId'|'originalAssetId'|'digest'|'width'|'height'>,bytes:Buffer) {
@@ -103,19 +125,6 @@ export class FieldService {
     if(!row) throw new AppError(404,'画像が見つかりません');
     return {bytes:await readFile(row.path),mimeType:row.mime};
   }
-  async getObservationImage(id:string,observationId:string) {
-    const obs=this.getTask(id).observations.find(o=>o.id===observationId&&!o.superseded);
-    if(!obs) throw new AppError(404,'有効な観測が見つかりません');
-    const a=await this.asset(id,obs.assetId); return {mimeType:a.mimeType,data:a.bytes.toString('base64')};
-  }
-  async cropImage(id:string,observationId:string,rect:{x:number;y:number;width:number;height:number}) {
-    const obs=this.getTask(id).observations.find(o=>o.id===observationId&&!o.superseded);
-    if(!obs) throw new AppError(404,'観測が見つかりません');
-    if(!Object.values(rect).every(Number.isInteger)||rect.x<0||rect.y<0||rect.width<1||rect.height<1||rect.x+rect.width>obs.width||rect.y+rect.height>obs.height) throw new AppError(400,'切り出し範囲が画像外です');
-    const a=await this.asset(id,obs.assetId);
-    const data=await sharp(a.bytes).extract({left:rect.x,top:rect.y,width:rect.width,height:rect.height}).jpeg().toBuffer();
-    return {mimeType:'image/jpeg',data:data.toString('base64')};
-  }
   reviewFacts(id:string,input:{baseRevision:number;facts:Partial<HeadFacts>},opId:string=randomUUID(),actor:'manual'|'fixture'='manual') {
     const facts=patchFacts(input.facts);
     return this.store.operation(id,opId,{...input,actor},()=>{
@@ -126,26 +135,6 @@ export class FieldService {
         (t.facts as unknown as Record<string,unknown>)[key]={...fact,source:actor};
       }
       this.changed(t,'facts_reviewed'); return t;
-    });
-  }
-  proposeFacts(id:string,input:{id:string;targetId:string;reason:string;facts:Partial<HeadFacts>},opId:string=randomUUID()) {
-    safeId(input.id); requireText(input.reason,'reason'); const facts=patchFacts(input.facts);
-    return this.store.operation(id,opId,input,()=>{
-      const t=this.active(id); if(input.targetId!==t.targetId) throw new AppError(400,'対象が違います');
-      const prior=t.candidates.find(c=>c.id===input.id); if(prior) throw new AppError(409,'候補IDはすでに使用されています');
-      for(const f of Object.values(facts)) { f.confirmed=false; f.source='model'; if(f.evidenceIds.some(e=>!t.observations.some(o=>o.id===e&&o.targetId===t.targetId&&!o.superseded))) throw new AppError(400,'根拠が存在しません'); }
-      const candidate:Candidate={...input,facts,createdAt:now()};t.candidates.push(candidate);
-      for(const key of fields) if(facts[key]&&!t.facts[key]?.confirmed) (t.facts as unknown as Record<string,unknown>)[key]=facts[key];
-      this.changed(t,'candidate_added'); return candidate;
-    });
-  }
-  recordFinding(id:string,input:{id:string;targetId:string;description:string;evidenceIds:string[]},opId:string=randomUUID()) {
-    safeId(input.id); requireText(input.description,'description');
-    return this.store.operation(id,opId,input,()=>{
-      const t=this.active(id);
-      if(input.targetId!==t.targetId||!Array.isArray(input.evidenceIds)||!input.evidenceIds.length||input.evidenceIds.some(e=>!t.observations.some(o=>o.id===e&&o.targetId===t.targetId&&!o.superseded))) throw new AppError(400,'同じ対象の有効な写真根拠が必要です');
-      if(t.findings.some(f=>f.id===input.id)) throw new AppError(409,'差異候補IDはすでに使用されています');
-      const finding:Finding={...input,status:'unverified',createdAt:now()}; t.findings.push(finding);this.changed(t,'finding_added');return finding;
     });
   }
   requestEvidence(id:string,input:{kind:EvidenceRequest['kind'];reason:string;fields:string[]},opId:string=randomUUID()) {

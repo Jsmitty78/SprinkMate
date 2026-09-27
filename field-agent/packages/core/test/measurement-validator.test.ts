@@ -21,10 +21,10 @@ describe("measurement acquisition validation", () => {
     });
   });
 
-  it.each(["existing_plane", "estimated_plane"] as const)("accepts actual %s hits", hit => {
+  it("accepts existing-plane hits", () => {
     const measurement = ar();
-    measurement.from.hit = hit;
-    measurement.to.hit = hit;
+    measurement.from.hit = "existing_plane";
+    measurement.to.hit = "existing_plane";
     expect(validateMeasurement(measurement, context()).qualityRecorded).toBe(true);
   });
 

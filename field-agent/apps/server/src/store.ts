@@ -31,8 +31,26 @@ export class Store {
       CREATE TABLE IF NOT EXISTS operations (task_id TEXT NOT NULL, id TEXT NOT NULL, hash TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(task_id,id));
       CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS assets (task_id TEXT NOT NULL, id TEXT NOT NULL, path TEXT NOT NULL, mime TEXT NOT NULL, PRIMARY KEY(task_id,id));
-      PRAGMA user_version = 1;
+
     `);
+    // Derived SVGs were previously duplicated in snapshots and idempotency results.
+    // Strip only those fields; preserve historical revisions, evidence and operation hashes.
+    if (Number(this.db.pragma('user_version', { simple: true })) < 2) {
+      this.db.transaction(() => {
+        this.db.exec(`
+          UPDATE tasks SET data=json_remove(data, '$.plan.svg', '$.artifact.plan.svg')
+            WHERE json_type(data, '$.plan.svg') IS NOT NULL OR json_type(data, '$.artifact.plan.svg') IS NOT NULL;
+          UPDATE operations SET result=json_remove(result, '$.plan.svg', '$.artifact.plan.svg')
+            WHERE json_type(result, '$.plan.svg') IS NOT NULL OR json_type(result, '$.artifact.plan.svg') IS NOT NULL;
+          PRAGMA user_version = 2;
+        `);
+      })();
+    }
+  }
+  listSummaries(): Pick<TaskSnapshot,'id'|'title'|'state'|'revision'|'updatedAt'>[] {
+    return this.db.prepare(`SELECT id, json_extract(data,'$.title') AS title,
+      json_extract(data,'$.state') AS state, json_extract(data,'$.revision') AS revision,
+      json_extract(data,'$.updatedAt') AS updatedAt FROM tasks ORDER BY rowid DESC`).all() as Pick<TaskSnapshot,'id'|'title'|'state'|'revision'|'updatedAt'>[];
   }
   get(id: string): TaskSnapshot {
     const row = this.db.prepare('SELECT data FROM tasks WHERE id = ?').get(id) as {data:string} | undefined;

@@ -75,3 +75,9 @@ Browser pass: both workflows were run end to end against `pnpm start` at 1600×1
 - Drawing preparation generated materials and cuts. Site adaptation generated alternatives, selected Route A, built the revised package, and generated PDF/CSV artifacts through the existing server.
 - Desktop (1440 px) and phone (390 px) inspection views checked visually. Phone package panels no longer overlap the canvas; page width stays within 390 px. No browser console errors were reported in the checked session.
 - Screenshots: `docs/ui/35-integrated-inspections.png` and `docs/ui/36-inspections-mobile.png`.
+
+### Main drawing-editor integration
+
+- Merged the source-based SVG editor into Field inspections without restoring the legacy shell or stylesheet. New inspections retain the reference drawing / sample selection. The work-package run editor remains a separate workflow with the limitations above.
+- All 26 test files pass (660 passed, 9 skipped); workspace typecheck and production build pass.
+- Browser check against isolated local data: created an FS-01 reference inspection, changed H1 orientation, saved drawing revision 2, and reloaded to verify the saved orientation in the unified UI.
