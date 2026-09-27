@@ -1,4 +1,5 @@
-import { expect, it } from "vitest";
+import { getLocale, setLocale } from "../locale.js";
+import { beforeEach, afterEach, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Snapshot } from "../api.js";
@@ -170,3 +171,7 @@ it("retains nominal evidence for subjects outside the edited scope", () => {
   const ids = [...patch.detailing, ...patch.siteFacts].map(f => f.id);
   expect(new Set(ids).size).toBe(ids.length);
 });
+
+const initialLocale = getLocale();
+beforeEach(() => setLocale("en"));
+afterEach(() => setLocale(initialLocale));

@@ -27,6 +27,7 @@ export function workPackageRouter(service: WorkPackageService, loadDetails?: (id
   app.get('/', c => c.json(service.list(c.req.query('projectId'))));
   app.post('/', async c => c.json(service.create(await c.req.json()), 201));
   app.get('/:id', c => c.json(service.get(c.req.param('id'))));
+  app.post('/:id/site-change', async c => c.json(service.copyForSiteChange(c.req.param('id'), await c.req.json()), 201));
   app.patch('/:id', async c => c.json(service.edit(c.req.param('id'), await c.req.json())));
   app.post('/:id/assets', async c => {
     const body = await c.req.parseBody(), file = body.file;

@@ -1,3 +1,4 @@
+import { tr } from "../locale.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Snapshot } from "../api.js";
 import { Badge, Button, Callout, Icon, Spinner } from "../ui.js";
@@ -32,7 +33,7 @@ interface Draft { question: string; measurements: Record<string, string>; attach
 const readDraft = (id: string): Draft | null => { try { const v = localStorage.getItem(DRAFT_KEY(id)); return v ? JSON.parse(v) : null; } catch { return null; } };
 const writeDraft = (id: string, d: Draft) => { try { localStorage.setItem(DRAFT_KEY(id), JSON.stringify(d)); } catch { /* storage unavailable */ } };
 
-export function AskPanel({ s, selectedPiece, onClose }: { s: Snapshot; selectedPiece: string | null; onClose: () => void }) {
+export function AskPanel({ s, selectedPiece, onClose, embedded = false }: { s: Snapshot; selectedPiece: string | null; embedded?: boolean; onClose: () => void }) {
   const draft = useRef(readDraft(s.id)).current;
   const [tab, setTab] = useState<"ask" | "library">("ask");
   const [question, setQuestion] = useState(draft?.question ?? "");
@@ -51,7 +52,7 @@ export function AskPanel({ s, selectedPiece, onClose }: { s: Snapshot; selectedP
 
   const refreshDocs = () => askApi.documents().then(r => setDocs(r.documents)).catch(() => setDocs([]));
   useEffect(() => { void refreshDocs(); input.current?.focus(); }, []);
-  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (!embedded && e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose, embedded]);
   // Attachments from an earlier visit come back with the typed question, so nothing has to be redone.
   useEffect(() => {
     for (const id of draft?.attachmentIds ?? []) askApi.getUpload(id).then(u => setAttachments(a => a.some(x => x.record?.id === u.id) ? a : [...a, { key: u.id, file: null, name: u.filename, size: u.size, local: null, progress: 1, record: u, error: "" }])).catch(() => undefined);
@@ -93,9 +94,8 @@ export function AskPanel({ s, selectedPiece, onClose }: { s: Snapshot; selectedP
     try {
       const a = await askApi.ask({ question: q, packageId: s.id, selectedElementId: selectedPiece ?? undefined, measurements: list, answers: extra.answers ?? answers, attachments: readyIds });
       setAnswer(a);
-      const first = a.sources.find(x => x.role === "main");
       setPage(null);
-      setViewing(v => (v && a.sources.some(x => x.key === v.key)) ? v : first ?? null);
+      setViewing(v => (v && a.sources.some(x => x.key === v.key)) ? v : null);
     } catch (e) { setError(e instanceof Error ? e.message : "The question could not be answered"); }
     finally { setBusy(false); }
   };
@@ -109,56 +109,57 @@ export function AskPanel({ s, selectedPiece, onClose }: { s: Snapshot; selectedP
   const noLibrary = docs !== null && docs.length === 0;
   const openCitation = (c: Citation) => { setPage(null); setViewing(c); };
 
-  return <div className="fa-ask" role="dialog" aria-label="Ask Sprink">
+  return <div className={`fa-ask ${answer ? "has-answer" : "is-new-question"}`} role={embedded ? "region" : "dialog"} aria-label={tr("コード検索")}>
     <div className="fa-ask-col">
       <div className="fa-ask-head">
-        <h2>Ask Sprink</h2>
+        <h2>{tr("コードを調べる")}</h2>
         <div className="fa-seg" role="tablist">
-          <button type="button" role="tab" aria-selected={tab === "ask"} className={tab === "ask" ? "is-on" : ""} onClick={() => { setTab("ask"); setPage(null); }}>Ask</button>
-          <button type="button" role="tab" aria-selected={tab === "library"} className={tab === "library" ? "is-on" : ""} onClick={() => setTab("library")}>Library{docs ? ` (${docs.length})` : ""}</button>
+          <button type="button" role="tab" aria-selected={tab === "ask"} className={tab === "ask" ? "is-on" : ""} onClick={() => { setTab("ask"); setPage(null); }}>{tr("質問")}</button>
+          <button type="button" role="tab" aria-selected={tab === "library"} className={tab === "library" ? "is-on" : ""} onClick={() => setTab("library")}>{tr("資料")}{docs ? ` (${docs.length})` : ""}</button>
         </div>
-        <button type="button" className="fa-icon-btn" onClick={onClose} aria-label="Close Ask Sprink"><Icon name="x" /></button>
+        {!embedded && <button type="button" className="fa-icon-btn" onClick={onClose} aria-label={tr("Close Ask Sprink")}><Icon name="x" /></button>}
       </div>
       {tab === "library" ? <Library s={s} docs={docs} onChanged={refreshDocs} incoming={forLibrary} onIncomingTaken={() => setForLibrary([])} onShowPage={setPage} />
-        : <DropArea onFiles={f => setPending(f)} hint="Drop to attach" className="fa-ask-body fa-ask-split">
+        : <DropArea onFiles={f => setPending(f)} hint={tr("Drop to attach")} className="fa-ask-body fa-ask-split">
         <div className="fa-ask-compose">
-        <ContextStrip s={s} answer={answer} selectedPiece={selectedPiece} />
+
         <form className="fa-ask-form" onSubmit={e => { e.preventDefault(); void run(); }}>
-          <label className="sr-only" htmlFor="ask-q">Question</label>
-          <textarea id="ask-q" ref={input} rows={2} value={question} placeholder="Ask about a rule, a measurement or this site condition" onChange={e => setQuestion(e.target.value)}
+          <label className="sr-only" htmlFor="ask-q">{tr("Question")}</label>
+          <textarea id="ask-q" ref={input} rows={2} value={question} placeholder={tr("この部材・現況に関係するコードについて質問…")} onChange={e => setQuestion(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void run(); } }} />
-          <Button variant="primary" busy={busy} disabled={!question.trim() || waiting} onClick={() => void run()} title={waiting ? "Waiting for attachments to be read" : undefined}>Ask</Button>
+          <Button variant="primary" busy={busy} disabled={!question.trim() || waiting} onClick={() => void run()} title={waiting ? tr("Waiting for attachments to be read") : undefined}>{tr("質問する")}</Button>
         </form>
         <div className="fa-ask-attach">
           <FileButtons onFiles={f => setPending(f)} />
-          <small className="fa-muted">Photos, drawings or PDFs. Drop or paste them here.</small>
+          <details className="wf-question-context"><summary>{tr("Context & measurements")}</summary><ContextStrip s={s} answer={answer} selectedPiece={selectedPiece} />        <details className="fa-ask-measure">
+          <summary>{tr("Measurements you add")}{Object.values(measurements).filter(Boolean).length ? ` (${Object.values(measurements).filter(Boolean).length})` : ""}</summary>
+          <div className="fa-ask-measure-grid">{MEASURE_FIELDS.map(f => <label key={f.name}><span>{tr(f.label)}</span>
+            <span className="fa-ask-unit"><input inputMode="decimal" value={measurements[f.name] ?? ""} onChange={e => setMeasurements({ ...measurements, [f.name]: e.target.value })} /><small>{tr(f.unit)}</small></span></label>)}</div>
+          <small className="fa-muted">{tr("Used for this question only. They are not saved to the work package.")}</small>
+        </details></details>
+
         </div>
-        {pending.length > 0 && <div className="fa-purpose" role="group" aria-label="How to use the files">
-          <p><b>How should Sprink use {pending.length === 1 ? pending[0].name || "this file" : `these ${pending.length} files`}?</b></p>
-          <Button onClick={() => chooseUse("question")}>Attach to this question<small>Site photo or drawing. Context only, never a code source.</small></Button>
-          <Button onClick={() => chooseUse("library")}>Add to the source library<small>A reference document to review and index.</small></Button>
-          <Button variant="quiet" onClick={() => setPending([])}>Cancel</Button>
+        {pending.length > 0 && <div className="fa-purpose" role="group" aria-label={tr("How to use the files")}>
+          <p><b>{tr("How should Sprink use")}{" "}{pending.length === 1 ? pending[0].name || "this file" : `these ${pending.length} files`}?</b></p>
+          <Button onClick={() => chooseUse("question")}>{tr("Attach to this question")}<small>{tr("Site photo or drawing. Context only, never a code source.")}</small></Button>
+          <Button onClick={() => chooseUse("library")}>{tr("Add to the source library")}<small>{tr("A reference document to review and index.")}</small></Button>
+          <Button variant="quiet" onClick={() => setPending([])}>{tr("Cancel")}</Button>
         </div>}
         {attachments.length > 0 && <ul className="fa-atts">{attachments.map(a => <AttachmentChip key={a.key} a={a}
           onRemove={() => removeAttachment(a)} onRetry={() => void retryAttachment(a)} onChange={u => setAttachments(x => x.map(y => y.key === a.key ? { ...y, record: u } : y))} />)}</ul>}
         </div>
         <div className="fa-ask-scroll">
-        {noLibrary && <Callout tone="neutral" title="The source library is empty" action={<Button variant="quiet" onClick={() => setTab("library")}>Open library</Button>}>Upload authorized documents or load the labelled demonstration set.</Callout>}
-        {!answer && <div className="fa-ask-suggest">{SUGGESTED.map(q => <button key={q} type="button" onClick={() => { setQuestion(q); void run(q); }}>{q}</button>)}</div>}
-        <details className="fa-ask-measure">
-          <summary>Measurements you add{Object.values(measurements).filter(Boolean).length ? ` (${Object.values(measurements).filter(Boolean).length})` : ""}</summary>
-          <div className="fa-ask-measure-grid">{MEASURE_FIELDS.map(f => <label key={f.name}><span>{f.label}</span>
-            <span className="fa-ask-unit"><input inputMode="decimal" value={measurements[f.name] ?? ""} onChange={e => setMeasurements({ ...measurements, [f.name]: e.target.value })} /><small>{f.unit}</small></span></label>)}</div>
-          <small className="fa-muted">Used for this question only. They are not saved to the work package.</small>
-        </details>
-        {error && <Callout tone="red" title="Could not answer" action={<Button busy={busy} onClick={() => void run()}>Retry</Button>}>{error} Your question and attachments are kept.</Callout>}
-        {busy && !answer && <Spinner label="Searching the project library…" />}
+        {noLibrary && <Callout tone="neutral" title={tr("The source library is empty")} action={<Button variant="quiet" onClick={() => setTab("library")}>{tr("Open library")}</Button>}>{tr("Upload authorized documents or load the labelled demonstration set.")}</Callout>}
+        {!answer && <details className="wf-question-examples"><summary>{tr("Example questions")}</summary><div className="fa-ask-suggest">{SUGGESTED.map(q => <button key={q} type="button" disabled={busy || waiting} onClick={() => { setQuestion(q); void run(q); }}><span>{tr(q)}</span></button>)}</div></details>}
+
+        {error && <Callout tone="red" title={tr("Could not answer")} action={<Button busy={busy} onClick={() => void run()}>{tr("Retry")}</Button>}>{error}{" "}{tr("Your question and attachments are kept.")}</Callout>}
+        {busy && !answer && <Spinner label={tr("Searching the project library…")} />}
         {answer && <Answer a={answer} viewing={viewing} onView={openCitation} onFollowUp={answerFollowUp} busy={busy} stale={selectionMoved} onAskAgain={() => void run(answer.question)} />}
         </div>
       </DropArea>}
     </div>
     {page ? <PageViewer focus={page} onClose={() => setPage(null)} onPage={n => setPage({ ...page, page: n, boxes: [], subtitle: `Page ${n} of ${page.pageCount}` })} />
-      : <SourceViewer citation={viewing} onClose={() => setViewing(null)} />}
+      : viewing ? <SourceViewer citation={viewing} onClose={() => setViewing(null)} /> : null}
   </div>;
 }
 
@@ -174,23 +175,23 @@ function AttachmentChip({ a, onRemove, onRetry, onChange }: { a: Attachment; onR
       <small>{a.error ? a.error : a.record ? (a.record.status === "failed" ? a.record.error?.message : `${a.record.kindLabel} · ${sizeText(a.size)}`) : `Uploading ${Math.round(a.progress * 100)}%`}</small>
     </span>
     {a.record && !a.error && <StatusBadge u={a.record} />}
-    {failed && <Button variant="quiet" onClick={onRetry}>Retry</Button>}
+    {failed && <Button variant="quiet" onClick={onRetry}>{tr("Retry")}</Button>}
     <button type="button" className="fa-icon-btn" onClick={onRemove} aria-label={`Remove ${a.name}`}><Icon name="x" size={14} /></button>
   </li>;
 }
 
 function PageViewer({ focus, onClose, onPage }: { focus: PageFocus; onClose: () => void; onPage: (n: number) => void }) {
   const img = useAuthedUrl(`/api/uploads/${focus.uploadId}/pages/${focus.page}`);
-  return <aside className="fa-viewer" aria-label="Page viewer">
+  return <aside className="fa-viewer" aria-label={tr("Page viewer")}>
     <div className="fa-viewer-head">
       <div><strong>{focus.title}</strong><small>{focus.subtitle}</small></div>
-      <button type="button" className="fa-icon-btn" onClick={onClose} aria-label="Close page"><Icon name="x" /></button>
+      <button type="button" className="fa-icon-btn" onClick={onClose} aria-label={tr("Close page")}><Icon name="x" /></button>
     </div>
     <div className="fa-viewer-body"><PageImage url={img.url} error={img.error} boxes={focus.boxes} /></div>
     {focus.pageCount > 1 && <div className="fa-viewer-foot">
-      <Button variant="quiet" disabled={focus.page <= 1} onClick={() => onPage(focus.page - 1)}>Previous page</Button>
-      <small className="fa-muted">Page {focus.page} of {focus.pageCount}</small>
-      <Button variant="quiet" disabled={focus.page >= focus.pageCount} onClick={() => onPage(focus.page + 1)}>Next page</Button>
+      <Button variant="quiet" disabled={focus.page <= 1} onClick={() => onPage(focus.page - 1)}>{tr("Previous page")}</Button>
+      <small className="fa-muted">{tr("Page")}{" "}{focus.page}{" "}{tr("of")}{" "}{focus.pageCount}</small>
+      <Button variant="quiet" disabled={focus.page >= focus.pageCount} onClick={() => onPage(focus.page + 1)}>{tr("Next page")}</Button>
     </div>}
   </aside>;
 }
@@ -200,8 +201,8 @@ function PageImage({ url, error, boxes }: { url: string | null; error: boolean; 
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const first = useRef<HTMLSpanElement | null>(null);
   useEffect(() => { first.current?.scrollIntoView({ block: "center" }); }, [size, boxes]);
-  if (error) return <Callout tone="red" title="Could not load the page image">Open the original file instead.</Callout>;
-  if (!url) return <Spinner label="Loading page…" />;
+  if (error) return <Callout tone="red" title={tr("Could not load the page image")}>{tr("Open the original file instead.")}</Callout>;
+  if (!url) return <Spinner label={tr("Loading page…")} />;
   return <div className="fa-page">
     <img src={url} alt="Source page" onLoad={e => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })} />
     {size && boxes.map((b, i) => <span key={i} ref={i === 0 ? first : undefined} className={`fa-page-box ${b.tone === "flag" ? "is-flag" : ""}`}
@@ -212,12 +213,12 @@ function PageImage({ url, error, boxes }: { url: string | null; error: boolean; 
 function ContextStrip({ s, answer, selectedPiece }: { s: Snapshot; answer: AskAnswer | null; selectedPiece: string | null }) {
   const c = answer?.context;
   const edition = c ? (c.edition.value ? `NFPA 13 ${c.edition.value}` : "Edition unknown") : null;
-  return <div className="fa-ask-context" aria-label="Question context">
-    <span><b>Project</b> {s.projectId}</span>
-    {edition && <span className={c!.edition.value ? "" : "fa-warn"} title={c!.edition.reason}><b>Edition</b> {edition}{c!.edition.status === "answered" ? " (your answer)" : c!.edition.status === "resolved" ? " (from permit facts)" : ""}</span>}
-    {c?.jurisdiction && <span><b>Jurisdiction</b> {c.jurisdiction.replace(/_/g, " ")}</span>}
-    <span><b>Piece</b> {c?.selectedElementId ?? selectedPiece ?? s.changeRequest?.affectedEntityIds[0] ?? "none"}</span>
-    {s.changeRequest && <span title={s.changeRequest.description}><b>Site</b> {s.changeRequest.description}</span>}
+  return <div className="fa-ask-context" aria-label={tr("Question context")}>
+    <span><b>{tr("Project")}</b> {s.projectId}</span>
+    {edition && <span className={c!.edition.value ? "" : "fa-warn"} title={c!.edition.reason}><b>{tr("Edition")}</b> {edition}{c!.edition.status === "answered" ? tr(" (your answer)") : c!.edition.status === "resolved" ? tr(" (from permit facts)") : ""}</span>}
+    {c?.jurisdiction && <span><b>{tr("Jurisdiction")}</b> {c.jurisdiction.replace(/_/g, " ")}</span>}
+    <span><b>{tr("Piece")}</b> {c?.selectedElementId ?? selectedPiece ?? s.changeRequest?.affectedEntityIds[0] ?? tr("none")}</span>
+    {s.changeRequest && <span title={s.changeRequest.description}><b>{tr("Site")}</b> {s.changeRequest.description}</span>}
   </div>;
 }
 
@@ -227,32 +228,29 @@ function Answer({ a, viewing, onView, onFollowUp, busy, stale, onAskAgain }: { a
   const cite = (key: string) => { const c = byKey.get(key); return c ? <button key={key} type="button" className={`fa-cite ${viewing?.key === key ? "is-on" : ""}`} onClick={() => onView(c)} title={`${c.docTitle}, ${c.edition}, p${c.pageStart ?? "?"}`}>{c.sectionId}</button> : null; };
   return <div className="fa-answer" aria-busy={busy}>
     <p className="fa-answer-q">{a.question}</p>
-    {stale && <p className="fa-warn small">This answer was for piece {a.context.selectedElementId}. The selection has changed. <button type="button" className="fa-link" onClick={onAskAgain}>Ask again</button></p>}
-    <div className="fa-answer-status">
-      <Badge tone={a.status === "no_source" ? "amber" : a.status === "needs_input" ? "amber" : "neutral"}>{{ answered: "From the library", needs_input: "Needs your input", no_source: "No source found" }[a.status]}</Badge>
-      <small className="fa-muted">Source lookup · answered in {a.timings.totalMs} ms</small>
-    </div>
+    {stale && <p className="fa-warn small">{tr("This answer was for piece")}{" "}{a.context.selectedElementId}{tr(". The selection has changed.")}{" "}<button type="button" className="fa-link" onClick={onAskAgain}>{tr("Ask again")}</button></p>}
+    {a.status === "no_source" && <p className="fa-warn">{tr("No source found")}</p>}
     <p className="fa-answer-summary">{a.summary}</p>
-    {demo && <p className="fa-demo-note"><Icon name="alert" size={14} />Answered from demonstration documents. Their text is invented for testing and is not code text.</p>}
+    {demo && <p className="fa-demo-note"><Icon name="alert" size={14} />{tr("Answered from demonstration documents. Their text is invented for testing and is not code text.")}</p>}
 
-    {a.followUps.length > 0 && <Block title="Needed to answer">
+    {a.followUps.length > 0 && <Block title={tr("Needed to answer")}>
       {a.followUps.map(f => <FollowUpRow key={f.id} f={f} busy={busy} onAnswer={v => onFollowUp(f, v)} />)}
     </Block>}
 
-    {a.explanation.length > 0 && <Block title="What applies" aside={a.explanation.some(c => c.kind === "quote") ? "Quotes are the source's words; notes are Sprink's interpretation" : "Sprink notes: interpretation, check the source wording"}>
+    {a.explanation.length > 0 && <Block title={tr("What applies")} aside={tr(a.explanation.some(c => c.kind === "quote") ? "Quotes are the source's words; notes are Sprink's interpretation" : "Sprink notes: interpretation, check the source wording")}>
       <ul className="fa-claims">{a.explanation.map(c => <li key={c.id} className={c.kind === "quote" ? "is-quote" : ""}>
-        {c.kind === "pointer" ? <span className="fa-muted">{c.text}</span> : c.kind === "quote" ? <><small className="fa-claim-label">Source wording</small><q>{c.text}</q></> : c.text} <span className="fa-cites">{c.citations.map(cite)}</span></li>)}</ul>
+        {c.kind === "pointer" ? <span className="fa-muted">{c.text}</span> : c.kind === "quote" ? <><small className="fa-claim-label">{tr("Source wording")}</small><q>{c.text}</q></> : c.text} <span className="fa-cites">{c.citations.map(cite)}</span></li>)}</ul>
     </Block>}
-    {a.unresolved.length > 0 && <Block title="Unresolved statements" aside="Not supported by the cited passage">
+    {a.unresolved.length > 0 && <Block title={tr("Unresolved statements")} aside={tr("Not supported by the cited passage")}>
       <ul className="fa-claims is-unresolved">{a.unresolved.map(c => <li key={c.id}><s>{c.text}</s> <small>{c.reason}</small></li>)}</ul>
     </Block>}
 
-    {a.exceptions.length > 0 && <Block title="Conditions that affect this">
+    {a.exceptions.length > 0 && <Block title={tr("Conditions that affect this")}>
       {a.exceptions.map(e => <div key={e.key} className="fa-cond">
-        <div className="fa-cond-head">{cite(e.key)}<Badge tone={e.status === "applies" ? "blue" : e.status === "unknown" ? "amber" : "neutral"}>{e.status === "applies" ? "Appears to apply" : e.status === "unknown" ? "Unknown" : "Does not appear to apply"}</Badge></div>
+        <div className="fa-cond-head">{cite(e.key)}<Badge tone={e.status === "applies" ? "blue" : e.status === "unknown" ? "amber" : "neutral"}>{e.status === "applies" ? tr("Appears to apply") : e.status === "unknown" ? tr("Unknown") : tr("Does not appear to apply")}</Badge></div>
         {e.checks.length > 0 && <table className="fa-mini"><tbody>{e.checks.map(c => <tr key={c.name}>
           <td>{c.question}</td>
-          <td className="mono">{c.value === null ? <span className="fa-warn">Unknown</span> : `${c.value} ${c.unit === "count" ? "" : c.unit}`}</td>
+          <td className="mono">{c.value === null ? <span className="fa-warn">{tr("Unknown")}</span> : `${c.value} ${c.unit === "count" ? "" : c.unit}`}</td>
           <td>{c.origin ? <Origin o={c.origin} detail={c.detail} /> : null}</td>
           <td className="mono fa-muted">{c.op} {c.limit}</td>
         </tr>)}</tbody></table>}
@@ -260,29 +258,29 @@ function Answer({ a, viewing, onView, onFollowUp, busy, stale, onAskAgain }: { a
       </div>)}
     </Block>}
 
-    {a.conflicts.length > 0 && <Block title="Sources disagree">
+    {a.conflicts.length > 0 && <Block title={tr("Sources disagree")}>
       {a.conflicts.map(c => <div key={c.topic} className="fa-conflict">
         <ul>{c.items.map(i => <li key={i.key}>{cite(i.key)} {i.position}</li>)}</ul>
         <small>{c.resolution}</small>
       </div>)}
     </Block>}
 
-    {a.missing.length > 0 && a.followUps.length === 0 && <Block title="Missing information"><ul className="fa-plain">{a.missing.map(m => <li key={m}>{m}</li>)}</ul></Block>}
+    {a.missing.length > 0 && a.followUps.length === 0 && <Block title={tr("Missing information")}><ul className="fa-plain">{a.missing.map(m => <li key={m}>{m}</li>)}</ul></Block>}
     {a.missing.length > 0 && a.followUps.length > 0 && <ul className="fa-plain small fa-muted">{a.missing.map(m => <li key={m}>{m}</li>)}</ul>}
 
-    {a.attachments.length > 0 && <Block title="Site photos" aside="Context for this question, not a code source">
+    {a.attachments.length > 0 && <Block title={tr("Site photos")} aside="Context for this question, not a code source">
       {a.attachments.map(x => <AttachmentFacts key={x.id} x={x} />)}
     </Block>}
 
 
-    {a.sources.length > 0 && <Block title="Source references" aside={`${a.sources.length}`}>
+    {a.sources.length > 0 && <details className="fa-ask-excluded"><summary>{tr("Source references")} ({a.sources.length})</summary>
       <ul className="fa-refs">{a.sources.map(s => <SourceRow key={s.key} c={s} on={viewing?.key === s.key} onOpen={() => onView(s)} />)}</ul>
-    </Block>}
-    {a.excluded.length > 0 && <details className="fa-ask-excluded"><summary>Not used ({a.excluded.length})</summary>
+    </details>}
+    {a.excluded.length > 0 && <details className="fa-ask-excluded"><summary>{tr("Not used (")}{a.excluded.length})</summary>
       <ul className="fa-plain small">{a.excluded.map(e => <li key={e.docId}><b>{e.title} {e.edition}</b>: {e.reason}</li>)}</ul></details>}
-    <details className="fa-ask-excluded"><summary>Facts used ({a.context.facts.length})</summary>
+    <details className="fa-ask-excluded"><summary>{tr("Facts used (")}{a.context.facts.length})</summary>
       <table className="fa-mini"><tbody>{a.context.facts.map((f, i) => <tr key={`${f.name}-${i}`}><td>{f.label}</td><td className="mono">{String(f.value ?? "Unknown")}{f.unit && f.unit !== "count" ? ` ${f.unit}` : ""}</td><td><Origin o={f.origin} detail={f.detail} /></td></tr>)}</tbody></table>
-      <small className="fa-muted">Edition: {a.context.edition.reason}{a.context.edition.script ? ` Script: ${a.context.edition.script}.` : ""}</small>
+      <small className="fa-muted">{tr("Edition:")}{" "}{a.context.edition.reason}{a.context.edition.script ? ` Script: ${a.context.edition.script}.` : ""}</small>
     </details>
   </div>;
 }
@@ -292,13 +290,13 @@ function AttachmentFacts({ x }: { x: AttachmentView }) {
   const label = { read: "Read, not confirmed", unclear: "Unclear", confirmed: "Confirmed by you", rejected: "Misread" } as const;
   return <div className="fa-photo-facts">
     <p className="small"><b>{x.filename}</b> · {x.kindLabel}</p>
-    {shown.length === 0 ? <small className="fa-muted">No readable text was found in this photo.</small>
+    {shown.length === 0 ? <small className="fa-muted">{tr("No readable text was found in this photo.")}</small>
       : <table className="fa-mini"><tbody>{shown.slice(0, 8).map(o => <tr key={o.id}>
-        <td>{o.kind === "marking" ? "Marking" : o.kind === "dimension_text" ? "Dimension text" : "Text"}</td>
+        <td>{o.kind === "marking" ? tr("Marking") : o.kind === "dimension_text" ? tr("Dimension text") : tr("Text")}</td>
         <td className="mono">{o.text}</td>
         <td><span className={`fa-origin ${o.status === "confirmed" ? "o-you" : "o-photo"}`}>{label[o.status]}</span></td>
       </tr>)}</tbody></table>}
-    {x.observations.some(o => o.kind === "dimension_text") && <small className="fa-muted">A photo has no scale: numbers in it are not measurements and are not used in calculations.</small>}
+    {x.observations.some(o => o.kind === "dimension_text") && <small className="fa-muted">{tr("A photo has no scale: numbers in it are not measurements and are not used in calculations.")}</small>}
   </div>;
 }
 
@@ -310,7 +308,7 @@ function FollowUpRow({ f, busy, onAnswer }: { f: FollowUp; busy: boolean; onAnsw
       ? <div className="fa-actions">{f.options?.map(o => <Button key={o.value} disabled={busy} onClick={() => onAnswer(o.value)}>{o.label}</Button>)}</div>
       : <form className="fa-actions" onSubmit={e => { e.preventDefault(); if (v.trim()) onAnswer(v.trim()); }}>
         <span className="fa-ask-unit"><input inputMode="decimal" value={v} onChange={e => setV(e.target.value)} aria-label={f.question} /><small>{f.unit === "count" ? "" : f.unit}</small></span>
-        <Button disabled={busy || !v.trim() || !Number.isFinite(Number(v))} onClick={() => onAnswer(v.trim())}>Use</Button>
+        <Button disabled={busy || !v.trim() || !Number.isFinite(Number(v))} onClick={() => onAnswer(v.trim())}>{tr("Use")}</Button>
       </form>}
   </div>;
 }
@@ -321,15 +319,15 @@ function SourceRow({ c, on, onOpen }: { c: Citation; on: boolean; onOpen: () => 
       <summary>
         <span className="fa-ref-id mono">{c.sectionId}</span>
         <span className="fa-ref-title">{c.heading}</span>
-        <span className="fa-ref-meta">{ROLE_LABEL[c.role] ?? c.role} · {c.label}</span>
+        <span className="fa-ref-meta">{tr(ROLE_LABEL[c.role] ?? c.role)} · {c.label}</span>
       </summary>
       <div className="fa-ref-body">
-        <p className="fa-ref-doc">{c.docTitle} · {c.edition} · {c.typeLabel} · {pages(c)}{c.demonstration && <> · <Badge tone="sample">Demonstration</Badge></>}</p>
+        <p className="fa-ref-doc">{c.docTitle} · {c.edition} · {c.typeLabel} · {pages(c)}{c.demonstration && <> · <Badge tone="sample">{tr("Demonstration")}</Badge></>}</p>
         {c.flags.map(f => <p key={f.flag} className="fa-warn small"><Icon name="alert" size={13} /> {f.label}</p>)}
         <SourceWording c={c} />
       </div>
     </details>
-    <Button variant="quiet" onClick={onOpen}>Open source</Button>
+    <Button variant="quiet" onClick={onOpen}>{tr("Open source")}</Button>
   </li>;
 }
 
@@ -359,43 +357,43 @@ function SourceViewer({ citation, onClose }: { citation: Citation | null; onClos
     return () => { live = false; };
   }, [citation?.link]);
   useEffect(() => { target.current?.scrollIntoView({ block: "center" }); }, [data]);
-  if (!citation) return <aside className="fa-viewer is-empty"><div className="fa-empty"><Icon name="drawing" size={28} /><p>Source viewer</p><small>Open a source reference to read the passage in its document.</small></div></aside>;
+  if (!citation) return <aside className="fa-viewer is-empty"><div className="fa-empty"><Icon name="drawing" size={28} /><p>{tr("参照した原文")}</p><small>{tr("回答の引用を選ぶと、該当箇所をここに表示します。")}</small></div></aside>;
   const doc = data?.document;
-  return <aside className="fa-viewer" aria-label="Source viewer">
+  return <aside className="fa-viewer" aria-label={tr("Source viewer")}>
     <div className="fa-viewer-head">
       <div>
         <strong>{citation.docTitle}</strong>
-        <small>{citation.publisher} · {citation.edition} · {citation.typeLabel}{citation.demonstration ? " · Demonstration text, not a real provision" : ""}</small>
+        <small>{citation.publisher} · {citation.edition} · {citation.typeLabel}{citation.demonstration ? tr(" · Demonstration text, not a real provision") : ""}</small>
         {citation.revision && <small>{citation.revision.label}</small>}
       </div>
-      <button type="button" className="fa-icon-btn" onClick={onClose} aria-label="Close source"><Icon name="x" /></button>
+      <button type="button" className="fa-icon-btn" onClick={onClose} aria-label={tr("Close source")}><Icon name="x" /></button>
     </div>
     {citation.page && <div className="fa-seg fa-viewer-mode" role="tablist">
-      <button type="button" role="tab" aria-selected={mode === "page"} className={mode === "page" ? "is-on" : ""} onClick={() => setMode("page")}>Page {citation.page.number}</button>
-      <button type="button" role="tab" aria-selected={mode === "text"} className={mode === "text" ? "is-on" : ""} onClick={() => setMode("text")}>Text</button>
+      <button type="button" role="tab" aria-selected={mode === "page"} className={mode === "page" ? "is-on" : ""} onClick={() => setMode("page")}>{tr("Page")}{" "}{citation.page.number}</button>
+      <button type="button" role="tab" aria-selected={mode === "text"} className={mode === "text" ? "is-on" : ""} onClick={() => setMode("text")}>{tr("Text")}</button>
     </div>}
     {mode === "page" && citation.page ? <div className="fa-viewer-body">
-      <p className="small fa-muted">{citation.sectionId} is highlighted on page {citation.page.number} of the uploaded file.</p>
+      <p className="small fa-muted">{citation.sectionId}{" "}{tr("is highlighted on page")}{" "}{citation.page.number}{" "}{tr("of the uploaded file.")}</p>
       <PageImage url={pageImg.url} error={pageImg.error} boxes={citation.regions.filter(r => r.page === citation.page!.number)} />
-    </div> : error ? <Callout tone="red" title="Could not open the passage">{error}</Callout> : !data ? <Spinner label="Opening passage…" /> :
+    </div> : error ? <Callout tone="red" title={tr("Could not open the passage")}>{error}</Callout> : !data ? <Spinner label={tr("Opening passage…")} /> :
       <div className="fa-viewer-body">
         {original !== null ? <pre className="fa-original">{original}</pre> : data.sections.map(sec => {
           const isTarget = sec.key === data.target || (sec.parentKey === null && data.sections.find(x => x.key === data.target)?.parentKey === sec.key);
           return <section key={sec.key} ref={sec.key === data.target ? (el => { target.current = el; }) : undefined} className={`fa-passage ${sec.key === data.target ? "is-target" : isTarget ? "is-context" : ""} ${sec.parentKey ? "is-child" : ""}`}>
             <header><span className="mono">{sec.sectionId}</span> {sec.parentKey ? null : <span>{sec.heading}</span>}<small>{pages(sec)}</small></header>
             {sec.flags.map(f => <p key={f} className="fa-warn small"><Icon name="alert" size={13} /> {FLAG_TEXT[f] ?? f}</p>)}
-            {sec.limited === "reference_only" ? <small className="fa-muted">The source permits reference only.</small> : sec.table ? <Table rows={sec.table} /> : <p className="fa-wording">{sec.text}</p>}
-            {sec.notes?.map((n, i) => <p key={i} className="fa-note"><b>Sprink note</b> (interpretation, not source text): {n.text}</p>)}
+            {sec.limited === "reference_only" ? <small className="fa-muted">{tr("The source permits reference only.")}</small> : sec.table ? <Table rows={sec.table} /> : <p className="fa-wording">{sec.text}</p>}
+            {sec.notes?.map((n, i) => <p key={i} className="fa-note"><b>{tr("Sprink note")}</b>{" "}{tr("(interpretation, not source text):")}{" "}{n.text}</p>)}
           </section>;
         })}
       </div>}
     <div className="fa-viewer-foot">
       <small className="fa-muted">{doc ? `Imported ${new Date(doc.importedAt).toLocaleDateString()} · ${doc.authorization.basis}` : ""}</small>
       {citation.original && (citation.original.startsWith("/api/uploads/")
-        ? <Button variant="quiet" onClick={() => void openOriginal(citation.original!, citation.page?.number).catch(e => setError(e.message))}>Original file <Icon name="external" size={13} /></Button>
+        ? <Button variant="quiet" onClick={() => void openOriginal(citation.original!, citation.page?.number).catch(e => setError(e.message))}>{tr("Original file")}{" "}<Icon name="external" size={13} /></Button>
         : citation.original.startsWith("/api/")
-        ? <Button variant="quiet" onClick={() => original === null ? void askApi.original(citation.original!).then(setOriginal).catch(e => setError(e.message)) : setOriginal(null)}>{original === null ? "Original file" : "Back to passage"}</Button>
-        : <a className="fa-link" href={citation.original} target="_blank" rel="noreferrer">Original <Icon name="external" size={13} /></a>)}
+        ? <Button variant="quiet" onClick={() => original === null ? void askApi.original(citation.original!).then(setOriginal).catch(e => setError(e.message)) : setOriginal(null)}>{original === null ? tr("Original file") : tr("Back to passage")}</Button>
+        : <a className="fa-link" href={citation.original} target="_blank" rel="noreferrer">{tr("Original")}{" "}<Icon name="external" size={13} /></a>)}
     </div>
   </aside>;
 }
@@ -415,7 +413,7 @@ const FLAG_TEXT: Record<string, string> = {
 const pages = (x: { pageStart: number | null; pageEnd: number | null }) => x.pageStart === null ? "page unknown" : x.pageEnd && x.pageEnd !== x.pageStart ? `pp. ${x.pageStart}–${x.pageEnd}` : `p. ${x.pageStart}`;
 
 function Origin({ o, detail }: { o: Origin; detail: string | null }) {
-  return <span className={`fa-origin o-${o}`} title={detail ?? undefined}>{ORIGIN_LABEL[o]}</span>;
+  return <span className={`fa-origin o-${o}`} title={detail ?? undefined}>{tr(ORIGIN_LABEL[o])}</span>;
 }
 function Block({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
   return <section className="fa-ask-block"><h3>{title}{aside !== undefined && <small>{aside}</small>}</h3>{children}</section>;

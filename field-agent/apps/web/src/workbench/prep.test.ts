@@ -16,13 +16,13 @@ const snap = (p: PackagePlan, detailing: WorkPackageSnapshot["detailing"] = []) 
   intent: "prepare_from_drawing", detailing, siteFacts: [], baselinePlan: p, sourceDrawing: null, changeRequest: null,
   scope: { coordinateFrame: p.coordinateFrame, includedEntityIds: ["p1", "f1"], excludedEntityIds: ["h1"], tieInEntityIds: [] },
 }) as unknown as WorkPackageSnapshot;
-const labels = (s: WorkPackageSnapshot) => requirements(s).map(r => r.label);
+const requiredIds = (s: WorkPackageSnapshot) => requirements(s).map(r => r.id);
 
 it("asks cement cure and joint movement only for the solvent-cement catalog", () => {
-  expect(labels(snap(plan(PIPE, ELBOW)))).toEqual(expect.arrayContaining(["Cement set and cure plan", "Joint movement at f1/in can be made"]));
-  const unselected = labels(snap(plan(null, null)));
-  expect(unselected).not.toContain("Cement set and cure plan");
-  expect(unselected.some(l => l.startsWith("Joint movement"))).toBe(false);
+  expect(requiredIds(snap(plan(PIPE, ELBOW)))).toEqual(expect.arrayContaining(["curePlan", "movement.in.f1"]));
+  const unselected = requiredIds(snap(plan(null, null)));
+  expect(unselected).not.toContain("curePlan");
+  expect(unselected.some(l => l.startsWith("movement."))).toBe(false);
 });
 
 it("stops asking San Francisco basis questions for another jurisdiction", () => {

@@ -4,6 +4,12 @@ The Sprink UI has one login and shared navigation: work packages at `/` (`/api/w
 
 Code: `apps/web/src/workbench/`. The UI calculates nothing: cuts, quantities, routes, deltas and rule findings all come from the server. The UI converts units for display (ft-in to the nearest 1/16 in, plus mm) and says so on screen.
 
+## Drawing workspaces and language
+
+The header keeps Materials & assembly, Site changes and Codes beside the Sprink logo. Materials and assembly stay linked to the drawing through part and material-group selection. Site observations open over the drawing; suggested routes and their material deltas appear beside it. Code search pairs the question and answer with the cited source, and returning preserves drawing selection and zoom.
+
+EN / JP switches the interface without remounting the workspaces, so draft observations and search results survive. The preference persists in browser storage. User input, source passages, catalog names and generated service output retain their original language. Drawing setup, detailed measurements and checks are secondary panels; the site-frame, provenance and retained-context behavior remains available there.
+
 ## Workflows
 
 **Prepare from a drawing (#11).** This workflow needs no obstruction or change request.

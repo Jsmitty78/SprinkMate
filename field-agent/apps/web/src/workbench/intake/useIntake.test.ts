@@ -1,10 +1,15 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Snapshot } from "../api.js";
+import { getLocale, setLocale } from "../locale.js";
 import { useIntake } from "./useIntake.js";
 import { IntakeInputs } from "./IntakeInputs.js";
 import { buildTracePlan } from "./sheet.js";
+
+const initialLocale = getLocale();
+beforeEach(() => setLocale("en"));
+afterEach(() => setLocale(initialLocale));
 
 const trace = { nodes: [{ kind: "open_end" as const, at: { x: 10, y: 20 }, head: false, label: "" }, { kind: "open_end" as const, at: { x: 150, y: 20 }, head: false, label: "" }], pipeLabels: ["P1"], context: [] };
 const built = buildTracePlan(trace, { origin: { x: 0, y: 0 }, rotationDeg: 0, scale: 1 }, { pipe: null, elbow: null });

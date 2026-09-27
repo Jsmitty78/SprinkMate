@@ -59,6 +59,7 @@ const post = <T>(path: string, body: unknown) => json<T>(path, { method: "POST",
 export const api = {
   list: (projectId: string) => json<Summary[]>(`?projectId=${encodeURIComponent(projectId)}`),
   create: (projectId: string, intent: PackageIntent, title: string) => post<Snapshot>("", { projectId, intent, title }),
+  copySiteChange: (id: string, expectedRevision: number, title: string) => post<Snapshot>(`/${encodeURIComponent(id)}/site-change`, { expectedRevision, title }),
   get: (id: string, signal?: AbortSignal) => json<Snapshot>(`/${encodeURIComponent(id)}`, { signal }),
   /** Integrated server only; returns null when the detail route is not mounted. */
   async detail(id: string, signal?: AbortSignal): Promise<Detail | null> {

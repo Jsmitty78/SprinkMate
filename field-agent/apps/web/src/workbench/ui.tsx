@@ -1,3 +1,4 @@
+import { tr } from "./locale.js";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { lengthText, type Quantity } from "./format.js";
 
@@ -65,7 +66,7 @@ export function Length({ q, signed }: { q: Quantity | null | undefined; signed?:
   const t = lengthText(q, signed);
   return t.known
     ? <span className="fa-len"><span className="mono">{t.primary}</span><small>{t.secondary}</small></span>
-    : <span className="fa-len is-unknown" title={t.reason}><span>Unknown</span><small>{t.reason}</small></span>;
+    : <span className="fa-len is-unknown" title={t.reason}><span>{tr("Unknown")}</span><small>{t.reason}</small></span>;
 }
 
 export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: ReactNode }) {

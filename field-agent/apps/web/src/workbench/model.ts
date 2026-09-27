@@ -1,3 +1,4 @@
+import { tr } from "./locale.js";
 import { adaptationFrame, adaptationInterval, confirmedPackageEvidence, geometryFactUsable, isSyntheticPackageFact } from "@field-agent/core";
 import type { PackageInputs, PackagePlan, PackageResult, WorkPackageSnapshot } from "@field-agent/core";
 import { lengthInput, parseLength } from "./format.js";
@@ -402,12 +403,12 @@ export function requirements(s: WorkPackageSnapshot): Requirement[] {
   if (plan) {
     for (const pipe of plan.entities.filter(e => e.kind === "pipe" && work(e.id)))
       for (const end of ["start", "end"])
-        add({ id: `datum.${end}.${pipe.id}`, group: "Dimensions", label: `How the ${end} of ${pipe.id} is dimensioned`, done: isConfirmed(findFact(s, `datum.${end}`, pipe.id)) });
+        add({ id: `datum.${end}.${pipe.id}`, group: "Dimensions", label: tr("How the {end} of {part} is dimensioned", { end: tr(end), part: pipe.id }), done: isConfirmed(findFact(s, `datum.${end}`, pipe.id)) });
     for (const tie of plan.entities.filter(e => e.kind === "tie_in" && work(e.id)))
-      add({ id: `netCutOffset.${tie.id}`, group: "Dimensions", label: `Net cut offset at tie-in ${tie.id}`, done: isConfirmed(findFact(s, "netCutOffset", tie.id)) });
+      add({ id: `netCutOffset.${tie.id}`, group: "Dimensions", label: tr("Net cut offset at tie-in {part}", { part: tie.id }), done: isConfirmed(findFact(s, "netCutOffset", tie.id)) });
     for (const fit of plan.entities.filter(e => e.kind === "fitting" && work(e.id) && e.productId === ELBOW))
       for (const port of fit.ports)
-        add({ id: `movement.${port.id}.${fit.id}`, group: "Assembly", label: `Joint movement at ${fit.id}/${port.id} can be made`, done: isConfirmed(findFact(s, `movement.${port.id}`, fit.id)) });
+        add({ id: `movement.${port.id}.${fit.id}`, group: "Assembly", label: tr("Joint movement at {part} can be made", { part: `${fit.id}/${port.id}` }), done: isConfirmed(findFact(s, `movement.${port.id}`, fit.id)) });
   }
   add({ id: "workAreaAccess", group: "Assembly", label: "Work-area access confirmed", done: isConfirmed(findFact(s, "workAreaAccess")) });
   if (showCpvcInputs(s)) add({ id: "curePlan", group: "Assembly", label: "Cement set and cure plan", done: isConfirmed(findFact(s, "curePlan")) });

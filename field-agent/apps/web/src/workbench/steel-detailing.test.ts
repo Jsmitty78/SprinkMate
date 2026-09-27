@@ -1,4 +1,5 @@
-import { expect, it } from "vitest";
+import { getLocale, setLocale } from "./locale.js";
+import { beforeEach, afterEach, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { deriveWorkPackage, fabricationCatalog } from "../../../../packages/fabrication/src/index.js";
@@ -65,3 +66,7 @@ it.each([0, -1, 57.15, 60, NaN])("keeps invalid saved engagement %s actionable w
   expect(output.cuts[1].cutLength.value).toBe(0.41505);
   expect(output.cuts[0].centerline.value).toBe(0.6096);
 });
+
+const initialLocale = getLocale();
+beforeEach(() => setLocale("en"));
+afterEach(() => setLocale(initialLocale));

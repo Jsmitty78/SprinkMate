@@ -1,3 +1,4 @@
+import { tr } from "../locale.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Badge, Button, Icon } from "../ui.js";
 import { askApi, authedBlobUrl, type UploadRecord, type UploadStatus } from "./askApi.js";
@@ -21,7 +22,7 @@ const STATUS_TONE: Record<UploadStatus, "neutral" | "amber" | "blue" | "red"> = 
   uploaded: "neutral", extracting: "blue", review: "amber", indexing: "blue", ready: "neutral", failed: "red",
 };
 export const StatusBadge = ({ u }: { u: Pick<UploadRecord, "status" | "purpose"> }) =>
-  <Badge tone={STATUS_TONE[u.status]}>{u.status === "ready" && u.purpose === "site_photo" ? "Ready as context" : u.status === "ready" ? "Searchable" : STATUS_LABEL[u.status]}</Badge>;
+  <Badge tone={STATUS_TONE[u.status]}>{u.status === "ready" && u.purpose === "site_photo" ? tr("Ready as context") : u.status === "ready" ? tr("Searchable") : tr(STATUS_LABEL[u.status])}</Badge>;
 
 export const isBusy = (s: UploadStatus) => s === "uploaded" || s === "extracting" || s === "indexing";
 export const localPreview = (file: File) => BROWSER_PREVIEW.test(file.type) ? URL.createObjectURL(file) : null;
@@ -62,8 +63,8 @@ export function FileButtons({ onFiles, label = "Attach", camera = true, disabled
   return <>
     <input ref={pick} type="file" multiple accept={ACCEPT} hidden onChange={e => take(e.target.files, e.target)} data-testid="file-input" />
     <input ref={cam} type="file" accept="image/*" capture="environment" hidden onChange={e => take(e.target.files, e.target)} />
-    <Button variant="quiet" disabled={disabled} onClick={() => pick.current?.click()}><Icon name="attach" size={16} />{label}</Button>
-    {camera && <Button variant="quiet" className="fa-only-touch" disabled={disabled} onClick={() => cam.current?.click()}><Icon name="camera" size={16} />Photo</Button>}
+    <Button variant="quiet" disabled={disabled} onClick={() => pick.current?.click()}><Icon name="attach" size={16} />{tr(label)}</Button>
+    {camera && <Button variant="quiet" className="fa-only-touch" disabled={disabled} onClick={() => cam.current?.click()}><Icon name="camera" size={16} />{tr("Photo")}</Button>}
   </>;
 }
 

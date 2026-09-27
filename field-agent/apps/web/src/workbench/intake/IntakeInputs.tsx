@@ -1,3 +1,4 @@
+import { tr } from "../locale.js";
 import { useEffect, useState } from "react";
 import type { DrawingRef, DrawingView, PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "../api.js";
@@ -123,13 +124,13 @@ export function IntakeInputs(props: Props) {
   };
 
   if (!d) return <div className="fa-stack">
-    <p className="fa-muted">Upload the sheet for this work: a PDF, or a PNG or JPEG copy, up to 20 MB. It is kept as uploaded and linked to every result. Uploading does not mark it approved.</p>
+    <p className="fa-muted">{tr("Upload the sheet for this work: a PDF, or a PNG or JPEG copy, up to 20 MB. It is kept as uploaded and linked to every result. Uploading does not mark it approved.")}</p>
     <div className="fa-row2">
-      <Field label="Revision"><input value={rev} onChange={e => setRev(e.target.value)} maxLength={40} /></Field>
-      <Field label="Copy of (optional)" hint="If this file is a scan, crop or raster of another document, name it."><input value={copyOf} onChange={e => setCopyOf(e.target.value)} maxLength={200} placeholder="e.g. FM32361 FS-01 PDF" /></Field>
+      <Field label={tr("Revision")}><input value={rev} onChange={e => setRev(e.target.value)} maxLength={40} /></Field>
+      <Field label={tr("Copy of (optional)")} hint={tr("If this file is a scan, crop or raster of another document, name it.")}><input value={copyOf} onChange={e => setCopyOf(e.target.value)} maxLength={200} placeholder={tr("e.g. FM32361 FS-01 PDF")} /></Field>
     </div>
     <label className={`fa-drop ${busy === "upload" ? "is-busy" : ""}`}>
-      <Icon name="upload" /><span>{busy === "upload" ? "Uploading…" : "Choose drawing file"}</span>
+      <Icon name="upload" /><span>{busy === "upload" ? tr("Uploading…") : tr("Choose drawing file")}</span>
       <input type="file" accept="application/pdf,image/png,image/jpeg" disabled={!!busy} onChange={e => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }} />
     </label>
   </div>;
@@ -138,7 +139,7 @@ export function IntakeInputs(props: Props) {
   const savedScale = d.scale;
   const lengths = t ? spanLengths(intake.trace, t) : [];
   const toolButton = (tool: IntakeTool, label: string, disabled = false) =>
-    <Button variant={intake.tool === tool ? "primary" : "default"} disabled={frozen || disabled} onClick={() => { intake.chooseTool(tool); showSheet(); }}>{intake.tool === tool ? `${label}: click the sheet` : label}</Button>;
+    <Button variant={intake.tool === tool ? "primary" : "default"} disabled={frozen || disabled} onClick={() => { intake.chooseTool(tool); showSheet(); }}>{intake.tool === tool ? tr("{tool}: click the sheet", { tool: tr(label) }) : tr(label)}</Button>;
   const pageCount = intake.sheet?.pages ?? 1;
   const nominal = findFact(s, "nominalSize", s.scope?.includedEntityIds.find(id => id.startsWith("p")));
   const requirement = findFact(s, "materialRequirement"), material = findFact(s, "materialRequirement.material");
@@ -146,130 +147,128 @@ export function IntakeInputs(props: Props) {
   const calibrated = savedScale.basis === "confirmed_inputs";
 
   return <div className="fa-stack">
-    {confirmed && d.approval !== "approved" && <Callout title="Confirmed drawing inputs">
-      Reopen to correct the file, scale, frame, product selection or trace. Existing results become stale and the corrected inputs need confirmation.
-      <Button busy={busy === "reopen-trace"} disabled={!!busy} onClick={reopenTrace}>Reopen drawing and trace</Button>
+    {confirmed && d.approval !== "approved" && <Callout title={tr("Confirmed drawing inputs")}>{tr("Reopen to correct the file, scale, frame, product selection or trace. Existing results become stale and the corrected inputs need confirmation.")}<Button busy={busy === "reopen-trace"} disabled={!!busy} onClick={reopenTrace}>{tr("Reopen drawing and trace")}</Button>
     </Callout>}
-    <Section title="Sheet" defaultOpen={!calibrated}>
+    <Section title={tr("Sheet")} defaultOpen={!calibrated}>
       <div className="fa-kv">
-        <span>File</span><strong>{d.view?.sheetUnit === "pdf_pt" ? "PDF" : "Image"}{d.view?.derivativeOf ? `, copy of ${d.view.derivativeOf}` : ""}</strong>
-        <span>Approval</span><strong>{d.approval === "approved" ? <Badge tone="green">Approved drawing</Badge> : d.approval === "superseded" ? <Badge tone="red">Superseded</Badge> : <Badge>Not reviewed</Badge>}</strong>
+        <span>{tr("File")}</span><strong>{d.view?.sheetUnit === "pdf_pt" ? tr("PDF") : tr("Image")}{d.view?.derivativeOf ? `, copy of ${d.view.derivativeOf}` : ""}</strong>
+        <span>{tr("Approval")}</span><strong>{d.approval === "approved" ? <Badge tone="green">{tr("Approved drawing")}</Badge> : d.approval === "superseded" ? <Badge tone="red">{tr("Superseded")}</Badge> : <Badge>{tr("Not reviewed")}</Badge>}</strong>
       </div>
       {!frozen && <>
         <div className="fa-row3">
-          <Field label="Sheet"><input className="mono" value={sheetId} onChange={e => setSheetId(e.target.value)} maxLength={100} /></Field>
-          <Field label="Revision"><input value={rev} onChange={e => setRev(e.target.value)} maxLength={40} /></Field>
-          <Field label="Page">{pageCount > 1
+          <Field label={tr("Sheet")}><input className="mono" value={sheetId} onChange={e => setSheetId(e.target.value)} maxLength={100} /></Field>
+          <Field label={tr("Revision")}><input value={rev} onChange={e => setRev(e.target.value)} maxLength={40} /></Field>
+          <Field label={tr("Page")}>{pageCount > 1
             ? <select value={d.page} onChange={e => { if (window.confirm("Switch page? Each page is its own view: its work area, scale and trace start over.")) void save("page", { page: Number(e.target.value) }); }}>
               {Array.from({ length: pageCount }, (_, i) => <option key={i} value={i + 1}>{i + 1}</option>)}</select>
             : <input value={d.page} readOnly />}</Field>
         </div>
-        <Field label="Copy of (optional)"><input value={copyOf} onChange={e => setCopyOf(e.target.value)} maxLength={200} placeholder="Name the original if this is a scan or raster" /></Field>
-        <label className="fa-link-file">Replace file<input type="file" accept="application/pdf,image/png,image/jpeg" disabled={!!busy} onChange={e => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }} /></label>
+        <Field label={tr("Copy of (optional)")}><input value={copyOf} onChange={e => setCopyOf(e.target.value)} maxLength={200} placeholder={tr("Name the original if this is a scan or raster")} /></Field>
+        <label className="fa-link-file">{tr("Replace file")}<input type="file" accept="application/pdf,image/png,image/jpeg" disabled={!!busy} onChange={e => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }} /></label>
       </>}
     </Section>
 
-    <Section title="Work area" count={intake.workArea ? "set" : undefined} defaultOpen={!intake.workArea}>
-      <p className="fa-muted">The bounded part of the sheet this package covers. Everything else stays on the sheet as context.</p>
-      {intake.workArea && <p className="mono small">x {r1(intake.workArea.x)}, y {r1(intake.workArea.y)}, {r1(intake.workArea.width)} × {r1(intake.workArea.height)} {unitWord(intake.sheet?.unit)}</p>}
+    <Section title={tr("Work area")} count={intake.workArea ? tr("set") : undefined} defaultOpen={!intake.workArea}>
+      <p className="fa-muted">{tr("The bounded part of the sheet this package covers. Everything else stays on the sheet as context.")}</p>
+      {intake.workArea && <p className="mono small">{tr("x")}{" "}{r1(intake.workArea.x)}{tr(", y")}{" "}{r1(intake.workArea.y)}, {r1(intake.workArea.width)} × {r1(intake.workArea.height)} {unitWord(intake.sheet?.unit)}</p>}
       <div className="fa-actions">{toolButton("area", intake.workArea ? "Redraw work area" : "Draw work area")}
-        {intake.workArea && !frozen && <Button variant="quiet" onClick={() => intake.setWorkArea(null)}>Clear</Button>}</div>
+        {intake.workArea && !frozen && <Button variant="quiet" onClick={() => intake.setWorkArea(null)}>{tr("Clear")}</Button>}</div>
     </Section>
 
-    <Section title="Scale" count={calibrated ? "confirmed" : savedScale.value ? "not confirmed" : "missing"} defaultOpen={!calibrated}>
-      {!frozen && <div className="fa-chips" role="radiogroup" aria-label="Calibration method">
-        <label className={`fa-chip ${intake.cal.method === "two_point" ? "is-on" : ""}`}><input type="radio" checked={intake.cal.method === "two_point"} onChange={() => intake.setCal({ ...intake.cal, method: "two_point" })} />A dimension on the sheet</label>
-        <label className={`fa-chip ${intake.cal.method === "printed_scale" ? "is-on" : ""}`}><input type="radio" checked={intake.cal.method === "printed_scale"} disabled={intake.sheet?.unit !== "pdf_pt"} onChange={() => intake.setCal({ ...intake.cal, method: "printed_scale" })} />Printed scale (PDF only)</label>
+    <Section title={tr("Scale")} count={calibrated ? tr("confirmed") : savedScale.value ? tr("not confirmed") : tr("missing")} defaultOpen={!calibrated}>
+      {!frozen && <div className="fa-chips" role="radiogroup" aria-label={tr("Calibration method")}>
+        <label className={`fa-chip ${intake.cal.method === "two_point" ? "is-on" : ""}`}><input type="radio" checked={intake.cal.method === "two_point"} onChange={() => intake.setCal({ ...intake.cal, method: "two_point" })} />{tr("A dimension on the sheet")}</label>
+        <label className={`fa-chip ${intake.cal.method === "printed_scale" ? "is-on" : ""}`}><input type="radio" checked={intake.cal.method === "printed_scale"} disabled={intake.sheet?.unit !== "pdf_pt"} onChange={() => intake.setCal({ ...intake.cal, method: "printed_scale" })} />{tr("Printed scale (PDF only)")}</label>
       </div>}
       {intake.cal.method === "two_point" ? <>
-        <p className="fa-muted">Pick both ends of a dimension or grid spacing you can read, then enter its real length.</p>
+        <p className="fa-muted">{tr("Pick both ends of a dimension or grid spacing you can read, then enter its real length.")}</p>
         <div className="fa-actions">{toolButton("calibrate", intake.cal.a && intake.cal.b ? "Pick again" : "Pick two points")}
-          {intake.cal.a && intake.cal.b && <span className="mono small">{r1(sheetDistance(intake.cal.a, intake.cal.b))} {unitWord(intake.sheet?.unit)} apart</span>}</div>
+          {intake.cal.a && intake.cal.b && <span className="mono small">{r1(sheetDistance(intake.cal.a, intake.cal.b))} {unitWord(intake.sheet?.unit)}{" "}{tr("apart")}</span>}</div>
         <div className="fa-row2">
-          <Field label="Real length"><input className="mono" value={intake.cal.distance} disabled={frozen} inputMode="decimal" onChange={e => intake.setCal({ ...intake.cal, distance: e.target.value })} placeholder="e.g. 10" /></Field>
-          <Field label="Unit"><select value={intake.cal.distanceUnit} disabled={frozen} onChange={e => intake.setCal({ ...intake.cal, distanceUnit: e.target.value as LengthUnit })}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></Field>
+          <Field label={tr("Real length")}><input className="mono" value={intake.cal.distance} disabled={frozen} inputMode="decimal" onChange={e => intake.setCal({ ...intake.cal, distance: e.target.value })} placeholder={tr("e.g. 10")} /></Field>
+          <Field label={tr("Unit")}><select value={intake.cal.distanceUnit} disabled={frozen} onChange={e => intake.setCal({ ...intake.cal, distanceUnit: e.target.value as LengthUnit })}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></Field>
         </div>
       </> : <>
-        <p className="fa-muted">The ratio printed on this view. PDF points are 1/72 in of paper, so this holds only for a PDF at its original size.</p>
+        <p className="fa-muted">{tr("The ratio printed on this view. PDF points are 1/72 in of paper, so this holds only for a PDF at its original size.")}</p>
         <div className="fa-scale-eq">
-          <input className="mono" value={intake.cal.paper} disabled={frozen} onChange={e => intake.setCal({ ...intake.cal, paper: e.target.value })} aria-label="Paper length" />
-          <select value={intake.cal.paperUnit} disabled={frozen} onChange={e => intake.setCal({ ...intake.cal, paperUnit: e.target.value as LengthUnit })} aria-label="Paper unit">{UNITS.map(u => <option key={u}>{u}</option>)}</select>
+          <input className="mono" value={intake.cal.paper} disabled={frozen} onChange={e => intake.setCal({ ...intake.cal, paper: e.target.value })} aria-label={tr("Paper length")} />
+          <select value={intake.cal.paperUnit} disabled={frozen} onChange={e => intake.setCal({ ...intake.cal, paperUnit: e.target.value as LengthUnit })} aria-label={tr("Paper unit")}>{UNITS.map(u => <option key={u}>{u}</option>)}</select>
           <span>=</span>
-          <input className="mono" value={intake.cal.real} disabled={frozen} onChange={e => intake.setCal({ ...intake.cal, real: e.target.value })} aria-label="Real length" />
-          <select value={intake.cal.realUnit} disabled={frozen} onChange={e => intake.setCal({ ...intake.cal, realUnit: e.target.value as LengthUnit })} aria-label="Real unit">{UNITS.map(u => <option key={u}>{u}</option>)}</select>
+          <input className="mono" value={intake.cal.real} disabled={frozen} onChange={e => intake.setCal({ ...intake.cal, real: e.target.value })} aria-label={tr("Real length")} />
+          <select value={intake.cal.realUnit} disabled={frozen} onChange={e => intake.setCal({ ...intake.cal, realUnit: e.target.value as LengthUnit })} aria-label={tr("Real unit")}>{UNITS.map(u => <option key={u}>{u}</option>)}</select>
         </div>
       </>}
-      <Field label="What you calibrated against"><input value={intake.cal.reference} disabled={frozen} onChange={e => intake.setCal({ ...intake.cal, reference: e.target.value })} placeholder="e.g. Scale bar, or 20'-0&quot; between grid lines 3 and 4" maxLength={500} /></Field>
+      <Field label={tr("What you calibrated against")}><input value={intake.cal.reference} disabled={frozen} onChange={e => intake.setCal({ ...intake.cal, reference: e.target.value })} placeholder={tr("e.g. Scale bar, or 20'-0\" between grid lines 3 and 4")} maxLength={500} /></Field>
       <div className="fa-kv">
-        <span>Scale</span><strong className="mono">{intake.scale ? `${r4(intake.scale)} mm per ${unitWord(intake.sheet?.unit, true)}` : "Not set"}</strong>
-        <span>Pick precision</span><strong className="small">{intake.scale && intake.pickTolerance ? `about ±${r1(intake.scale * intake.pickTolerance)} mm per picked point at the zoom you used` : "Zoom in before picking for a smaller error"}</strong>
-        <span>Saved</span><strong>{savedScale.value ? <>{r4(savedScale.value)} {calibrated ? <Badge tone="green">Confirmed</Badge> : <Badge tone="amber">Not confirmed</Badge>}</> : <Badge tone="amber">No scale</Badge>}</strong>
+        <span>{tr("Scale")}</span><strong className="mono">{intake.scale ? `${r4(intake.scale)} mm per ${unitWord(intake.sheet?.unit, true)}` : tr("Not set")}</strong>
+        <span>{tr("Pick precision")}</span><strong className="small">{intake.scale && intake.pickTolerance ? `about ±${r1(intake.scale * intake.pickTolerance)} mm per picked point at the zoom you used` : tr("Zoom in before picking for a smaller error")}</strong>
+        <span>{tr("Saved")}</span><strong>{savedScale.value ? <>{r4(savedScale.value)} {calibrated ? <Badge tone="green">{tr("Confirmed")}</Badge> : <Badge tone="amber">{tr("Not confirmed")}</Badge>}</> : <Badge tone="amber">{tr("No scale")}</Badge>}</strong>
       </div>
     </Section>
 
-    <Section title="Plan frame" defaultOpen={false}>
-      <p className="fa-muted">Plan X and Y in millimetres, Z up. By default X runs right and Y up the sheet from the work area's corner. Rotate if the sheet is turned.</p>
+    <Section title={tr("Plan frame")} defaultOpen={false}>
+      <p className="fa-muted">{tr("Plan X and Y in millimetres, Z up. By default X runs right and Y up the sheet from the work area's corner. Rotate if the sheet is turned.")}</p>
       <div className="fa-row2">
-        <Field label="Rotation, degrees"><input className="mono" value={intake.rotation} disabled={frozen} onChange={e => intake.setRotation(e.target.value)} /></Field>
-        <Field label="Origin"><span className="mono small">{r1(intake.origin.x)}, {r1(intake.origin.y)} {intake.originSet ? "" : "(work area corner)"}</span></Field>
+        <Field label={tr("Rotation, degrees")}><input className="mono" value={intake.rotation} disabled={frozen} onChange={e => intake.setRotation(e.target.value)} /></Field>
+        <Field label={tr("Origin")}><span className="mono small">{r1(intake.origin.x)}, {r1(intake.origin.y)} {intake.originSet ? "" : tr("(work area corner)")}</span></Field>
       </div>
       <div className="fa-actions">{toolButton("axis", "Pick plan X on the sheet")}{toolButton("origin", "Pick origin")}</div>
-      {t && <p className="mono small fa-muted">plan = rotate({r4(t.rotationDeg)}°) · ((x − {r1(t.origin.x)}) · {r4(t.scale)}, −(y − {r1(t.origin.y)}) · {r4(t.scale)}) mm</p>}
+      {t && <p className="mono small fa-muted">{tr("plan = rotate(")}{r4(t.rotationDeg)}{tr("°) · ((x −")}{" "}{r1(t.origin.x)}) · {r4(t.scale)}{tr(", −(y −")}{" "}{r1(t.origin.y)}) · {r4(t.scale)}{tr(") mm")}</p>}
     </Section>
 
     <div className="fa-actions">
-      <Button busy={busy === "view"} disabled={!!busy || frozen || (!intake.viewDirty && !metadataDirty)} onClick={() => void save("view")}>Save sheet settings</Button>
-      <Button variant="primary" busy={busy === "scale"} disabled={!!busy || frozen || !t || (calibrated && !intake.viewDirty)} onClick={() => void save("scale", { confirmScale: true })}>Confirm scale</Button>
+      <Button busy={busy === "view"} disabled={!!busy || frozen || (!intake.viewDirty && !metadataDirty)} onClick={() => void save("view")}>{tr("Save sheet settings")}</Button>
+      <Button variant="primary" busy={busy === "scale"} disabled={!!busy || frozen || !t || (calibrated && !intake.viewDirty)} onClick={() => void save("scale", { confirmScale: true })}>{tr("Confirm scale")}</Button>
     </div>
 
-    <Section title="Trace the run" count={intake.trace.nodes.length ? `${intake.trace.nodes.length} points` : undefined} defaultOpen={!confirmed}>
-      <p className="fa-muted">Click along the pipe on the sheet. Ends are interfaces (where this work meets something else) or open ends; points between are turns. Heads at an end station stay context: shown, never bought or connected.</p>
+    <Section title={tr("Trace the run")} count={intake.trace.nodes.length ? tr("{count} points", { count: intake.trace.nodes.length }) : undefined} defaultOpen={!confirmed}>
+      <p className="fa-muted">{tr("Click along the pipe on the sheet. Ends are interfaces (where this work meets something else) or open ends; points between are turns. Heads at an end station stay context: shown, never bought or connected.")}</p>
       <div className="fa-actions wrap">{toolButton("trace", "Trace run")}{toolButton("head", "Mark a head")}{toolButton("context_pipe", "Add context pipe")}
         {!frozen && intake.trace.nodes.length > 0 && <Button variant="quiet" onClick={() => {
           const nodes = intake.trace.nodes.slice(0, -1);
           if (nodes.length >= 2) nodes[nodes.length - 1] = { ...nodes[nodes.length - 1], kind: intake.trace.nodes.at(-1)!.kind, head: intake.trace.nodes.at(-1)!.head };
           intake.setTrace({ ...intake.trace, nodes, pipeLabels: intake.trace.pipeLabels.slice(0, Math.max(nodes.length - 1, 0)) });
-        }}>Undo point</Button>}</div>
+        }}>{tr("Undo point")}</Button>}</div>
       {intake.trace.nodes.length > 0 && <div className="fa-table-wrap"><table className="fa-table fa-trace">
-        <thead><tr><th>#</th><th>Point</th><th>Head</th><th>Label</th><th>Sheet x, y</th></tr></thead>
+        <thead><tr><th>#</th><th>{tr("Point")}</th><th>{tr("Head")}</th><th>{tr("Label")}</th><th>{tr("Sheet x, y")}</th></tr></thead>
         <tbody>{intake.trace.nodes.map((n, i) => {
           const end = i === 0 || i === intake.trace.nodes.length - 1;
           const set = (patch: Partial<typeof n>) => intake.setTrace({ ...intake.trace, nodes: intake.trace.nodes.map((x, j) => j === i ? { ...x, ...patch } : x) });
           return <tr key={i}>
             <td className="mono">{i + 1}</td>
-            <td>{frozen || !end ? KIND_LABEL[n.kind] : <select aria-label={`Point ${i + 1} type`} value={n.kind} onChange={e => set({ kind: e.target.value as TraceNodeKind })}><option value="interface">Interface</option><option value="open_end">Open end</option></select>}</td>
+            <td>{frozen || !end ? tr(KIND_LABEL[n.kind]) : <select aria-label={`Point ${i + 1} type`} value={n.kind} onChange={e => set({ kind: e.target.value as TraceNodeKind })}><option value="interface">{tr("Interface")}</option><option value="open_end">{tr("Open end")}</option></select>}</td>
             <td>{end && n.kind !== "elbow" ? <input type="checkbox" aria-label={`Retained head at point ${i + 1}`} checked={n.head} disabled={frozen} onChange={e => set({ head: e.target.checked })} /> : "—"}</td>
-            <td><input aria-label={`Point ${i + 1} label`} value={n.label} disabled={frozen} onChange={e => set({ label: e.target.value })} placeholder={n.head ? "e.g. H1" : ""} maxLength={60} /></td>
+            <td><input aria-label={`Point ${i + 1} label`} value={n.label} disabled={frozen} onChange={e => set({ label: e.target.value })} placeholder={n.head ? tr("e.g. H1") : ""} maxLength={60} /></td>
             <td className="mono small"><CoordInput value={n.at.x} disabled={frozen} onChange={x => set({ at: { ...n.at, x } })} label={`Point ${i + 1} x`} />, <CoordInput value={n.at.y} disabled={frozen} onChange={y => set({ at: { ...n.at, y } })} label={`Point ${i + 1} y`} /></td>
           </tr>;
         })}</tbody>
       </table></div>}
       {lengths.length > 0 && <div className="fa-table-wrap"><table className="fa-table">
-        <thead><tr><th>Span</th><th>Label on sheet</th><th>Projected length</th></tr></thead>
+        <thead><tr><th>{tr("Span")}</th><th>{tr("Label on sheet")}</th><th>{tr("Projected length")}</th></tr></thead>
         <tbody>{lengths.map((len, i) => { const txt = lengthText({ value: len, unit: "mm" }); return <tr key={i}>
           <td className="mono">{i + 1}</td>
-          <td><input aria-label={`Span ${i + 1} label`} value={intake.trace.pipeLabels[i] ?? ""} disabled={frozen} maxLength={60} placeholder="e.g. P27" onChange={e => { const pipeLabels = [...intake.trace.pipeLabels]; pipeLabels[i] = e.target.value; intake.setTrace({ ...intake.trace, pipeLabels }); }} /></td>
-          <td>{txt.known ? <span className="fa-len"><span className="mono">{r4(len)} mm</span><small>{txt.primary}</small></span> : "?"}</td>
+          <td><input aria-label={`Span ${i + 1} label`} value={intake.trace.pipeLabels[i] ?? ""} disabled={frozen} maxLength={60} placeholder={tr("e.g. P27")} onChange={e => { const pipeLabels = [...intake.trace.pipeLabels]; pipeLabels[i] = e.target.value; intake.setTrace({ ...intake.trace, pipeLabels }); }} /></td>
+          <td>{txt.known ? <span className="fa-len"><span className="mono">{r4(len)}{" "}{tr("mm")}</span><small>{txt.primary}</small></span> : "?"}</td>
         </tr>; })}</tbody>
       </table></div>}
-      {lengths.length > 0 && <small className="fa-muted">Projected plan length of the trace, not a cut or stock length. {intake.scale && intake.pickTolerance ? `Each end carries about ±${r1(intake.scale * intake.pickTolerance)} mm from picking, plus the scale's own error.` : ""}</small>}
+      {lengths.length > 0 && <small className="fa-muted">{tr("Projected plan length of the trace, not a cut or stock length.")}{" "}{intake.scale && intake.pickTolerance ? `Each end carries about ±${r1(intake.scale * intake.pickTolerance)} mm from picking, plus the scale's own error.` : ""}</small>}
       {intake.trace.context.length > 0 && <ul className="fa-context-list">{intake.trace.context.map((c, i) => <li key={i}>
-        <span>{c.kind === "head" ? "Context head" : "Context pipe"}</span>
-        <input aria-label={`Context ${i + 1} label`} value={c.label} disabled={frozen} maxLength={60} placeholder={c.kind === "head" ? "e.g. H2" : "e.g. P30"} onChange={e => intake.setTrace({ ...intake.trace, context: intake.trace.context.map((x, j) => j === i ? { ...x, label: e.target.value } : x) })} />
+        <span>{c.kind === "head" ? tr("Context head") : tr("Context pipe")}</span>
+        <input aria-label={`Context ${i + 1} label`} value={c.label} disabled={frozen} maxLength={60} placeholder={c.kind === "head" ? tr("e.g. H2") : tr("e.g. P30")} onChange={e => intake.setTrace({ ...intake.trace, context: intake.trace.context.map((x, j) => j === i ? { ...x, label: e.target.value } : x) })} />
         {!frozen && <button type="button" className="fa-icon-btn" aria-label={`Remove context ${i + 1}`} onClick={() => intake.setTrace({ ...intake.trace, context: intake.trace.context.filter((_, j) => j !== i) })}><Icon name="x" size={14} /></button>}
       </li>)}</ul>}
-      {!frozen && <Field label="Pipe and fittings for this run" hint="Only products with documented dimensions and procedures can be sized. Otherwise cuts and assembly stay unresolved and the source requirement is kept.">
-        <select value={products} onChange={e => setProducts(e.target.value)}>{Object.entries(PRODUCT_SETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
+      {!frozen && <Field label={tr("Pipe and fittings for this run")} hint={tr("Only products with documented dimensions and procedures can be sized. Otherwise cuts and assembly stay unresolved and the source requirement is kept.")}>
+        <select value={products} onChange={e => setProducts(e.target.value)}>{Object.entries(PRODUCT_SETS).map(([k, v]) => <option key={k} value={k}>{tr(v.label)}</option>)}</select>
       </Field>}
-      {conflict && <Callout title="Material conflict">The source requires {String(material!.value)} but {PRODUCT_SETS[products].label} is selected. Keep the source material, or record a documented design change before substituting.</Callout>}
-      {(intake.traceDirty || productDirty) && <p className="fa-warn small">Unsaved trace, kept in this browser until you save.</p>}
+      {conflict && <Callout title={tr("Material conflict")}>{tr("The source requires")}{" "}{String(material!.value)}{" "}{tr("but")}{" "}{PRODUCT_SETS[products].label}{" "}{tr("is selected. Keep the source material, or record a documented design change before substituting.")}</Callout>}
+      {(intake.traceDirty || productDirty) && <p className="fa-warn small">{tr("Unsaved trace, kept in this browser until you save.")}</p>}
       {!frozen && <div className="fa-actions">
-        <Button variant="primary" busy={busy === "trace"} disabled={!!busy || intake.trace.nodes.length < 2 || !t} onClick={() => void save("trace")}>Save trace</Button>
-        <Button busy={busy === "confirm-trace"} disabled={!!busy || !s.baselinePlan || intake.traceDirty || productDirty || intake.viewDirty || metadataDirty || !calibrated} onClick={confirmTrace}>Confirm trace</Button>
+        <Button variant="primary" busy={busy === "trace"} disabled={!!busy || intake.trace.nodes.length < 2 || !t} onClick={() => void save("trace")}>{tr("Save trace")}</Button>
+        <Button busy={busy === "confirm-trace"} disabled={!!busy || !s.baselinePlan || intake.traceDirty || productDirty || intake.viewDirty || metadataDirty || !calibrated} onClick={confirmTrace}>{tr("Confirm trace")}</Button>
       </div>}
-      {!frozen && !t && intake.trace.nodes.length > 0 && <p className="fa-muted small">Set the scale to save the trace.</p>}
-      {!frozen && s.baselinePlan && !calibrated && <p className="fa-muted small">Confirm the scale before confirming the trace.</p>}
-      {confirmed && <p className="fa-muted"><Badge tone="green">Trace confirmed</Badge> {d.approval === "approved" ? "Approved source inputs are immutable; use a new package for a changed drawing." : "Reopen the drawing and trace above to make a reviewed correction."}</p>}
+      {!frozen && !t && intake.trace.nodes.length > 0 && <p className="fa-muted small">{tr("Set the scale to save the trace.")}</p>}
+      {!frozen && s.baselinePlan && !calibrated && <p className="fa-muted small">{tr("Confirm the scale before confirming the trace.")}</p>}
+      {confirmed && <p className="fa-muted"><Badge tone="green">{tr("Trace confirmed")}</Badge> {d.approval === "approved" ? tr("Approved source inputs are immutable; use a new package for a changed drawing.") : tr("Reopen the drawing and trace above to make a reviewed correction.")}</p>}
     </Section>
 
     <SourceRequirements {...props} nominal={nominal} requirement={requirement} material={material} />
@@ -337,8 +336,8 @@ export function SourceRequirements({ s, act, busy, setNotice, intake, nominal, r
   }, [s.inputRevision]);
   const provenanceControl = (label: string, previous: ReturnType<typeof findFact>, value: Provenance, change: (p: Provenance) => void) => {
     const locked = !!previous && factProvenance(previous) === "synthetic_assumption";
-    return <Field label={label}><select value={locked ? "synthetic_assumption" : value} disabled={locked} onChange={e => change(e.target.value as Provenance)}>{Object.entries(PROVENANCE_LABELS).map(([key, text]) => <option key={key} value={key}>{text}</option>)}</select>
-      {locked && <small className="fa-warn">This value remains a synthetic test assumption.</small>}</Field>;
+    return <Field label={tr(label)}><select value={locked ? "synthetic_assumption" : value} disabled={locked} onChange={e => change(e.target.value as Provenance)}>{Object.entries(PROVENANCE_LABELS).map(([key, text]) => <option key={key} value={key}>{tr(text)}</option>)}</select>
+      {locked && <small className="fa-warn">{tr("This value remains a synthetic test assumption.")}</small>}</Field>;
   };
   const savedPage = requirement?.source.page ?? material?.source.page ?? s.sourceDrawing?.page ?? 1;
   const [sourcePage, setSourcePage] = useState(String(savedPage));
@@ -351,22 +350,22 @@ export function SourceRequirements({ s, act, busy, setNotice, intake, nominal, r
     if (!validPage) throw new Error("Choose a valid requirement source page.");
     return patchClearing(cur, sourceRequirementsPatch(cur, { size, text, mat, provenance, nominalProvenance, materialProvenance, source, page, updateSource: ref !== (requirement?.source.description.replace(/^Read by you from /, "") ?? "") || page !== savedPage }), setNotice);
   });
-  return <Section title="Source requirements" count={requirement ? "entered" : undefined} defaultOpen={!requirement}>
-    <p className="fa-muted">What the drawing or its notes require. This is kept as stated and is not a product selection or an approval.</p>
+  return <Section title={tr("Source requirements")} count={requirement ? tr("entered") : undefined} defaultOpen={!requirement}>
+    <p className="fa-muted">{tr("What the drawing or its notes require. This is kept as stated and is not a product selection or an approval.")}</p>
     <div className="fa-row2">
-      <Field label="Nominal size as printed" hint={pipes.length ? undefined : "Save a trace first."}><div className="fa-fact-head"><input value={size} onChange={e => setSize(e.target.value)} placeholder='e.g. 2"' maxLength={40} disabled={!pipes.length} />{mixedNominal ? <Badge tone="amber">Varies by span</Badge> : nominal && factStatus(nominal)}</div></Field>
-      <Field label="Material"><select value={mat} onChange={e => setMat(e.target.value)}><option value="">Not stated</option>{MATERIALS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
+      <Field label={tr("Nominal size as printed")} hint={pipes.length ? undefined : tr("Save a trace first.")}><div className="fa-fact-head"><input value={size} onChange={e => setSize(e.target.value)} placeholder='e.g. 2"' maxLength={40} disabled={!pipes.length} />{mixedNominal ? <Badge tone="amber">{tr("Varies by span")}</Badge> : nominal && factStatus(nominal)}</div></Field>
+      <Field label={tr("Material")}><select value={mat} onChange={e => setMat(e.target.value)}><option value="">{tr("Not stated")}</option>{MATERIALS.map(([v, l]) => <option key={v} value={v}>{tr(l)}</option>)}</select></Field>
     </div>
     <div className="fa-row2">
-      {mixedNominal ? <Field label="Nominal size provenance"><select value="mixed" disabled><option value="mixed">Varies by span</option></select><small className="fa-muted">Existing provenance is preserved for each span.</small></Field> : provenanceControl("Nominal size provenance", nominal, nominalProvenance, setNominalProvenance)}
+      {mixedNominal ? <Field label={tr("Nominal size provenance")}><select value="mixed" disabled><option value="mixed">{tr("Varies by span")}</option></select><small className="fa-muted">{tr("Existing provenance is preserved for each span.")}</small></Field> : provenanceControl("Nominal size provenance", nominal, nominalProvenance, setNominalProvenance)}
       {provenanceControl("Material provenance", material, materialProvenance, setMaterialProvenance)}
     </div>
-    {mixedSize && <p className="fa-muted small">Sizes vary by span. The first span is shown; editing this value applies it to every included span.</p>}
+    {mixedSize && <p className="fa-muted small">{tr("Sizes vary by span. The first span is shown; editing this value applies it to every included span.")}</p>}
     {provenanceControl("Requirement text provenance", requirement, provenance, setProvenance)}
-    <Field label="Requirement text"><textarea rows={2} value={text} onChange={e => setText(e.target.value)} placeholder="e.g. Schedule 40 black steel pipe with threaded cast-iron fittings" maxLength={1000} /></Field>
-    <Field label="Where it is stated"><input value={ref} onChange={e => setRef(e.target.value)} placeholder="e.g. FS-02 general notes" maxLength={300} /></Field>
-    <Field label="Requirement source page" hint="Page containing the material requirement or notes. The nominal-size label remains linked to the traced drawing page."><input type="number" min={1} max={maxPage} step={1} value={sourcePage} onChange={e => setSourcePage(e.target.value)} /></Field>
-    <div className="fa-actions"><Button busy={busy === "requirements"} disabled={!!busy || !validPage} onClick={() => void save()}>Save requirements</Button></div>
+    <Field label={tr("Requirement text")}><textarea rows={2} value={text} onChange={e => setText(e.target.value)} placeholder={tr("e.g. Schedule 40 black steel pipe with threaded cast-iron fittings")} maxLength={1000} /></Field>
+    <Field label={tr("Where it is stated")}><input value={ref} onChange={e => setRef(e.target.value)} placeholder={tr("e.g. FS-02 general notes")} maxLength={300} /></Field>
+    <Field label={tr("Requirement source page")} hint={tr("Page containing the material requirement or notes. The nominal-size label remains linked to the traced drawing page.")}><input type="number" min={1} max={maxPage} step={1} value={sourcePage} onChange={e => setSourcePage(e.target.value)} /></Field>
+    <div className="fa-actions"><Button busy={busy === "requirements"} disabled={!!busy || !validPage} onClick={() => void save()}>{tr("Save requirements")}</Button></div>
   </Section>;
 }
 

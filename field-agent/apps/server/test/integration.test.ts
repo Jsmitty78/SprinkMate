@@ -636,3 +636,18 @@ it.each(["uncalculated", "unevaluated", "baseline-only", "one-candidate", "pendi
   if(!reviewed) {expect(await response.text()).toContain("candidate_review_incomplete");expect(t.packages.get(initial.id).selectedPlan).toBeNull();}
   else expect(t.packages.get(initial.id).selectedPlan?.id).toBe(candidates.candidates[0].plan.id);
 });
+
+it("keeps synthetic open-end topology usable without confirming fabrication dimensions", async () => {
+  const t = setup();
+  const s = await create(t, 2, true, input => {
+    input.detailing = input.detailing.map(f => f.field.startsWith("datum.")
+      ? { ...f, confirmation: "proposed", provenance: "synthetic_assumption", source: { ...f.source, description: "SAMPLE: fictional endpoint datum" } }
+      : f);
+  });
+  const result = await run(t, s.id);
+  expect(result.run?.status).not.toBe("failed");
+  const cuts = t.detailStore.get(s.id)!.details[0].fabrication.cuts;
+  expect(cuts).toHaveLength(2);
+  expect(cuts.every(c => c.cutLength.value === null)).toBe(true);
+  expect(result.outputs.results.some(r => r.materials.length > 0)).toBe(true);
+});

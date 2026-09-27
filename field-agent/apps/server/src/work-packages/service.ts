@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import sharp from 'sharp';
+import { Type } from 'typebox';
 import {
   AnswerPackageRequestSchema, CreateWorkPackageSchema, EditWorkPackageSchema, PublishPackageOutputsSchema,
   SelectPackagePlanSchema, StartPackageRunSchema,
@@ -114,6 +115,27 @@ export class WorkPackageService {
     this.validate(snapshot);
     this.store.insert(snapshot);
     return this.get(snapshot.id);
+  }
+  /** The new package and all source assets either commit together or roll back together. */
+  copyForSiteChange(id: string, input: unknown) {
+    const data = parse(Type.Object({ expectedRevision: Type.Integer({ minimum: 1 }), title: Type.String({ minLength: 1, maxLength: 8000 }) }, { additionalProperties: false }), input);
+    return this.store.db.transaction(() => {
+      const source = this.snapshot(id);
+      this.expected(source, data.expectedRevision);
+      const next = this.create({ projectId: source.projectId, intent: 'adapt_to_site', title: data.title });
+      const ids = new Set([source.sourceDrawing?.assetId, ...source.siteFacts.concat(source.detailing).map(f => f.source.assetId)].filter((id): id is string => !!id));
+      const replacements = new Map<string, string>();
+      for (const assetId of ids) {
+        const asset = this.sourceAsset(id, assetId), copiedId = randomUUID();
+        this.store.putAsset({ ...asset.metadata, id: copiedId, packageId: next.id }, asset.bytes);
+        replacements.set(assetId, copiedId);
+      }
+      const copyFacts = (facts: WorkPackageSnapshot['siteFacts']) => facts.map(f => ({ ...f, source: { ...f.source, assetId: f.source.assetId ? replacements.get(f.source.assetId)! : null } }));
+      return this.edit(next.id, { expectedRevision: next.inputRevision, patch: {
+        sourceDrawing: source.sourceDrawing ? { ...source.sourceDrawing, assetId: replacements.get(source.sourceDrawing.assetId)! } : null,
+        baselinePlan: source.baselinePlan, scope: source.scope, detailing: copyFacts(source.detailing), siteFacts: copyFacts(source.siteFacts),
+      } });
+    })();
   }
   private validate(snapshot: WorkPackageSnapshot) {
     validateInputs(snapshot, id => {

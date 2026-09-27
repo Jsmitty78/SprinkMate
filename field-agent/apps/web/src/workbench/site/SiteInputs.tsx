@@ -1,3 +1,4 @@
+import { tr } from "../locale.js";
 import { geometryFactUsable } from "@field-agent/core";
 import { useEffect, useState } from "react";
 import type { PackageInputs } from "@field-agent/core";
@@ -33,21 +34,21 @@ export function siteEvidence(previous: Fact | undefined, basis: Basis, confirm: 
 }
 
 function BasisPicker({ basis, onChange, name, locked = false }: { basis: Basis; onChange: (b: Basis) => void; name: string; locked?: boolean }) {
-  return <div className="fa-chips" role="radiogroup" aria-label="Basis">
+  return <div className="fa-chips" role="radiogroup" aria-label={tr("Basis")}>
     {([["measured", "Measured on site"], ["assumption", "Test assumption (fictional)"]] as const).map(([v, l]) =>
-      <label key={v} className={`fa-chip ${basis === v ? "is-on" : ""}`}><input type="radio" name={name} disabled={locked} checked={basis === v} onChange={() => onChange(v)} />{l}</label>)}
+      <label key={v} className={`fa-chip ${basis === v ? "is-on" : ""}`}><input type="radio" name={name} disabled={locked} checked={basis === v} onChange={() => onChange(v)} />{tr(l)}</label>)}
   </div>;
 }
 
 function statusBadge(facts: Array<Fact | undefined>) {
   const present = facts.filter(f => f && f.value !== null);
-  if (!present.length) return <Badge tone="amber">Not entered</Badge>;
+  if (!present.length) return <Badge tone="amber">{tr("Not entered")}</Badge>;
   const assumption = present.some(f => isTestAssumption(f));
   const all = present.length === facts.length && facts.every(assumption ? geometryFactUsable : isConfirmed);
   return <span className="fa-badges">
-    {assumption && <Badge tone="sample" title="Fictional value for testing the software, not a field observation">Test assumption</Badge>}
-    {all ? <Badge tone="green">{assumption ? "Usable for testing" : "Measured and confirmed"}</Badge>
-      : present.length < facts.length ? <Badge tone="amber">Incomplete</Badge> : <Badge tone="amber">Entered, not confirmed</Badge>}
+    {assumption && <Badge tone="sample" title={tr("Fictional value for testing the software, not a field observation")}>{tr("Test assumption")}</Badge>}
+    {all ? <Badge tone="green">{assumption ? tr("Usable for testing") : tr("Measured and confirmed")}</Badge>
+      : present.length < facts.length ? <Badge tone="amber">{tr("Incomplete")}</Badge> : <Badge tone="amber">{tr("Entered, not confirmed")}</Badge>}
   </span>;
 }
 
@@ -113,7 +114,7 @@ export function SiteFrameInputs({ s, act, busy, setNotice, callouts }: Common & 
   const initial = () => affected ?? pinned ?? pipes[0]?.id ?? "";
   const [span, setSpan] = useState(initial);
   useEffect(() => setSpan(initial()), [affected, pinned, saved?.reason]);
-  if (!plan || !pipes.length) return <p className="fa-muted">Trace or enter the existing run first, then pin the frame to the span the obstacle blocks.</p>;
+  if (!plan || !pipes.length) return <p className="fa-muted">{tr("Trace or enter the existing run first, then pin the frame to the span the obstacle blocks.")}</p>;
 
   const target = span ? spanFrame(plan, span) : null;
   const frame = target ? frameFromYaw(target.origin, target.yaw) : null;
@@ -127,7 +128,7 @@ export function SiteFrameInputs({ s, act, busy, setNotice, callouts }: Common & 
     const at = (end === "start" ? pipe?.ports[0] : pipe?.ports.at(-1))?.position;
     const labels = at ? plan.entities.filter(e => e.id !== span && e.ports.some(p => p.position && Math.hypot(p.position.x - at.x, p.position.y - at.y) < 1e-6))
       .map(e => findFact(s, "sourceLabel", e.id)?.value).filter((l): l is string => typeof l === "string" && !!l) : [];
-    return labels[0] ?? `its ${end}`;
+    return labels[0] ?? tr(end);
   };
   const changed = !saved || !!saved.reason || pinned !== span;
 
@@ -146,17 +147,17 @@ export function SiteFrameInputs({ s, act, busy, setNotice, callouts }: Common & 
   });
 
   return <div className="fa-stack">
-    <Field label="Span the frame is pinned to"><select value={span} onChange={e => setSpan(e.target.value)}>
+    <Field label={tr("Span the frame is pinned to")}><select value={span} onChange={e => setSpan(e.target.value)}>
       {pipes.map(p => <option key={p.id} value={p.id}>{label(p.id)}</option>)}
     </select></Field>
     {frame && target ? <div className="fa-frame-note">
-      <p>X runs along the pipe from {endLabel("start")} (X = 0) to {endLabel("end")} (X = {lengthText({ value: target.length, unit: "mm", basis: "confirmed_inputs" }).primary}). Y is level and points to the left of the pipe looking along X. Z is up, 0 at the pipe centerline.</p>
+      <p>{tr("X runs along the pipe from")}{" "}{endLabel("start")}{" "}{tr("(X = 0) to")}{" "}{endLabel("end")}{" "}{tr("(X =")}{" "}{lengthText({ value: target.length, unit: "mm", basis: "confirmed_inputs" }).primary}{tr("). Y is level and points to the left of the pipe looking along X. Z is up, 0 at the pipe centerline.")}</p>
       <p className="mono small">{formulas!.plan}</p>
       {formulas!.drawing && <p className="mono small">{formulas!.drawing}</p>}
-      <p className="small fa-muted">The frame is right-handed (yaw {target.yaw < 0 ? "−" : ""}{num(target.yaw)}°). A value given with Y to the right of the pipe is entered with its Y sign flipped.</p>
-    </div> : <p className="fa-warn small">This span is not level or has no length, so it cannot carry a local frame.</p>}
-    <div className="fa-fact-head"><span className="fa-muted small">A frame choice, not a measurement.</span>{saved ? saved.reason ? <Badge tone="amber">{saved.reason}</Badge> : pinned ? <Badge tone="green">Saved</Badge> : <Badge tone="neutral">Saved on another origin</Badge> : <Badge tone="neutral">Drawing frame</Badge>}</div>
-    <div className="fa-actions"><Button variant="primary" busy={busy === "siteFrame"} disabled={!!busy || !target || !changed} onClick={() => void save()}>{saved ? "Save frame" : "Enter boxes along this span"}</Button></div>
+      <p className="small fa-muted">{tr("The frame is right-handed (yaw")}{" "}{target.yaw < 0 ? "−" : ""}{num(target.yaw)}{tr("°). A value given with Y to the right of the pipe is entered with its Y sign flipped.")}</p>
+    </div> : <p className="fa-warn small">{tr("This span is not level or has no length, so it cannot carry a local frame.")}</p>}
+    <div className="fa-fact-head"><span className="fa-muted small">{tr("A frame choice, not a measurement.")}</span>{saved ? saved.reason ? <Badge tone="amber">{saved.reason}</Badge> : pinned ? <Badge tone="green">{tr("Saved")}</Badge> : <Badge tone="neutral">{tr("Saved on another origin")}</Badge> : <Badge tone="neutral">{tr("Drawing frame")}</Badge>}</div>
+    <div className="fa-actions"><Button variant="primary" busy={busy === "siteFrame"} disabled={!!busy || !target || !changed} onClick={() => void save()}>{saved ? tr("Save frame") : tr("Enter boxes along this span")}</Button></div>
   </div>;
 }
 
@@ -204,30 +205,30 @@ export function SiteBoxInputs({ s, act, busy, unit, setNotice, prefix, title, he
   const gaps = box.values.some(v => v !== null) ? boxGaps(s, prefix, local) : [];
 
   return <div className="fa-stack">
-    <div className="fa-fact-head"><span className="fa-muted">{help}</span>{sample ? <Badge tone="sample">Sample</Badge> : statusBadge(facts)}</div>
+    <div className="fa-fact-head"><span className="fa-muted">{help}</span>{sample ? <Badge tone="sample">{tr("Sample")}</Badge> : statusBadge(facts)}</div>
     <div className="fa-boxgrid">
-      <span /><span className="fa-muted small">From</span><span className="fa-muted small">To</span>
+      <span /><span className="fa-muted small">{tr("Lower bound")}</span><span className="fa-muted small">{tr("Upper bound")}</span>
       {AXES.map((a, i) => [
-        <span key={`${a}l`} className="small">{axisLabel[i]}</span>,
-        ...[i, i + 3].map(j => <input key={j} aria-label={`${title} ${axisLabel[i]} ${j < 3 ? "from" : "to"}`} className={`mono ${(vals[j].trim() && parsed[j] === null) || order[i] ? "is-invalid" : ""}`} value={vals[j]} placeholder="Unknown"
+        <span key={`${a}l`} className="small">{tr(axisLabel[i])}</span>,
+        ...[i, i + 3].map(j => <input key={j} aria-label={`${title} ${tr(axisLabel[i])} ${tr(j < 3 ? "Lower bound" : "Upper bound")}`} className={`mono ${(vals[j].trim() && parsed[j] === null) || order[i] ? "is-invalid" : ""}`} value={vals[j]} placeholder={tr("Unknown")}
           onChange={e => setVals(vals.map((v, k) => k === j ? e.target.value : v))} />),
       ])}
     </div>
     <small className="fa-muted">{unitHint(unit)}</small>
-    {order.some(Boolean) && <small className="fa-warn">Each "From" must be less than its "To".</small>}
-    {!complete && <small className="fa-warn">Empty faces are saved as unknown, not zero.{parsed[2] === null || parsed[5] === null ? " Without the height (Z), no route can be generated around it." : ""}</small>}
+    {order.some(Boolean) && <small className="fa-warn">{tr("Each \"From\" must be less than its \"To\".")}</small>}
+    {!complete && <small className="fa-warn">{tr("Empty faces are saved as unknown, not zero.")}{parsed[2] === null || parsed[5] === null ? tr(" Without the height (Z), no route can be generated around it.") : ""}</small>}
     <BasisPicker basis={facts.some(isTestAssumption) ? "assumption" : basis} onChange={setBasis} name={`${prefix}-basis`} locked={facts.some(isTestAssumption)} />
     <div className="fa-row2">
-      <Field label={basis === "assumption" ? "Why this value (optional)" : "How it was measured (optional)"}><input value={note} onChange={e => setNote(e.target.value)} placeholder={basis === "assumption" ? "e.g. FS-01 acceptance v1" : "e.g. Tape from the pipe centerline"} /></Field>
-      <Field label="Evidence photo"><select value={photo} onChange={e => setPhoto(e.target.value)}>
-        <option value="">None</option>{photos.map(p => <option key={p.id} value={p.source.assetId!}>{p.source.description.slice(0, 60)}</option>)}
+      <Field label={basis === "assumption" ? tr("Why this value (optional)") : tr("How it was measured (optional)")}><input value={note} onChange={e => setNote(e.target.value)} placeholder={basis === "assumption" ? tr("e.g. FS-01 acceptance v1") : tr("e.g. Tape from the pipe centerline")} /></Field>
+      <Field label={tr("Evidence photo")}><select value={photo} onChange={e => setPhoto(e.target.value)}>
+        <option value="">{tr("None")}</option>{photos.map(p => <option key={p.id} value={p.source.assetId!}>{p.source.description.slice(0, 60)}</option>)}
       </select></Field>
     </div>
-    {photo && <small className="fa-muted">The photo is linked as evidence. The numbers come from what you typed, never from the photo.</small>}
+    {photo && <small className="fa-muted">{tr("The photo is linked as evidence. The numbers come from what you typed, never from the photo.")}</small>}
     {gaps.length > 0 && <ul className="fa-gaps">{gaps.map(g => <li key={g}>{g}</li>)}</ul>}
     <div className="fa-actions">
-      <Button busy={busy === `${prefix}.save`} disabled={!!busy || invalid} onClick={() => void save(false)}>Save</Button>
-      <Button variant="primary" busy={busy === `${prefix}.confirm`} disabled={!!busy || invalid || !complete || order.some(Boolean) || (local && !!site?.reason)} onClick={() => void save(true)}>{basis === "assumption" ? "Confirm test values" : "Confirm measurement"}</Button>
+      <Button busy={busy === `${prefix}.save`} disabled={!!busy || invalid} onClick={() => void save(false)}>{tr("Save")}</Button>
+      <Button variant="primary" busy={busy === `${prefix}.confirm`} disabled={!!busy || invalid || !complete || order.some(Boolean) || (local && !!site?.reason)} onClick={() => void save(true)}>{basis === "assumption" ? tr("Confirm test values") : tr("Confirm measurement")}</Button>
     </div>
   </div>;
 }
@@ -249,14 +250,14 @@ export function SiteLengthInput({ s, act, busy, unit, setNotice, field, subject,
   return <div className="fa-fact">
     <div className="fa-fact-head"><span>{label}{tag && <> <Badge tone="neutral">{tag}</Badge></>}</span>{statusBadge([f])}</div>
     <div className="fa-row2">
-      <input className={`mono ${value.trim() && parsed === null ? "is-invalid" : ""}`} value={value} onChange={e => setValue(e.target.value)} aria-label={label} placeholder={unit === "mm" ? "mm" : "ft-in"} />
-      <input value={note} onChange={e => setNote(e.target.value)} aria-label={`${label} note`} placeholder="Note (optional)" />
+      <input className={`mono ${value.trim() && parsed === null ? "is-invalid" : ""}`} value={value} onChange={e => setValue(e.target.value)} aria-label={label} placeholder={unit === "mm" ? tr("mm") : tr("ft-in")} />
+      <input value={note} onChange={e => setNote(e.target.value)} aria-label={`${label} note`} placeholder={tr("Note (optional)")} />
     </div>
     <BasisPicker basis={isTestAssumption(f) ? "assumption" : basis} onChange={setBasis} name={`${field}-${subject ?? ""}-basis`} locked={isTestAssumption(f)} />
     <small className="fa-muted">{help} {unitHint(unit)}</small>
     <div className="fa-actions">
-      <Button busy={busy === `${field}.false`} disabled={!!busy || (!!value.trim() && parsed === null)} onClick={() => void save(false)}>Save</Button>
-      <Button variant="primary" busy={busy === `${field}.true`} disabled={!!busy || parsed === null || parsed <= 0} onClick={() => void save(true)}>Confirm</Button>
+      <Button busy={busy === `${field}.false`} disabled={!!busy || (!!value.trim() && parsed === null)} onClick={() => void save(false)}>{tr("Save")}</Button>
+      <Button variant="primary" busy={busy === `${field}.true`} disabled={!!busy || parsed === null || parsed <= 0} onClick={() => void save(true)}>{tr("Confirm")}</Button>
     </div>
   </div>;
 }

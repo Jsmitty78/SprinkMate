@@ -1,3 +1,4 @@
+import { tr } from "../locale.js";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { api, type Snapshot } from "../api.js";
@@ -5,7 +6,10 @@ import { lengthText } from "../format.js";
 import { Callout, Icon, Spinner } from "../ui.js";
 import { imageSize, openPdf, renderPage, type SheetRaster } from "./pdf.js";
 import { planToSheet, sheetToPlan, spanLengths, type SheetPoint } from "./sheet.js";
+import { planShape, labelFor, type Plan, type Callouts } from "../model.js";
 import type { Intake, Rect } from "./useIntake.js";
+
+import type { ShapeOverlay } from "../site/SiteShapeEditor.js";
 
 interface Box { x: number; y: number; w: number; h: number }
 const TOOL_HINT: Record<string, string> = {
@@ -22,7 +26,7 @@ const TOOL_HINT: Record<string, string> = {
  * The uploaded sheet in its own units (PDF points or image pixels, Y down), with the intake overlays.
  * The page is drawn by the browser; nothing on it is read automatically.
  */
-export function SheetView({ s, intake }: { s: Snapshot; intake: Intake }) {
+export function SheetView({ s, intake, readOnly = false, displayPlan, comparisonPlan, selectedIds = [], context, onSelectPiece, callouts, shapeOverlay }: { s: Snapshot; intake: Intake; shapeOverlay?: ShapeOverlay; readOnly?: boolean; displayPlan?: Plan | null; comparisonPlan?: Plan | null; selectedIds?: string[]; context?: ReadonlySet<string>; onSelectPiece?: (id: string | null) => void; callouts?: Callouts }) {
   const d = s.sourceDrawing!;
   const host = useRef<HTMLDivElement>(null);
   const svg = useRef<SVGSVGElement>(null);
@@ -98,8 +102,8 @@ export function SheetView({ s, intake }: { s: Snapshot; intake: Intake }) {
   };
   useEffect(() => { fitTo(area); }, [sheet?.width, sheet?.height, sheet?.unit, size.w > 50]);
 
-  if (error) return <div className="fa-drawing"><Callout tone="red" title="Could not open the drawing">{error}</Callout></div>;
-  if (!sheet || !box) return <div className="fa-drawing" ref={host}><Spinner label="Opening the drawing…" /></div>;
+  if (error) return <div className="fa-drawing"><Callout tone="red" title={tr("Could not open the drawing")}>{error}</Callout></div>;
+  if (!sheet || !box) return <div className="fa-drawing" ref={host}><Spinner label={tr("Opening the drawing…")} /></div>;
 
   const k = box.w / size.w; // sheet units per screen pixel
   const px = (n: number) => n * k;
@@ -118,7 +122,7 @@ export function SheetView({ s, intake }: { s: Snapshot; intake: Intake }) {
     const dx = e.clientX - g.x, dy = e.clientY - g.y;
     if (Math.abs(dx) + Math.abs(dy) > 3) g.moved = true;
     if (!g.moved) return;
-    if (intake.tool === "area") {
+    if (!readOnly && intake.tool === "area") {
       const p = toSheet(e);
       setDragRect({ x: Math.min(p.x, g.start.x), y: Math.min(p.y, g.start.y), width: Math.abs(p.x - g.start.x), height: Math.abs(p.y - g.start.y) });
     } else setBox({ ...g.box, x: g.box.x - dx * k, y: g.box.y - dy * k });
@@ -127,13 +131,16 @@ export function SheetView({ s, intake }: { s: Snapshot; intake: Intake }) {
     const g = drag.current;
     drag.current = null;
     if (!g) return;
-    if (intake.tool === "area" && g.moved && dragRect) {
+    if (!readOnly && intake.tool === "area" && g.moved && dragRect) {
       if (dragRect.width > 0 && dragRect.height > 0) { intake.setWorkArea(dragRect); intake.chooseTool("area"); }
       setDragRect(null);
       return;
     }
     // Half a screen pixel at this zoom, in sheet units: how precisely this click can be placed.
-    if (!g.moved) intake.click(toSheet(e), k / 2);
+    if (!g.moved) {
+      if (readOnly) onSelectPiece?.(document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-piece]")?.getAttribute("data-piece") ?? null);
+      else intake.click(toSheet(e), k / 2);
+    }
   };
   const zoomBy = (f: number, at?: SheetPoint) => {
     const c = at ?? { x: box.x + box.w / 2, y: box.y + box.h / 2 };
@@ -141,7 +148,7 @@ export function SheetView({ s, intake }: { s: Snapshot; intake: Intake }) {
     setBox({ x: c.x - (c.x - box.x) * (w / box.w), y: c.y - (c.y - box.y) * (h / box.h), w, h });
   };
 
-  const t = intake.draftTransform;
+  const t = intake.viewDirty ? intake.draftTransform : intake.savedTransform ?? intake.draftTransform;
   const nodes = intake.trace.nodes;
   const lengths = t ? spanLengths(intake.trace, t) : [];
   const cal = intake.cal;
@@ -150,13 +157,14 @@ export function SheetView({ s, intake }: { s: Snapshot; intake: Intake }) {
   const untraced = !nodes.length && s.baselinePlan && intake.savedTransform ? s.baselinePlan : null;
 
   return <div className={`fa-sheet tool-${intake.tool}`} ref={host}>
-    <svg ref={svg} viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`} width="100%" height="100%" role="img" aria-label={`Sheet ${d.drawingId} page ${d.page}`}
+    <svg ref={svg} viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`} width="100%" height="100%" role="img" aria-label={tr("Drawing {id}, page {page}", { id: d.drawingId, page: d.page })}
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onWheel={e => zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15, toSheet(e))}>
       <rect x={0} y={0} width={sheet.width} height={sheet.height} className="fa-sheet-paper" />
       {raster && <image href={raster.url} x={raster.x} y={raster.y} width={raster.width} height={raster.height} preserveAspectRatio="none" />}
       {detail && <image href={detail.url} x={detail.x} y={detail.y} width={detail.width} height={detail.height} preserveAspectRatio="none" />}
       {area && <rect className="fa-sheet-area" x={area.x} y={area.y} width={area.width} height={area.height} strokeWidth={px(1.5)} strokeDasharray={`${px(6)} ${px(4)}`} />}
       {dragRect && <rect className="fa-sheet-area is-drag" x={dragRect.x} y={dragRect.y} width={dragRect.width} height={dragRect.height} strokeWidth={px(1.5)} />}
+      {!readOnly && <>
       {cal.a && <g className="fa-sheet-cal">
         {cal.b && <line x1={cal.a.x} y1={cal.a.y} x2={cal.b.x} y2={cal.b.y} strokeWidth={px(2)} />}
         {[cal.a, cal.b].filter(Boolean).map((p, i) => <g key={i} transform={`translate(${p!.x} ${p!.y})`}><line x1={px(-7)} x2={px(7)} strokeWidth={px(1.5)} /><line y1={px(-7)} y2={px(7)} strokeWidth={px(1.5)} /></g>)}
@@ -191,18 +199,29 @@ export function SheetView({ s, intake }: { s: Snapshot; intake: Intake }) {
         </g>)}
       </g>
       {intake.pending.map((p, i) => <circle key={i} className="fa-sheet-pending" cx={p.x} cy={p.y} r={px(5)} />)}
+      </>}
+      {readOnly && intake.savedTransform && [comparisonPlan, displayPlan].map((plan, index) => plan && <g key={`${index}-${plan.id}`} opacity={index === 0 ? .45 : 1}>{planShape(plan, context).segments.map(segment => {
+        const a = planToSheet(segment.a, intake.savedTransform!), b = planToSheet(segment.b, intake.savedTransform!);
+        const selected = selectedIds.includes(segment.id);
+        return <g key={segment.id} data-piece={index === 1 && !segment.context ? segment.id : undefined}>
+          <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={selected ? "var(--fa-blue-soft)" : "transparent"} strokeWidth={px(18)} />
+          <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={index === 0 || segment.context ? "#7e8b9c" : "var(--fa-blue)"} strokeWidth={px(selected ? 5 : 3)} strokeDasharray={index === 0 ? `${px(6)} ${px(5)}` : undefined} />
+          {index === 1 && !segment.context && <text x={(a.x+b.x)/2} y={(a.y+b.y)/2-px(10)} fontSize={px(12)} fill="var(--fa-blue-ink)" stroke="white" strokeWidth={px(3)} paintOrder="stroke">{callouts ? labelFor(callouts, segment.id) : segment.id}</text>}
+        </g>;
+      })}{planShape(plan, context).markers.map(marker => { const at = planToSheet(marker.at, intake.savedTransform!); return <circle key={marker.id} data-piece={index === 1 && !marker.context ? marker.id : undefined} cx={at.x} cy={at.y} r={px(selectedIds.includes(marker.id) ? 9 : 5)} fill={selectedIds.includes(marker.id) ? "var(--fa-blue)" : "white"} stroke={marker.context ? "#7e8b9c" : "var(--fa-blue)"} strokeWidth={px(2)} />; })}</g>)}
+      {shapeOverlay && intake.savedTransform && s.baselinePlan?.coordinateFrame.id === "drawing-plan" && shapeOverlay({ bounds: box, px, fromPlan: p => planToSheet(p, intake.savedTransform!), toPlan: p => sheetToPlan(p, intake.savedTransform!) })}
     </svg>
-    {TOOL_HINT[intake.tool] && <div className="fa-sheet-hint" role="status"><Icon name="select" size={14} />{TOOL_HINT[intake.tool]}</div>}
-    <div className="fa-sheet-bar">
-      <b className="mono">{d.drawingId}</b> Rev {d.revision} · page {d.page}{sheet.pages > 1 ? ` of ${sheet.pages}` : ""}
-      <span className="fa-muted">{sheet.unit === "pdf_pt" ? "Sheet units: PDF points" : "Sheet units: image pixels"}{t ? ` · ${round(t.scale)} mm per unit` : " · scale not set"}</span>
-      {d.view?.derivativeOf && <span className="fa-muted">Copy of {d.view.derivativeOf}</span>}
-    </div>
-    <div className="fa-zoom" role="toolbar" aria-label="Zoom">
-      <button type="button" onClick={() => zoomBy(1 / 1.25)} aria-label="Zoom out"><Icon name="minus" /></button>
-      <button type="button" onClick={() => zoomBy(1.25)} aria-label="Zoom in"><Icon name="plus" /></button>
-      <button type="button" onClick={() => fitTo(area)} aria-label="Fit to work area" title="Fit to work area"><Icon name="fit" /></button>
-      {area && <button type="button" onClick={() => fitTo(null)} aria-label="Whole sheet" title="Whole sheet"><Icon name="drawing" /></button>}
+    {!readOnly && TOOL_HINT[intake.tool] && <div className="fa-sheet-hint" role="status"><Icon name="select" size={14} />{TOOL_HINT[intake.tool]}</div>}
+    <details className="fa-sheet-bar"><summary>{d.drawingId}</summary><div>
+      <b className="mono">{d.drawingId}</b>{" "}{tr("Rev")}{" "}{d.revision}{" "}{tr("· page")}{" "}{d.page}{sheet.pages > 1 ? ` of ${sheet.pages}` : ""}
+      <span className="fa-muted">{sheet.unit === "pdf_pt" ? tr("Sheet units: PDF points") : tr("Sheet units: image pixels")}{t ? ` · ${round(t.scale)} mm per unit` : tr(" · scale not set")}</span>
+      {d.view?.derivativeOf && <span className="fa-muted">{tr("Copy of")}{" "}{d.view.derivativeOf}</span>}
+    </div></details>
+    <div className="fa-zoom" role="toolbar" aria-label={tr("Zoom")}>
+      <button type="button" onClick={() => zoomBy(1 / 1.25)} aria-label={tr("Zoom out")}><Icon name="minus" /></button>
+      <button type="button" onClick={() => zoomBy(1.25)} aria-label={tr("Zoom in")}><Icon name="plus" /></button>
+      <button type="button" onClick={() => fitTo(area)} aria-label={tr("Fit to work area")} title={tr("Fit to work area")}><Icon name="fit" /></button>
+      {area && <button type="button" onClick={() => fitTo(null)} aria-label={tr("Whole sheet")} title={tr("Whole sheet")}><Icon name="drawing" /></button>}
     </div>
   </div>;
 }
@@ -221,8 +240,8 @@ function Axes({ t, px }: { t: NonNullable<Intake["draftTransform"]>; px: (n: num
   return <g className="fa-sheet-axes">
     <line x1={o2.x} y1={o2.y} x2={x.x} y2={x.y} strokeWidth={px(1.5)} markerEnd="" />
     <line x1={o2.x} y1={o2.y} x2={y.x} y2={y.y} strokeWidth={px(1.5)} />
-    <text x={x.x + px(4)} y={x.y + px(4)} fontSize={px(11)}>+X</text>
-    <text x={y.x + px(4)} y={y.y + px(4)} fontSize={px(11)}>+Y</text>
+    <text x={x.x + px(4)} y={x.y + px(4)} fontSize={px(11)}>{tr("+X")}</text>
+    <text x={y.x + px(4)} y={y.y + px(4)} fontSize={px(11)}>{tr("+Y")}</text>
     <circle cx={o2.x} cy={o2.y} r={px(3)} />
   </g>;
 }

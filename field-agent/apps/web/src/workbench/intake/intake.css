@@ -4,14 +4,14 @@
 .fa-sheet.tool-pan svg:active { cursor: grabbing; }
 .fa-sheet:not(.tool-pan) svg { cursor: crosshair; }
 .fa-sheet-paper { fill: #fff; }
-.fa-sheet-area { fill: rgba(26, 111, 224, .05); stroke: var(--fa-blue); }
-.fa-sheet-area.is-drag { fill: rgba(26, 111, 224, .1); }
-.fa-sheet-cal line { stroke: #c2410c; }
-.fa-sheet-cal text { fill: #c2410c; font-weight: 600; paint-order: stroke; stroke: #fff; stroke-width: .3em; }
-.fa-sheet-axes line { stroke: #6d28d9; }
-.fa-sheet-axes circle { fill: #6d28d9; }
-.fa-sheet-axes text { fill: #6d28d9; font-weight: 600; paint-order: stroke; stroke: #fff; stroke-width: .3em; }
-.fa-sheet-plan line { stroke: rgba(26, 111, 224, .6); stroke-linecap: round; }
+.fa-sheet-area { fill: rgba(75, 104, 95, .05); stroke: var(--fa-blue); }
+.fa-sheet-area.is-drag { fill: rgba(75, 104, 95, .1); }
+.fa-sheet-cal line { stroke: #96684d; }
+.fa-sheet-cal text { fill: #96684d; font-weight: 600; paint-order: stroke; stroke: #fff; stroke-width: .3em; }
+.fa-sheet-axes line { stroke: #716780; }
+.fa-sheet-axes circle { fill: #716780; }
+.fa-sheet-axes text { fill: #716780; font-weight: 600; paint-order: stroke; stroke: #fff; stroke-width: .3em; }
+.fa-sheet-plan line { stroke: rgba(75, 104, 95, .6); stroke-linecap: round; }
 .fa-sheet-trace line { stroke: var(--fa-blue); stroke-linecap: round; opacity: .85; }
 .fa-sheet-trace rect, .fa-sheet-trace circle { fill: #fff; stroke: var(--fa-blue); }
 .fa-sheet-trace .node-open_end line { stroke: var(--fa-blue); }
@@ -20,7 +20,7 @@
 .fa-sheet-context line { stroke: var(--fa-existing); stroke-linecap: round; }
 .fa-sheet-head circle { fill: none; stroke: #7c8594; }
 .fa-sheet-head line { stroke: #7c8594; }
-.fa-sheet-pending { fill: #c2410c; }
+.fa-sheet-pending { fill: #96684d; }
 .fa-sheet-hint { position: absolute; left: 12px; top: 12px; display: flex; gap: 6px; align-items: center; padding: 6px 10px; border-radius: 7px; background: var(--fa-ink); color: #fff; font-size: 13px; max-width: calc(100% - 24px); box-shadow: var(--fa-shadow); }
 .fa-sheet-bar { position: absolute; left: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 6px 10px; border-radius: 7px; background: rgba(255, 255, 255, .94); border: 1px solid var(--fa-line); font-size: 12.5px; max-width: calc(100% - 140px); }
 .fa-scale-eq { display: grid; grid-template-columns: 1fr auto auto 1fr auto; gap: 6px; align-items: center; }

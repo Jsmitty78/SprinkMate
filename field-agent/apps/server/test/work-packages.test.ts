@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +8,8 @@ import { FieldService } from '../src/service.js';
 import { createApp } from '../src/api.js';
 import { WorkPackageStore } from '../src/work-packages/store.js';
 import { WorkPackageService, type PackageRunContext, type WorkPackageRunner } from '../src/work-packages/service.js';
+
+import { shapePatch, shapeValues } from '../../web/src/workbench/site/shapes.js';
 
 const token = 'work-package-test-token';
 const headers = { Authorization: `Bearer ${token}` };
@@ -101,6 +103,30 @@ describe('work-package HTTP contracts and input ownership', () => {
     ]) expect((await s.app.request('/api/work-packages', json(bad))).status).toBe(400);
     expect((await s.app.request(path, { ...json(null, 'PATCH'), body: '{' })).status).toBe(400);
   });
+  it('copies source assets atomically and rejects stale revisions without leaving a package', async () => {
+    const s = setup(), p = s.packages.create(input());
+    const image = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#fff' } }).png().toBuffer();
+    const asset = await s.packages.upload(p.id, image, 'image/png', 'drawing.png');
+    const sourceDrawing = { assetId: asset.id, drawingId: 'drawing-1', revision: 'A', page: 1, approval: 'approved', scale: { value: null, unit: 'mm/pixel', reason: 'Explicit dimensions used', basis: 'unknown' } };
+    const source = s.packages.edit(p.id, { expectedRevision: 1, patch: { sourceDrawing } });
+    const path = `/api/work-packages/${p.id}/site-change`;
+    expect((await s.app.request(path, { method: 'POST', body: '{}' })).status).toBe(401);
+    expect((await s.app.request(path, json({ expectedRevision: 1, title: 'Stale copy' }))).status).toBe(409);
+    expect(s.packages.list()).toHaveLength(1);
+    const response = await s.app.request(path, json({ expectedRevision: source.inputRevision, title: 'Site change' }));
+    expect(response.status).toBe(201);
+    const copied = await response.json() as typeof source;
+    expect(copied.sourceDrawing!.assetId).not.toBe(asset.id);
+    expect(copied.baselinePlan).toEqual(source.baselinePlan);
+    expect(s.packages.sourceAsset(copied.id, copied.sourceDrawing!.assetId).bytes).toEqual(image);
+    const before = s.field.store.db.prepare('SELECT count(*) AS n FROM work_package_assets').get();
+    const fail = vi.spyOn(s.packages, 'edit').mockImplementationOnce(() => { throw new Error('simulated final edit failure'); });
+    expect(() => s.packages.copyForSiteChange(p.id, { expectedRevision: source.inputRevision, title: 'Failed copy' })).toThrow('simulated final edit failure');
+    fail.mockRestore();
+    expect(s.packages.list()).toHaveLength(2);
+    expect(s.field.store.db.prepare('SELECT count(*) AS n FROM work_package_assets').get()).toEqual(before);
+    expect(s.packages.get(p.id)).toEqual(source);
+  });
   it('uploads real decoded PNG bytes, freezes confirmed sources and blocks same-project and cross-project asset reuse', async () => {
     const s = setup(), p = s.packages.create(input());
     const image = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#fff' } }).png().toBuffer();
@@ -129,6 +155,21 @@ describe('work-package HTTP contracts and input ownership', () => {
 });
 
 describe('revision-bound outputs and explicit human decisions', () => {
+  it('persists shape edits and unknown height through the API and invalidates previous calculations', async () => {
+    const runner = new ControlledRunner(), s = setup(runner), { snapshot, context, path } = await start(s, runner, 3);
+    publishCandidates(context); context.publish({ results: [result(context)] });
+    runner.finish(); await tick();
+    const before = s.packages.get(snapshot.id), draft = shapeValues(before);
+    draft.duct = [4200, -350, null, 5900, 450, null];
+    const response = await s.app.request(path, json({ expectedRevision: before.inputRevision, patch: shapePatch(before, draft) }, 'PATCH'));
+    expect(response.status).toBe(200);
+    const saved = s.packages.get(snapshot.id);
+    expect(shapeValues(saved).duct).toEqual(draft.duct);
+    expect(saved.inputRevision).toBe(before.inputRevision + 1);
+    expect(saved.freshness.candidates).toBe(false);
+    expect(saved.freshness.results.every(r => !r.current)).toBe(true);
+    expect(saved.baselinePlan).toEqual(before.baselinePlan);
+  });
   it('saves partial results without changing inputs and makes a user-selected candidate stale without mutating source or site facts', async () => {
     const runner = new ControlledRunner(), s = setup(runner), { snapshot, context, path } = await start(s, runner, 3);
     const baseline = structuredClone(snapshot.baselinePlan), facts = structuredClone(snapshot.siteFacts);

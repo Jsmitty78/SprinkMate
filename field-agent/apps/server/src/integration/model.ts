@@ -164,7 +164,9 @@ export function fabricationInput(
       const c = connected.get(`${p.id}/${port.id}`),
         other = c && plan.entities.find((e) => e.id === c.entityId);
       const datum = value<string>(s, `datum.${end}`, p.id);
-      const scopeInterface = datum.status === "confirmed" && datum.value === "scope_interface";
+      // Synthetic datums may describe test topology, but value()/cutDatum() keep them unverified for fabrication.
+      const topologyUsable = geometryFactUsable(savedFact(s, `datum.${end}`, p.id));
+      const scopeInterface = topologyUsable && datum.value === "scope_interface";
       if (other && !["fitting", "tie_in"].includes(other.kind) && !(scopeInterface && other.kind === "head"))
         throw new Error("Pipe endpoints require a fitting or tie-in");
       const otherPort = other?.ports.find((p) => p.id === c!.portId);
@@ -177,7 +179,7 @@ export function fabricationInput(
       const nodeId = other ? `node-${other.id}` : `node-${p.id}-${end}`;
       const physical =
         !other &&
-        datum.status === "confirmed" &&
+        topologyUsable &&
         datum.value === "physical_pipe_end";
       if (!c && !physical && !scopeInterface)
         throw new Error(
