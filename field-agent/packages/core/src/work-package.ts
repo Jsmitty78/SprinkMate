@@ -115,7 +115,6 @@ export type DrawingRef = Static<typeof DrawingRefSchema>;
 export type DrawingView = Static<typeof DrawingViewSchema>;
 export type PackageInputs = Static<typeof PackageInputsSchema>;
 export type CreateWorkPackage = Static<typeof CreateWorkPackageSchema>;
-export type EditWorkPackage = Static<typeof EditWorkPackageSchema>;
 export type CandidateSet = Static<typeof CandidateSetSchema>;
 export type PackageResult = Static<typeof PackageResultSchema>;
 export type PackageRequest = Static<typeof PackageRequestSchema>;

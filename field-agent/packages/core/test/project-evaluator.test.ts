@@ -282,7 +282,7 @@ describe("project evaluation contract", () => {
     [250, 17.23689323292, "bar", "unknown"],
     [250, 17.3, "bar", "fail"],
     [250, 250.01, "psi", "fail"],
-  ] as const)("compares the published pressure boundary %s psi from %s %s", (boundary, value, unit, expected, model: string = "TY3231") => {
+  ] as const)("compares the published pressure boundary %s psi from %s %s", (_boundary, value, unit, expected, model: string = "TY3231") => {
     const input = validRequest();
     input.heads![0]!.facts!.model = fact(model);
     input.heads![0]!.facts!.workingPressure = fact({ value, unit: unit as "kPa" | "bar" | "psi" }, ["calculation"]);

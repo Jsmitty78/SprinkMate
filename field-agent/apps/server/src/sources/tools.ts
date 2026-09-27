@@ -198,8 +198,3 @@ type Product = Catalog['products'][number];
 const pipeOf = (c: Catalog) => c.products.find((p): p is Extract<Product, { kind: 'pipe' }> => p.id === PIPE_ID && p.kind === 'pipe')!;
 const elbowOf = (c: Catalog) => c.products.find((p): p is Extract<Product, { kind: 'elbow_90' }> => p.id === ELBOW_ID && p.kind === 'elbow_90')!;
 const round = (n: number, digits = 1) => Math.round(n * 10 ** digits) / 10 ** digits;
-
-export const TOOLS = [
-  { id: 'pipe_duct_clearance', title: 'Pipe to duct clearance (geometry only)', script: 'evaluateLocalPlanGeometry' },
-  { id: 'straight_cut_length', title: 'Cut length between two 4206-010S elbows', script: 'evaluateLocalPlanGeometry' },
-] as const;

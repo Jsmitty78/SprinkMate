@@ -1,4 +1,4 @@
-import type { Fact, RuleStatus, SourceReference } from "../types.js";
+import type { Fact, RuleStatus } from "../types.js";
 import type {
   DocumentRevisionRef,
   ProjectEvaluationRequest,
@@ -198,15 +198,6 @@ function routeHasChanged(baseline: ProjectLocalPlan, proposed: ProjectLocalPlan,
   return signature(baseline) !== signature(proposed);
 }
 
-function sourceDocument(request: ProjectEvaluationRequest, evidenceIds: readonly string[]): { value?: DocumentRevisionRef; issues: string[] } {
-  const records = evidenceIds.map(id => (request.evidence ?? []).find(record => record.id === id)).filter((value): value is ProjectEvidence => !!value);
-  const sources = records.filter(record => record.kind === "drawing");
-  if (sources.length !== records.length || !sources.length) return { issues: ["drawing.evidence"] };
-  const first = sources[0]!.documentRevision;
-  if (!sources.every(record => sameRevision(record.documentRevision, first))) return { issues: ["drawing.revision"] };
-  return { value: first, issues: [] };
-}
-
 function scopeState(request: ProjectEvaluationRequest): { state: LocalChangeVerificationState; reason: string; missing: string[]; evidence: string[] } {
   const facts = request.facts ?? {};
   const scopeFacts = [facts.systemType, facts.sprinklerType, facts.storage, facts.hazardClassification];
@@ -329,10 +320,6 @@ function compareStableContext(request: ProjectEvaluationRequest, input: ProjectL
   compareContexts("duct", baseline.ducts, proposed.ducts, duct => duct.id, ductShape);
   compareContexts("tieIn", tieIns(baseline), tieIns(proposed), node => node.id, tieShape);
   return { state: missing.length ? "input_missing" : "verified", changedIds: [...new Set(changedIds)], missing: [...new Set(missing)], evidence: [...new Set(evidence)] };
-}
-
-function comparePlanRef(a: DocumentRevisionRef | null | undefined, b: DocumentRevisionRef | null | undefined): boolean {
-  return sameRevision(a, b);
 }
 
 function headChanges(request: ProjectEvaluationRequest, input: ProjectLocalChangeInput): { deltas: ProjectLocalHeadDelta[]; issues: string[]; evidence: string[]; moved: string[] } {
@@ -464,7 +451,7 @@ function bomDeltas(
   };
 }
 
-function sourceDrawingCheck(request: ProjectEvaluationRequest, input: ProjectLocalChangeInput, plan: ProjectLocalPlan, side: "baseline" | "proposed"): FactCheck<DocumentRevisionRef> {
+function sourceDrawingCheck(request: ProjectEvaluationRequest, plan: ProjectLocalPlan, side: "baseline" | "proposed"): FactCheck<DocumentRevisionRef> {
   return docFact(request, plan.sourceDrawing, `${side}.sourceDrawing`, [plan.id], ["drawing"]);
 }
 
@@ -536,7 +523,7 @@ export function evaluateLocalChange(request: ProjectEvaluationRequest): { rules:
 
   const approvedDoc = docFact(request, input.approvedDrawing.document, "approvedDrawing.document", [input.id], ["permit", "drawing"]);
   const approvedState = checkFact(request, input.approvedDrawing.approval, "approvedDrawing.approval", [input.id], ["permit", "drawing"], approvedDoc.value);
-  const baselineDrawing = sourceDrawingCheck(request, input, input.baseline, "baseline");
+  const baselineDrawing = sourceDrawingCheck(request, input.baseline, "baseline");
   const baselineMatchesApproval = sameRevision(approvedDoc.value, baselineDrawing.value);
   const baselineApprovalStatus = !approvedDoc.issues.length && !approvedState.issues.length && approvedState.value === "approved" && !baselineDrawing.issues.length && baselineMatchesApproval;
   const knownBaselineRejection = !approvedDoc.issues.length && !approvedState.issues.length && approvedState.value === "not_approved" && !baselineDrawing.issues.length && baselineMatchesApproval;
@@ -544,14 +531,14 @@ export function evaluateLocalChange(request: ProjectEvaluationRequest): { rules:
     baselineApprovalStatus ? "The approved baseline and baseline plan identify the same current drawing revision." : knownBaselineRejection ? "The identified baseline plan revision is confirmed not approved." : "The approved drawing approval, source revision, and baseline plan drawing must be confirmed and linked before comparison.",
     [input.id, input.baseline.id], SOURCES.plans, [...approvedDoc.evidenceIds, ...approvedState.evidenceIds, ...baselineDrawing.evidenceIds], [...approvedDoc.issues, ...approvedState.issues, ...baselineDrawing.issues, ...(!baselineMatchesApproval ? ["baseline.sourceDrawing:approvedDrawing.document"] : [])]));
 
-  const proposedDrawing = sourceDrawingCheck(request, input, input.proposed, "proposed");
+  const proposedDrawing = sourceDrawingCheck(request, input.proposed, "proposed");
   const revisedDoc: FactCheck<DocumentRevisionRef> = input.revisedDrawing
     ? docFact(request, input.revisedDrawing.document, "revisedDrawing.document", [input.id], ["permit", "drawing"])
     : { issues: ["revisedDrawing.document"], evidenceIds: [], state: "input_missing" };
   const revisedApproval: FactCheck<"approved" | "not_approved"> = input.revisedDrawing
     ? checkFact(request, input.revisedDrawing.approval, "revisedDrawing.approval", [input.id], ["permit", "drawing"], revisedDoc.value)
     : { issues: ["revisedDrawing.approval"], evidenceIds: [], state: "input_missing" };
-  const sameAsBaseline = comparePlanRef(proposedDrawing.value, approvedDoc.value);
+  const sameAsBaseline = sameRevision(proposedDrawing.value, approvedDoc.value);
   const revisedMatches = sameRevision(revisedDoc.value, proposedDrawing.value);
   const lineageOk = !proposedDrawing.issues.length && (sameAsBaseline || (!revisedDoc.issues.length && revisedMatches));
   rules.push(result(request, "SFFD_LOCAL_CHANGE_DRAWING_LINEAGE_V1", "Proposed plan drawing revision is identified", lineageOk ? "pass" : "unknown", lineageOk ? "verified" : "input_missing",

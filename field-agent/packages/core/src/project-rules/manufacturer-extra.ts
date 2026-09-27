@@ -278,7 +278,7 @@ function evaluateInstallationSequence(rule: ExtraRule, facts: HeadFacts, extra: 
     : "The installation record confirms pipe-thread sealant and hand-tightening preceded wrench-tightening; other installation conditions are separate.", [], evidenceIds);
 }
 
-function validateDistanceInterval(value: unknown, context: RuleContext): asserts value is RecessedFittingFaceToMountingSurfaceInterval {
+function validateDistanceInterval(value: unknown): asserts value is RecessedFittingFaceToMountingSurfaceInterval {
   const path = `manufacturerExtra.recessedFittingFaceToMountingSurfaceInterval`;
   if (!value || typeof value !== "object") {
     throw new ProjectInputError("invalid_input", "Recessed distance must be an explicit interval with lower, upper, unit, and phase fields.", [path]);
@@ -291,7 +291,7 @@ function validateDistanceInterval(value: unknown, context: RuleContext): asserts
 
 function evaluateRecessedDistance(rule: ExtraRule, facts: HeadFacts, extra: ManufacturerExtraFacts, projectId: string, context: RuleContext, evidence: readonly ProjectEvidence[]): ProjectRuleResult {
   const scopedInterval = extra.recessedFittingFaceToMountingSurfaceInterval;
-  if (scopedInterval?.value != null) validateDistanceInterval(scopedInterval.value, context);
+  if (scopedInterval?.value != null) validateDistanceInterval(scopedInterval.value);
   const phase = scopedInterval?.value?.phase;
   const isAsBuilt = phase === "as_built" || (!phase && facts.installation?.value === "installed");
   const scope = isAsBuilt

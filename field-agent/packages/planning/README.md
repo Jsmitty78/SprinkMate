@@ -1,6 +1,6 @@
 # Bounded change candidates
 
-Initial pure candidate-generation slice for [#9](https://github.com/my-name-is-yu/InnovationCup/issues/9), following [design revision 3](https://github.com/my-name-is-yu/InnovationCup/issues/1). It is not the complete Scenario 3 workflow. No rule scripts, server/UI, rendering, or original-checkout files are changed.
+Pure candidate generation for [#9](https://github.com/my-name-is-yu/InnovationCup/issues/9), following [design revision 3](https://github.com/my-name-is-yu/InnovationCup/issues/1). This package handles bounded route search; the server integrates it with work-package persistence, evaluation and exports.
 
 ## Supported input and output
 
@@ -21,9 +21,9 @@ Comparison is deterministic: added elbow count, added centerline length, then AS
 
 ## Geometry integration contract
 
-`geometry-port.ts` contains only the minimal structural types needed to accept the existing `evaluateLocalPlanGeometry` function. It does not implement a second geometry engine. The existing engine was present only in another lane's uncommitted checkout when this branch began; **there is no default production geometry engine on this branch**.
+`geometry-port.ts` contains only the minimal structural types needed to accept the existing `evaluateLocalPlanGeometry` function. It does not implement a second geometry engine. The server integration supplies the core evaluator through this port.
 
-After the core lane is integrated:
+Connect the core evaluator:
 
 ```ts
 const geometryPort = createLocalGeometryPort(evaluateLocalPlanGeometry);
@@ -38,7 +38,7 @@ The shared `configVersion` must identify the deployed generator/templates and ge
 
 `deriveCandidatePackages(input, set, derive)` calls the same typed `DeriveWorkPackage<T>` callback for the baseline and every candidate. It preserves version and plan identity and refuses stale sets. `toFabricationInput` adapts that request to the fabrication lane's current structural DTO, converting coordinates and tie-in offsets explicitly to **mm**, preserving generated positions as `proposed`, carrying split-segment lineage, and retaining heads as unresolved accessory lines. It requires explicit drawing/evidence and assembly-detailing inputs; it invents neither access/movement confirmation nor shop/field placement. Its single subassembly and joint-location parameters are a draft integration contract, not proof of an executable sequence.
 
-An optional read-only integration test now runs the other lane's real `deriveWorkPackage` for the baseline and both generated candidates, then for an explicitly selected candidate at the next revision. That demonstrates a local callback connection, not production API integration. Selected-plan persistence, manual candidate edits, shared assembly comparison metrics, applicable rule feedback, UI/API, and a full release fixture remain unconnected. No Issue #9 closure is requested.
+The CPVC integration test runs the repository’s `deriveWorkPackage` for the baseline and both generated candidates, then for an explicitly selected candidate at the next revision. For the server workflow and its validation scope, see [scenario integration](../../docs/scenario-integration.md).
 
 The source drawing's approval and the site's observed facts remain outside candidate adoption. A returned plan is a proposal; neither `ready` nor user selection establishes construction approval.
 
@@ -62,14 +62,6 @@ pnpm typecheck
 pnpm test
 ```
 
-Default tests use a **recorded fixture geometry port**, so a clean checkout can test the routing/graph/selection contract without a copy of the other lane's implementation. They do not establish that a production geometry dependency has been integrated. Eight geometry integration cases and one combined fabrication integration case are explicitly skipped without the appropriate environment variables. To run the full suite with the other lanes read-only (use actual local paths):
-
-```sh
-PLANNING_GEOMETRY_MODULE=/absolute/path/to/core/src/local-change-geometry.ts \
-PLANNING_FABRICATION_MODULE=/absolute/path/to/fabrication/src/index.ts \
-  pnpm exec vitest run packages/planning
-```
-
-The integration loader uses `tsx` so the dependency can remain outside this Vite workspace. No source is copied or modified. During implementation this exercised the engine with SHA-256 `8d9094b62422e81e2410ac408402b53bc6a176f758f8f6deae006459e5db6ac9`; rerun when it changes.
+Tests import the repository’s core geometry evaluator and fabrication engine directly. All geometry and CPVC integration cases run by default; no external checkout paths or environment switches are needed. Fault-injection tests wrap the same geometry evaluator to exercise missing results and error propagation.
 
 The synthetic fixture in `fixtures/duct.ts` and [its hand calculations](fixtures/README.md) cover two alternatives, one/no candidate, missing geometry and takeouts, protected context, units/frames, unsupported routes, broken connections, negative cuts, axis/reversed routes, direct retention, deterministic comparison, and stale/regenerated selection. The additional CPVC integration consumes the fabrication lane's manufacturer-referenced catalog and obtains draft operations with unresolved assembly conditions. No live service, physical installation, browser flow, or fully confirmed assembly output was verified here.
