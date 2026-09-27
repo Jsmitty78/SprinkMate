@@ -37,26 +37,38 @@ export function useIntake(s: Snapshot | null) {
   const [rotation, setRotation] = useState(String(view?.frame.rotationDeg ?? 0));
   const [pickTolerance, setPickTolerance] = useState<number>(() => savedTolerance(view, d?.scale.value ?? null));
   const [trace, setTraceState] = useState<Trace>(() => initialTrace(s));
-  const [traceDirty, setTraceDirty] = useState(false);
+  const [traceDirty, setTraceDirty] = useState(() => restoredDraft(s) !== null);
   const [viewDirty, setViewDirty] = useState(false);
 
   // A newer saved revision replaces what is shown, unless the user has unsaved edits of that part.
   const revision = s?.inputRevision;
   const asset = d?.assetId;
-  const seen = useRef<number | undefined>(undefined);
+  const seen = useRef<string | undefined>(undefined);
+  const seenSource = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!s || seen.current === revision) return;
-    seen.current = revision;
-    if (!viewDirty) {
+    if (!s || seen.current === `${s.id}:${revision}`) return;
+    seen.current = `${s.id}:${revision}`;
+    const sourceKey = `${s.id}:${asset}:${d?.page}`;
+    const sourceChanged = seenSource.current !== undefined && seenSource.current !== sourceKey;
+    seenSource.current = sourceKey;
+    if (sourceChanged) {
+      setTraceDirty(false); setViewDirty(false); setTool("pan"); setPending([]);
+      try { localStorage.removeItem(draftKey(s.id)); } catch { /* ignore */ }
+    }
+    if (!viewDirty || sourceChanged) {
       setWorkArea(view?.workArea ?? null); setCal(calibrationDraft(view)); setOrigin(view?.frame.origin ?? null);
       setRotation(String(view?.frame.rotationDeg ?? 0)); setPickTolerance(savedTolerance(view, d?.scale.value ?? null));
     }
-    if (!traceDirty) setTraceState(initialTrace(s));
-  }, [revision, asset]);
+    if (!traceDirty || sourceChanged) {
+      setTraceState(initialTrace(s));
+      setTraceDirty(restoredDraft(s) !== null);
+    }
+    if (s.baselinePlan?.confirmation === "confirmed" || d?.approval === "approved") { setTool("pan"); setPending([]); }
+  }, [s?.id, revision, asset, d?.page]);
 
   const setTrace = (next: Trace) => {
     setTraceState(next); setTraceDirty(true);
-    if (s) try { localStorage.setItem(draftKey(s.id), JSON.stringify({ assetId: asset, trace: next })); } catch { /* storage unavailable */ }
+    if (s) try { localStorage.setItem(draftKey(s.id), JSON.stringify({ assetId: asset, page: d?.page, trace: next })); } catch { /* storage unavailable */ }
   };
   const markTraceSaved = () => { setTraceDirty(false); if (s) try { localStorage.removeItem(draftKey(s.id)); } catch { /* ignore */ } };
   const markViewSaved = () => setViewDirty(false);
@@ -81,6 +93,7 @@ export function useIntake(s: Snapshot | null) {
   /** A click on the sheet, in sheet units, with the pick tolerance at the current zoom. */
   const click = (p: SheetPoint, tolerance: number) => {
     const addTolerance = () => setPickTolerance(t => Math.max(t, tolerance));
+    if (s?.baselinePlan?.confirmation === "confirmed" || d?.approval === "approved") return;
     switch (tool) {
       case "calibrate": {
         const next = cal.a && !cal.b ? { ...cal, b: p } : { ...cal, a: p, b: null };
@@ -138,7 +151,7 @@ export function useIntake(s: Snapshot | null) {
     rotation, setRotation: (r: string) => { setRotation(r); touchView(); }, rotationDeg,
     scale, pickTolerance, draftTransform, savedTransform,
     trace, setTrace, traceDirty, markTraceSaved, viewDirty, markViewSaved,
-    resetTrace: () => { setTraceState(initialTrace(s, true)); markTraceSaved(); },
+    resetTrace: () => { setTraceState(emptyTrace()); setTool("pan"); setPending([]); markTraceSaved(); },
   };
 }
 export type Intake = ReturnType<typeof useIntake>;
@@ -157,15 +170,21 @@ function savedTolerance(view: DrawingView | undefined, scale: number | null) {
   const u = view?.calibration?.pointUncertaintyMm;
   return u && scale ? u / scale : 0;
 }
-function initialTrace(s: Snapshot | null, ignoreDraft = false): Trace {
-  if (!s) return emptyTrace();
-  if (!ignoreDraft) try {
+function restoredDraft(s: Snapshot | null): Trace | null {
+  if (!s || s.baselinePlan?.confirmation === "confirmed" || s.sourceDrawing?.approval === "approved") return null;
+  try {
     const raw = localStorage.getItem(draftKey(s.id));
     if (raw) {
-      const saved = JSON.parse(raw) as { assetId?: string; trace?: Trace };
-      if (saved.trace && saved.assetId === s.sourceDrawing?.assetId && s.baselinePlan?.confirmation !== "confirmed") return saved.trace;
+      const saved = JSON.parse(raw) as { assetId?: string; page?: number; trace?: Trace };
+      if (saved.trace && saved.assetId === s.sourceDrawing?.assetId && saved.page === s.sourceDrawing?.page) return saved.trace;
     }
   } catch { /* ignore a bad draft */ }
+  return null;
+}
+function initialTrace(s: Snapshot | null): Trace {
+  if (!s) return emptyTrace();
+  const draft = restoredDraft(s);
+  if (draft) return draft;
   const t = transformOf(s.sourceDrawing?.view, s.sourceDrawing?.scale.value ?? null);
   const label = (id: string) => {
     const f = findFact(s, "sourceLabel", id);

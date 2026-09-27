@@ -1,8 +1,9 @@
+import { geometryFactUsable } from "@field-agent/core";
 import { useEffect, useState } from "react";
 import type { PackageInputs } from "@field-agent/core";
 import type { Snapshot } from "../api.js";
 import { lengthInput, lengthText, parseLength } from "../format.js";
-import { ASSUMPTION_PREFIX, BOX_KEYS, boxGaps, findFact, inScope, isConfirmed, isTestAssumption, readBox, siteFrameOf, toMm, upsertFacts, type Callouts, type Fact } from "../model.js";
+import { evidenceSpec, ASSUMPTION_PREFIX, BOX_KEYS, boxGaps, findFact, inScope, isConfirmed, isTestAssumption, readBox, siteFrameOf, toMm, upsertFacts, type Callouts, type Fact } from "../model.js";
 import { MEASURED, patchClearing, type Act, type Unit } from "../inputs.js";
 import { Badge, Button, Field } from "../ui.js";
 
@@ -24,13 +25,17 @@ const noteOf = (f: Fact | undefined) => {
   const d = f?.source.description ?? "";
   if (d.startsWith(ASSUMED)) return d.slice(ASSUMED.length).replace(/^\.\s*/, "");
   if (d.startsWith(`${MEASURED}: `)) return d.slice(MEASURED.length + 2);
-  return "";
+  return d;
 };
 
-function BasisPicker({ basis, onChange, name }: { basis: Basis; onChange: (b: Basis) => void; name: string }) {
+export function siteEvidence(previous: Fact | undefined, basis: Basis, confirm: boolean, note: string) {
+  return evidenceSpec(previous, basis === "assumption" ? "synthetic_assumption" : confirm ? "confirmed_evidence" : "user_entered", sourceFor(basis, note));
+}
+
+function BasisPicker({ basis, onChange, name, locked = false }: { basis: Basis; onChange: (b: Basis) => void; name: string; locked?: boolean }) {
   return <div className="fa-chips" role="radiogroup" aria-label="Basis">
     {([["measured", "Measured on site"], ["assumption", "Test assumption (fictional)"]] as const).map(([v, l]) =>
-      <label key={v} className={`fa-chip ${basis === v ? "is-on" : ""}`}><input type="radio" name={name} checked={basis === v} onChange={() => onChange(v)} />{l}</label>)}
+      <label key={v} className={`fa-chip ${basis === v ? "is-on" : ""}`}><input type="radio" name={name} disabled={locked} checked={basis === v} onChange={() => onChange(v)} />{l}</label>)}
   </div>;
 }
 
@@ -38,10 +43,10 @@ function statusBadge(facts: Array<Fact | undefined>) {
   const present = facts.filter(f => f && f.value !== null);
   if (!present.length) return <Badge tone="amber">Not entered</Badge>;
   const assumption = present.some(f => isTestAssumption(f));
-  const all = present.length === facts.length && facts.every(isConfirmed);
+  const all = present.length === facts.length && facts.every(assumption ? geometryFactUsable : isConfirmed);
   return <span className="fa-badges">
     {assumption && <Badge tone="sample" title="Fictional value for testing the software, not a field observation">Test assumption</Badge>}
-    {all ? <Badge tone="green">{assumption ? "Confirmed for testing" : "Measured and confirmed"}</Badge>
+    {all ? <Badge tone="green">{assumption ? "Usable for testing" : "Measured and confirmed"}</Badge>
       : present.length < facts.length ? <Badge tone="amber">Incomplete</Badge> : <Badge tone="amber">Entered, not confirmed</Badge>}
   </span>;
 }
@@ -128,18 +133,16 @@ export function SiteFrameInputs({ s, act, busy, setNotice, callouts }: Common & 
 
   const save = () => act("siteFrame", async cur => {
     if (!target) return;
-    const hadFrame = !!siteFrameOf(cur);
     const boxes = (f: Fact) => /^(duct|workEnvelope)\./.test(f.field);
-    // The same numbers mean a different place in a new frame: keep them, but ask for them to be confirmed again.
-    const reopen = (f: Fact): Fact => boxes(f) && f.confirmation === "confirmed" ? { ...f, confirmation: "proposed" } : f;
-    const reopened = [...cur.siteFacts, ...cur.detailing].some(f => boxes(f) && f.confirmation === "confirmed");
-    const source = `Local frame chosen by you in Sprink: origin at the start of ${label(span)}, X along it`;
-    const facts = upsertFacts({ detailing: cur.detailing.map(reopen), siteFacts: cur.siteFacts.map(reopen) }, [
-      ...(["x", "y", "z"] as const).map(k => ({ field: `adaptationFrame.origin.${k}`, value: target.origin[k], unit: "mm", confirmation: "confirmed" as const, context: "detailing" as const, source })),
-      { field: "adaptationFrame.yaw", value: target.yaw, unit: "deg", confirmation: "confirmed", context: "detailing", source },
+    const source = `Synthetic local frame aligned to ${label(span)}; drawing Z is an assumed horizontal test plane, not a measured elevation`;
+    const facts = upsertFacts({ detailing: cur.detailing.filter(f => !boxes(f)), siteFacts: cur.siteFacts.filter(f => !boxes(f)) }, [
+      ...(["x", "y", "z"] as const).map(k => ({ field: `adaptationFrame.origin.${k}`, value: target.origin[k], unit: "mm", confirmation: "proposed" as const, provenance: "synthetic_assumption" as const, context: "detailing" as const, source })),
+      { field: "adaptationFrame.yaw", value: target.yaw, unit: "deg", confirmation: "proposed", provenance: "synthetic_assumption", context: "detailing", source },
     ]);
-    await patchClearing(cur, facts as Partial<PackageInputs>, setNotice);
-    if (reopened) setNotice(hadFrame ? "The local frame changed. The obstacle and work boundary keep their numbers but need confirming again in the new frame." : "Boxes are now read along the span. Check the obstacle and work boundary numbers and confirm them again.");
+    const patch: Partial<PackageInputs> = { ...facts };
+    if (cur.changeRequest) patch.changeRequest = { ...cur.changeRequest, factIds: cur.changeRequest.factIds.filter(id => [...facts.detailing, ...facts.siteFacts].some(f => f.id === id)) };
+    await patchClearing(cur, patch, setNotice);
+    setNotice("Saved a synthetic frame for route testing. Enter obstacle and work bounds in this frame; previous boxes have been cleared.");
   });
 
   return <div className="fa-stack">
@@ -191,11 +194,11 @@ export function SiteBoxInputs({ s, act, busy, unit, setNotice, prefix, title, he
 
   const save = (confirm: boolean) => act(`${prefix}.${confirm ? "confirm" : "save"}`, async cur => {
     const facts = upsertFacts(cur, BOX_KEYS.map((k, i) => ({
-      field: `${prefix}.${k}`, value: parsed[i], unit: "mm", confirmation: confirm ? "confirmed" : "proposed", context: "observed",
-      source: sourceFor(basis, note), assetId: photo || null, unknownReason: `${axisLabel[i % 3]} ${i < 3 ? "low" : "high"} face not measured yet`,
+      field: `${prefix}.${k}`, value: parsed[i], unit: "mm", ...siteEvidence(findFact(cur, `${prefix}.${k}`), basis, confirm, note), context: basis === "assumption" ? "detailing" : "observed",
+      assetId: photo || null, unknownReason: `${axisLabel[i % 3]} ${i < 3 ? "low" : "high"} face not measured yet`,
     })));
     const patch: Partial<PackageInputs> = { ...facts };
-    if (prefix === "duct" && cur.changeRequest) patch.changeRequest = { ...cur.changeRequest, factIds: facts.siteFacts.filter(f => f.field.startsWith("duct.")).map(f => f.id) };
+    if (prefix === "duct" && cur.changeRequest) patch.changeRequest = { ...cur.changeRequest, factIds: [...facts.detailing, ...facts.siteFacts].filter(f => f.field.startsWith("duct.")).map(f => f.id) };
     await patchClearing(cur, patch, setNotice);
   });
   const gaps = box.values.some(v => v !== null) ? boxGaps(s, prefix, local) : [];
@@ -213,7 +216,7 @@ export function SiteBoxInputs({ s, act, busy, unit, setNotice, prefix, title, he
     <small className="fa-muted">{unitHint(unit)}</small>
     {order.some(Boolean) && <small className="fa-warn">Each "From" must be less than its "To".</small>}
     {!complete && <small className="fa-warn">Empty faces are saved as unknown, not zero.{parsed[2] === null || parsed[5] === null ? " Without the height (Z), no route can be generated around it." : ""}</small>}
-    <BasisPicker basis={basis} onChange={setBasis} name={`${prefix}-basis`} />
+    <BasisPicker basis={facts.some(isTestAssumption) ? "assumption" : basis} onChange={setBasis} name={`${prefix}-basis`} locked={facts.some(isTestAssumption)} />
     <div className="fa-row2">
       <Field label={basis === "assumption" ? "Why this value (optional)" : "How it was measured (optional)"}><input value={note} onChange={e => setNote(e.target.value)} placeholder={basis === "assumption" ? "e.g. FS-01 acceptance v1" : "e.g. Tape from the pipe centerline"} /></Field>
       <Field label="Evidence photo"><select value={photo} onChange={e => setPhoto(e.target.value)}>
@@ -241,7 +244,7 @@ export function SiteLengthInput({ s, act, busy, unit, setNotice, field, subject,
   useEffect(() => { setValue(shown); setBasis(basisOf(f)); setNote(noteOf(f)); }, [f?.id, f?.value, f?.source.description, unit]);
   const parsed = keep(value, savedMm, unit);
   const save = (confirm: boolean) => act(`${field}.${confirm}`, cur => patchClearing(cur, upsertFacts(cur, [{
-    field, subjectIds: subject ? [subject] : [], value: parsed, unit: "mm", confirmation: confirm ? "confirmed" : "proposed", context: "observed", source: sourceFor(basis, note),
+    field, subjectIds: subject ? [subject] : [], value: parsed, unit: "mm", ...siteEvidence(findFact(cur, field, subject), basis, confirm, note), context: basis === "assumption" ? "detailing" : "observed",
   }]), setNotice));
   return <div className="fa-fact">
     <div className="fa-fact-head"><span>{label}{tag && <> <Badge tone="neutral">{tag}</Badge></>}</span>{statusBadge([f])}</div>
@@ -249,7 +252,7 @@ export function SiteLengthInput({ s, act, busy, unit, setNotice, field, subject,
       <input className={`mono ${value.trim() && parsed === null ? "is-invalid" : ""}`} value={value} onChange={e => setValue(e.target.value)} aria-label={label} placeholder={unit === "mm" ? "mm" : "ft-in"} />
       <input value={note} onChange={e => setNote(e.target.value)} aria-label={`${label} note`} placeholder="Note (optional)" />
     </div>
-    <BasisPicker basis={basis} onChange={setBasis} name={`${field}-${subject ?? ""}-basis`} />
+    <BasisPicker basis={isTestAssumption(f) ? "assumption" : basis} onChange={setBasis} name={`${field}-${subject ?? ""}-basis`} locked={isTestAssumption(f)} />
     <small className="fa-muted">{help} {unitHint(unit)}</small>
     <div className="fa-actions">
       <Button busy={busy === `${field}.false`} disabled={!!busy || (!!value.trim() && parsed === null)} onClick={() => void save(false)}>Save</Button>

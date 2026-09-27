@@ -1,11 +1,11 @@
-import { adaptationFrame } from "@field-agent/core";
+import { adaptationFrame, geometryFactUsable, isSyntheticPackageFact } from "@field-agent/core";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, type Snapshot } from "./api.js";
 import { dateTime } from "./format.js";
 import { ChangeInputs, DetailingInputs, EvidenceInputs, RunEditor, type Unit } from "./inputs.js";
 import { SiteBoxInputs, SiteFrameInputs, SiteLengthInput } from "./site/SiteInputs.js";
 import { SiteViews } from "./site/SiteViews.js";
-import { callouts, contextIds, findFact, isConfirmed, readBox, requirements, siteFrameOf, sourceLabel, resultFor, routeOptions, runBlockers, type Plan } from "./model.js";
+import { callouts, contextIds, findFact, readBox, requirements, siteFrameOf, sourceLabel, resultFor, routeOptions, runBlockers, type Plan } from "./model.js";
 import { IntakeInputs } from "./intake/IntakeInputs.js";
 import { SheetView } from "./intake/SheetView.js";
 import { FRAME_ID } from "./intake/sheet.js";
@@ -154,9 +154,9 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
       case "checks": return <Checks result={workResult} sources={sources} callouts={workCallouts} />;
       case "routes": return <RouteComparison routes={routes} baseline={baseline} baselineResult={base.result} focusId={focusId} selectedId={selectedId} current={candidatesCurrent} appliedAt={selectedId && selectedResult.current ? s.inputRevision : null}
         rejected={s.outputs.candidates?.rejected ?? []} searchDescription={s.outputs.candidates?.searchDescription ?? null}
-        noneReason={s.outputs.candidates && !routes.length ? [...s.outputs.candidates.gaps.map(g => g.reason), ...s.outputs.candidates.rejected.map(r => r.reason)].filter((v, i, a) => a.indexOf(v) === i).join(" ") || null : null}
+        hasGeneration={!!s.outputs.candidates} noneReason={candidatesCurrent && s.outputs.candidates && !routes.length ? [...s.outputs.candidates.gaps.map(g => g.reason), ...s.outputs.candidates.rejected.map(r => r.reason)].filter((v, i, a) => a.indexOf(v) === i).join(" ") || null : null}
         onPreview={id => { setPreview(id); setPiece(null); }} onRegenerate={() => void start("adapt_to_site", "run")} onShowPackage={() => setTab("package")} busy={pkg.busy === "run"}
-        clearanceMissing={!isConfirmed(findFact(s, "requiredPipeClearance"))} sources={sources} />;
+        clearanceMissing={!geometryFactUsable(findFact(s, "requiredPipeClearance"))} syntheticGeometry={[...s.detailing, ...s.siteFacts].some(f => /^(adaptationFrame\.|duct\.|workEnvelope\.|requiredPipeClearance$)/.test(f.field) && isSyntheticPackageFact(f))} sources={sources} />;
       case "package": {
         if (!routes.length && !selectedId) return <div className="fa-empty"><p>No routes yet.</p><small>Generate route alternatives, choose one, and the revised package with its full quantities and change from the original appears here.</small></div>;
         const shown = focus ?? selected;
@@ -288,6 +288,8 @@ const ARTIFACT_LABEL: Record<string, [string, string]> = { pdf: ["Work package P
 function ExportDialog({ s, artifacts, ready, busy, running, onCreate, onClose }: { s: Snapshot; artifacts: Snapshot["outputs"]["artifacts"]; ready: boolean; busy: string; running: boolean; onCreate: () => void; onClose: () => void }) {
   const [downloading, setDownloading] = useState("");
   const [error, setError] = useState("");
+  const pending = s.run?.status === "waiting_input" && s.run.inputRevision === s.inputRevision && s.run.configVersion === s.configVersion
+    ? s.outputs.requests.filter(r => s.freshness.requests.some(f => f.id === r.id && f.current && !f.answered)) : [];
   const download = async (a: Snapshot["outputs"]["artifacts"][number]) => {
     setDownloading(a.id); setError("");
     try {
@@ -303,7 +305,10 @@ function ExportDialog({ s, artifacts, ready, busy, running, onCreate, onClose }:
     <div className="fa-modal-card">
       <div className="fa-modal-head"><h2>Export</h2><button type="button" className="fa-icon-btn" onClick={onClose} aria-label="Close"><Icon name="x" /></button></div>
       <p className="fa-muted">Exports are bound to one input revision and the {s.intent === "adapt_to_site" ? "selected route" : "prepared run"}. They are made by the server's exporter (the same bundle as the export API).</p>
-      {artifacts.length > 0 ? <ul className="fa-downloads">{artifacts.map(a => <li key={a.id}>
+      {pending.length > 0 ? <Callout title="Answer needed before export" action={<Button onClick={onClose}>Close to answer</Button>}>
+        {pending.map(request => <p key={request.id}>{request.question}</p>)}
+        <p>Close this dialog to provide the requested input or explain why it is unavailable, then create the export again.</p>
+      </Callout> : artifacts.length > 0 ? <ul className="fa-downloads">{artifacts.map(a => <li key={a.id}>
         <div><strong>{ARTIFACT_LABEL[a.kind]?.[0] ?? a.kind}</strong><small>Rev {a.inputRevision}</small></div>
         <Button busy={downloading === a.id} onClick={() => void download(a)}><Icon name="download" size={14} />Download</Button>
       </li>)}</ul> : !ready ? <Callout title="Nothing to export yet">{s.intent === "adapt_to_site" ? "Choose a route and build the revised package first." : "Generate current materials and cuts first."}</Callout>
@@ -311,7 +316,7 @@ function ExportDialog({ s, artifacts, ready, busy, running, onCreate, onClose }:
       {error && <Callout tone="red" title="Download failed">{error}</Callout>}
       <div className="fa-actions end">
         <Button onClick={onClose}>Close</Button>
-        {ready && artifacts.length === 0 && <Button variant="primary" busy={busy === "export" || running} onClick={onCreate}>Create export for rev {s.inputRevision}</Button>}
+        {ready && artifacts.length === 0 && <Button variant="primary" busy={busy === "export" || running} disabled={pending.length > 0} onClick={onCreate}>Create export for rev {s.inputRevision}</Button>}
       </div>
     </div>
   </div>;

@@ -39,6 +39,24 @@ describe('revision-bound exports', () => {
     const restarted = new WorkPackageExports({ directory: t.directory, loadCurrent: async () => t.current });
     expect((await restarted.download('fixture-package', manifest.exportId, 'bom.csv')).bytes.length).toBeGreaterThan(100);
   });
+  it('keeps readable source values and provenance in every artifact manifest and CSV', async () => {
+    const t = await setup();
+    t.current.inputFacts = [{ id: 'source-P27', field: 'sourceLabel', value: 'P27', unit: null, subjectIds: ['P0'], confirmation: 'confirmed', provenance: 'confirmed_evidence', context: 'detailing', unknownReason: null, source: { description: 'FS-01 source label', assetId: 'official-drawing', page: 1 } },
+      { id: 'test-obstacle', field: 'duct.width', value: 200, unit: 'mm', subjectIds: [], confirmation: 'proposed', provenance: 'synthetic_assumption', context: 'observed', unknownReason: null, source: { description: 'Fictional software test only', assetId: null, page: null } }];
+    t.current.selectedPlan.context = [{ id: 'h1', sourceLabel: 'H1', kind: 'head', positions: [[0, 0, 0]] }];
+    const manifest = await t.service.create(t.current.binding.packageId, t.current.binding);
+    expect(manifest.inputFacts).toEqual(t.current.inputFacts);
+    expect(manifest.protectedContext?.[0].sourceLabel).toBe('H1');
+    expect(manifest.drawingReference).toBe(t.current.drawingReference);
+    for (const filename of ['bom.csv', 'cut-list.csv']) {
+      const text = (await t.service.download(t.current.binding.packageId, manifest.exportId, filename)).bytes.toString();
+      expect(text).toContain('P27');
+      expect(text).toContain('synthetic_assumption');
+      expect(text).toContain('Fictional software test only');
+    }
+    t.current.inputFacts[1].provenance = 'user_entered';
+    await expect(t.service.download(t.current.binding.packageId, manifest.exportId, 'manifest.json')).rejects.toMatchObject({ status: 409 });
+  });
   it.each(['inputRevision', 'configVersion', 'modelVersion', 'selectionId', 'catalogVersion', 'engineVersion', 'rulesVersion', 'evidenceVersion', 'outputVersion'] as const)('rejects stale %s, including the manifest', async key => {
     const t = await setup();
     const manifest = await t.service.create('fixture-package', t.current.binding);
@@ -150,4 +168,25 @@ describe('CSV and HTTP boundaries', () => {
     expect((await app.request(path, { method: 'POST', headers, body: JSON.stringify({ expectedBinding: t.current.binding, snapshot: t.current }) })).status).toBe(400);
     expect((await app.request(path, { method: 'POST', headers, body: '{' })).status).toBe(400);
   });
+});
+
+it('keeps CSV growth linear and package metadata separate from quantity rows', () => {
+  const make = (n: number) => {
+    const s = exportFixture();
+    s.inputFacts = Array.from({ length: n }, (_,i) => ({ id: `fact-${i}`, field: 'nominalSize', value: '2 inch', unit: null, subjectIds: ['P0'], confirmation: 'confirmed', provenance: 'confirmed_evidence', context: 'detailing', unknownReason: null, source: { description: 'unique provenance marker', assetId: null, page: 1 } }));
+    s.materials = Array.from({ length: n }, (_,i) => ({ ...s.materials[0], id: `material-${i}` }));
+    s.cuts = Array.from({ length: n }, (_,i) => ({ ...s.cuts[0], pieceId: `piece-${i}` }));
+    return csvFiles(s);
+  };
+  const small = make(100), large = make(200);
+  for (const key of ['bom', 'cuts'] as const) {
+    expect(large[key].length).toBeLessThan(small[key].length * 2.2);
+    const text = small[key].toString();
+    expect(text.match(/unique provenance marker/g)).toHaveLength(100);
+    const rows = text.trim().split('\r\n');
+    expect(rows).toHaveLength(102);
+    expect(rows[1]).toContain('"package_metadata"');
+    expect(rows[1]).not.toContain('"known"');
+    expect(rows.slice(2).every(row => !row.includes('unique provenance marker'))).toBe(true);
+  }
 });

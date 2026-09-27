@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "./api.js";
-import { lengthInput, lengthText, parseLength, toMetres } from "./format.js";
+import { lengthInput, lengthText, millimetres, parseLength, toMetres, UNKNOWN } from "./format.js";
 import {
-  reopenSiteGeometry, showCpvcInputs, showSfInputs, activeDetailingPlan, buildRun, ELBOW, inScope, PIPE, runEditPatch, findFact, isConfirmed, projectBasis, runChanged, runNodes, upsertFacts,
-  syncRunDraft, type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
+  reopenSiteGeometry, showCpvcInputs, showSfInputs, activeDetailingPlan, buildRun, ELBOW, inScope, runEditPatch, findFact, isConfirmed, projectBasis, runChanged, runNodes, upsertFacts,
+  evidenceSpec, factProvenance, PROVENANCE_LABELS, type Provenance, syncRunDraft, type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
 } from "./model.js";
+import { PRODUCT_SETS, productSetOf } from "./products.js";
 import { Badge, Button, Callout, Field, Icon, Section } from "./ui.js";
 
 export type Act = (label: string, fn: (s: Snapshot) => Promise<unknown>) => Promise<boolean>;
 export type Unit = "mm" | "in";
-interface Common { s: Snapshot; act: Act; busy: string; unit: Unit; setNotice: (t: string) => void }
+export interface Common { s: Snapshot; act: Act; busy: string; unit: Unit; setNotice: (t: string) => void }
 
 export const BY_YOU = "Confirmed by you in Sprink";
 export const MEASURED = "Measured on site by you";
@@ -32,8 +33,10 @@ export async function patchClearing(s: Snapshot, patch: Partial<PackageInputs>, 
 
 export function factStatus(f: Fact | undefined) {
   if (!f || f.value === null) return <Badge tone="amber">Missing</Badge>;
-  if (f.source.description.startsWith("SAMPLE")) return <Badge tone="sample">Sample</Badge>;
-  if (f.confirmation === "confirmed") return <Badge tone="green">{f.context === "observed" ? "Measured by you" : "Confirmed"}</Badge>;
+  if (factProvenance(f) === "synthetic_assumption") return <Badge tone="sample">Synthetic test assumption</Badge>;
+  if (f.provenance === "machine_proposal") return <Badge tone="amber">Machine proposal</Badge>;
+  if (f.provenance === "user_entered") return <Badge tone="amber">Entered, unverified</Badge>;
+  if (f.confirmation === "confirmed") return <Badge tone="green">{f.context === "observed" ? "Confirmed evidence" : "Confirmed"}</Badge>;
   return <Badge tone="amber">Proposed</Badge>;
 }
 
@@ -51,9 +54,10 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
 
   const nodes: RunNode[] = rows.map(r => ({ kind: r.kind, x: parseLength(r.x, unit), y: parseLength(r.y, unit) }));
   // No product is assumed: a typed run is only sized with a product the user chose.
-  const [product, setProduct] = useState(() => s.baselinePlan?.entities.find(e => e.kind === "pipe")?.productId === PIPE ? "cpvc" : "none");
-  const built = buildRun(nodes, s.baselinePlan?.id ?? "baseline", undefined, product === "cpvc" ? { pipe: PIPE, elbow: ELBOW } : { pipe: null, elbow: null });
-  const productChanged = !!s.baselinePlan && (s.baselinePlan.entities.find(e => e.kind === "pipe")?.productId ?? null) !== (product === "cpvc" ? PIPE : null);
+  const [product, setProduct] = useState(() => productSetOf(s));
+  useEffect(() => setProduct(productSetOf(s)), [s.inputRevision]);
+  const built = buildRun(nodes, s.baselinePlan?.id ?? "baseline", undefined, PRODUCT_SETS[product]);
+  const productChanged = !!s.baselinePlan && (s.baselinePlan.entities.find(e => e.kind === "pipe")?.productId ?? null) !== PRODUCT_SETS[product].pipe;
   const problems = "problems" in built ? built.problems : [];
   const dirty = runChanged(nodes, saved, unit) || productChanged;
   const drawingReady = s.sourceDrawing?.scale.basis === "confirmed_inputs";
@@ -117,7 +121,7 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
         setRows(next);
       }}>+ Add a point (the current end becomes an elbow)</button>
       <Field label="Pipe and fittings"><select value={product} onChange={e => setProduct(e.target.value)}>
-        <option value="none">Not selected yet</option><option value="cpvc">Spears FlameGuard CPVC NPS 1 (supported catalog)</option></select></Field>
+        {Object.entries(PRODUCT_SETS).map(([key, value]) => <option key={key} value={key}>{value.label}</option>)}</select></Field>
       {problems.length > 0 && <ul className="fa-problems">{problems.map(p => <li key={p}>{p}</li>)}</ul>}
       <div className="fa-actions">
         <Button busy={busy === "run"} disabled={!!busy || problems.length > 0} onClick={() => void save()}>Save run</Button>
@@ -142,6 +146,9 @@ export function FactRow({ s, act, busy, unit, setNotice, spec }: Common & { spec
     if (spec.kind.type === "length" && typeof f.value === "number") { const m = toMetres(f.value, f.unit ?? "mm"); return m === null ? "" : lengthInput(m * 1000, unit); }
     return String(f.value);
   };
+  const [provenance, setProvenance] = useState<Provenance>(() => factProvenance(f));
+  const [source, setSource] = useState(f?.source.description ?? "");
+  useEffect(() => { setProvenance(factProvenance(f)); setSource(f?.source.description ?? ""); }, [JSON.stringify(f)]);
   const [value, setValue] = useState(initial);
   const [editing, setEditing] = useState(!isConfirmed(f));
   useEffect(() => { setValue(initial()); setEditing(!isConfirmed(f)); }, [f?.id, f?.value, unit]);
@@ -149,10 +156,11 @@ export function FactRow({ s, act, busy, unit, setNotice, spec }: Common & { spec
   const parsed = spec.kind.type === "length" ? parseLength(value, unit) : spec.kind.type === "bool" ? (value === "true" ? true : value === "false" ? false : null) : value.trim() || null;
   const save = () => act(key, cur => patchClearing(cur, upsertFacts(cur, [{
     field: spec.field, subjectIds: spec.subject ? [spec.subject] : [], value: parsed, unit: spec.kind.type === "length" ? "mm" : null,
-    confirmation: "confirmed", context: spec.context ?? "detailing", source: spec.context === "observed" ? MEASURED : BY_YOU,
+    ...evidenceSpec(findFact(cur, spec.field, spec.subject), provenance, source), context: provenance === "synthetic_assumption" ? "detailing" : spec.context ?? "detailing",
   }]), setNotice));
+  const metres = typeof f?.value === "number" ? toMetres(f.value, f.unit ?? "mm") : null;
   const shown = f?.value === null || f?.value === undefined ? null
-    : spec.kind.type === "length" && typeof f.value === "number" ? lengthText({ value: f.value, unit: f.unit ?? "mm", basis: "confirmed_inputs" }).primary
+    : spec.kind.type === "length" && typeof f.value === "number" ? (unit === "mm" ? (metres === null ? UNKNOWN : millimetres(metres)) : lengthText({ value: f.value, unit: f.unit ?? "mm", basis: "confirmed_inputs" }).primary)
     : spec.kind.type === "bool" ? (f.value ? spec.kind.yes : spec.kind.no)
     : spec.kind.type === "choice" ? spec.kind.options.find(o => o[0] === f.value)?.[1] ?? String(f.value) : String(f.value);
 
@@ -164,8 +172,9 @@ export function FactRow({ s, act, busy, unit, setNotice, spec }: Common & { spec
           : spec.kind.type === "choice" && spec.kind.options.length ? <select value={value} onChange={e => setValue(e.target.value)} aria-label={spec.label}><option value="">Choose…</option>{spec.kind.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           : spec.kind.type === "text" ? <textarea value={value} onChange={e => setValue(e.target.value)} rows={2} aria-label={spec.label} />
           : <input value={value} onChange={e => setValue(e.target.value)} aria-label={spec.label} className={spec.kind.type === "length" ? "mono" : ""} placeholder={spec.kind.type === "length" ? (unit === "mm" ? "mm" : `ft-in`) : ""} />}
-        <Button variant="primary" busy={busy === key} disabled={!!busy || parsed === null} onClick={() => void save()}>{spec.context === "observed" ? "Save measurement" : "Confirm"}</Button>
+        <Button variant="primary" busy={busy === key} disabled={!!busy || parsed === null || !source.trim()} onClick={() => void save()}>Save fact</Button>
       </div>}
+    {editing && <SourceEvidenceInputs provenance={provenance} setProvenance={setProvenance} source={source} setSource={setSource} syntheticLocked={!!f && factProvenance(f) === "synthetic_assumption"} />}
     {spec.help && <small className="fa-muted">{spec.help}</small>}
   </div>;
 }
@@ -233,8 +242,8 @@ export function EvidenceInputs({ s, act, busy, setNotice }: Common) {
     const asset = await api.upload(cur.id, file);
     const n = cur.siteFacts.filter(f => f.field.startsWith("evidence.photo")).length + 1;
     await patchClearing(cur, upsertFacts(cur, [{
-      field: `evidence.photo.${n}`, value: file.name.slice(0, 200), subjectIds: cur.changeRequest?.affectedEntityIds ?? [], confirmation: "confirmed",
-      context: "observed", source: caption.trim() || `Site photo taken by you: ${file.name}`, assetId: asset.id,
+      field: `evidence.photo.${n}`, value: file.name.slice(0, 200), subjectIds: cur.changeRequest?.affectedEntityIds ?? [], confirmation: "proposed", provenance: "user_entered",
+      context: "observed", source: caption.trim() || `Uploaded site photo: ${file.name}`, assetId: asset.id,
     }]), setNotice);
     setCaption("");
   });
@@ -256,4 +265,16 @@ function Thumb({ packageId, assetId, caption }: { packageId: string; assetId: st
     return () => { revoked = true; if (made) URL.revokeObjectURL(made); };
   }, [packageId, assetId]);
   return <figure className="fa-thumb">{url ? <img src={url} alt={caption} /> : <div className="fa-thumb-ph" />}<figcaption>{caption}</figcaption></figure>;
+}
+function SourceEvidenceInputs({ provenance, setProvenance, source, setSource, syntheticLocked = false }: {
+  provenance: Provenance; setProvenance: (v: Provenance) => void; source: string; setSource: (v: string) => void; syntheticLocked?: boolean;
+}) {
+  return <div className="fa-stack">
+    <Field label="Input provenance"><select value={syntheticLocked ? "synthetic_assumption" : provenance} disabled={syntheticLocked} onChange={e => setProvenance(e.target.value as Provenance)}>
+      {Object.entries(PROVENANCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+    </select></Field>
+    <Field label="Source / measurement description"><textarea rows={2} value={source} onChange={e => setSource(e.target.value)} placeholder="Describe the measurement, document, proposal or test assumption" /></Field>
+    {(syntheticLocked || provenance === "synthetic_assumption") && <small className="fa-warn">Software test assumption only. Saving or confirming keeps this synthetic; it is not field evidence or construction approval.</small>}
+    {provenance === "confirmed_evidence" && !syntheticLocked && <small className="fa-muted">Choose only after checking the value against the evidence described above.</small>}
+  </div>;
 }

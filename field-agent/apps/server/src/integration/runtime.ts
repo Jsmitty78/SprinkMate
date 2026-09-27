@@ -52,10 +52,18 @@ import { evaluateProfile, type ProfileOutput } from "./profiles.js";
 import { materialDescription } from "./describe.js";
 import { exportSnapshot } from "./snapshot.js";
 
-/** The coordinate frame of runs typed in the web run editor (apps/web/src/workbench/model.ts). */
+export const INTEGRATION_VERSION = "scenario-integration-7-projection-context";
+function generationRecovery(path: string, message: string): string {
+  const action = path === "outsideDiameter" || path.startsWith("product")
+    ? "Open drawing inputs, reopen the trace if confirmed, select a compatible pipe and fitting catalog pair, save and confirm the trace."
+    : path.startsWith("workEnvelope") ? "Open Work boundary and save every minimum and maximum coordinate with units, source and input provenance."
+    : path.includes("duct") ? "Open Measured obstacle and save all box coordinates with units, source and input provenance."
+    : path === "requiredPipeClearance" ? "Open clearance inputs and save the required surface clearance with units, source and input provenance."
+    : "Open inputs and correct this field, including its units and source.";
+  return `${path}: ${message} ${action} Run route generation again after saving. Synthetic assumptions support test geometry only.`;
+}
+/** Coordinate frame used by manually entered runs. */
 const TYPED_RUN_FRAME = "room";
-
-export const INTEGRATION_VERSION = "scenario-integration-3-steel-interval";
 export interface Detail {
   id: string;
   input: FabricationInput;
@@ -347,14 +355,18 @@ export function createIntegratedServices(
           if (
             state.candidates?.inputRevision === s.inputRevision &&
             !state.candidates.candidates.length
-          )
-            gaps.push({
-              id: "no-candidate",
-              description:
-                state.candidates.reasons.map((r) => r.message).join("; ") ||
-                "No candidate in the bounded search",
-              blocks: ["generate_change_candidates"],
+          ) {
+            const reasons = state.candidates.reasons;
+            if (!reasons.length) gaps.push({ id: "no-candidate", description: "No candidate in the bounded search", blocks: ["generate_change_candidates"] });
+            reasons.forEach((r, i) => {
+              const key = safe(`generation-${r.path}`);
+              const actionable = r.code === "input_missing" || r.code === "invalid_input";
+              const text = actionable ? generationRecovery(r.path, r.message) : `${r.path}: ${r.message}`;
+              const answered = state.acknowledgedQuestions?.includes(key) || s.answers.some(a => a.requestId === requestId(key));
+              gaps.push({ id: key, description: text, blocks: ["generate_change_candidates"],
+                ...(actionable && !answered ? { question: { id: key, text, kind: "fact" as const, subjectId: base?.id ?? "drawing", order: i } } : {}) });
             });
+          }
           if (!s.sourceDrawing || !base || !s.scope)
             gaps.push({
               id: "drawing",
@@ -570,7 +582,7 @@ export function createIntegratedServices(
               gaps: state.candidates.reasons.map((r, i) => ({
                 id: `generation-${i}`,
                 subjectIds: [],
-                reason: r.message,
+                reason: r.code === "input_missing" || r.code === "invalid_input" ? generationRecovery(r.path, r.message) : `${r.path}: ${r.message}`,
               })),
             };
             context.publish({ candidates: api });

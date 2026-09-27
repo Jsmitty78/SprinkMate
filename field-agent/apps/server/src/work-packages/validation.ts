@@ -64,6 +64,7 @@ export function validateInputs(inputs: PackageInputs, checkAsset: (id: string) =
   ensure(inputs.siteFacts.every(f => f.context !== 'detailing') && inputs.detailing.every(f => f.context === 'detailing'), 'fact_context_mismatch');
   for (const fact of facts) {
     checkSubjects(fact.subjectIds);
+    ensure(!fact.provenance || fact.provenance === 'confirmed_evidence' || fact.confirmation === 'proposed', 'unverified_provenance_cannot_be_confirmed');
     ensure(fact.value !== null || fact.unknownReason, 'unknown_fact_requires_reason');
     ensure(fact.value !== null || fact.confirmation === 'proposed', 'unknown_fact_cannot_be_confirmed');
     if (typeof fact.value === 'number') ensure(Number.isFinite(fact.value) && fact.unit, 'measurement_requires_unit');

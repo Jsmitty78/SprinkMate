@@ -119,10 +119,10 @@ export function Checks({ result, sources, callouts }: { result: PackageResult | 
 
 // ---------------------------------------------------------------- adapt
 
-export function RouteComparison({ routes, baseline, baselineResult, focusId, selectedId, current, appliedAt, rejected, searchDescription, noneReason, onPreview, onRegenerate, onShowPackage, busy, clearanceMissing, sources }: {
+export function RouteComparison({ routes, baseline, baselineResult, focusId, selectedId, current, appliedAt, rejected, searchDescription, noneReason, hasGeneration, onPreview, onRegenerate, onShowPackage, busy, clearanceMissing, syntheticGeometry, sources }: {
   routes: RouteOption[]; baseline: Plan | null; baselineResult: PackageResult | undefined; focusId: string | null; selectedId: string | null; current: boolean; appliedAt: number | null;
-  rejected: Array<{ id: string; reason: string }>; searchDescription: string | null; noneReason: string | null;
-  onPreview: (id: string) => void; onRegenerate: () => void; onShowPackage: () => void; busy: boolean; clearanceMissing: boolean; sources: Sources;
+  rejected: Array<{ id: string; reason: string }>; searchDescription: string | null; noneReason: string | null; hasGeneration?: boolean;
+  onPreview: (id: string) => void; onRegenerate: () => void; onShowPackage: () => void; busy: boolean; clearanceMissing: boolean; syntheticGeometry?: boolean; sources: Sources;
 }) {
   const focus = routes.find(r => r.plan.id === focusId);
   const baseFittings = baseline?.entities.filter(e => e.kind === "fitting").length ?? 0;
@@ -133,9 +133,12 @@ export function RouteComparison({ routes, baseline, baselineResult, focusId, sel
     {!current && routes.length > 0 && appliedAt === null && <Callout title="These routes were generated for older inputs" action={<Button busy={busy} onClick={onRegenerate}><Icon name="refresh" size={14} />Regenerate</Button>}>
       {selectedId ? "Your selection is kept for reference, but it cannot be used until the routes are regenerated." : "Regenerate before choosing a route."}
     </Callout>}
-    {clearanceMissing && <Callout title="Clearance measurement needed">Enter the required clearance under Site evidence so the planner can keep routes clear of the duct.</Callout>}
-    {routes.length === 0 ? <Callout tone="red" title="No generated alternative is available" action={<Button busy={busy} onClick={onRegenerate}>Regenerate</Button>}>
-      {noneReason ?? "Generate from confirmed inputs to search the supported templates."} Check the obstacle and work boundary measurements, then regenerate.
+    {clearanceMissing && <Callout title="Clearance input needed">Enter the required clearance and its provenance under Site evidence before generating routes.</Callout>}
+    {syntheticGeometry && <Callout tone="neutral" title="Synthetic geometry test">These routes use labeled test assumptions. Site measurements and construction suitability remain unverified.</Callout>}
+    {routes.length === 0 ? current ? <Callout tone="red" title="No generated alternative is available" action={<Button busy={busy} onClick={onRegenerate}>Regenerate</Button>}>
+      {noneReason ?? "No alternative was found in the supported route templates."} Check the obstacle and work boundary inputs, then regenerate.
+    </Callout> : <Callout tone="neutral" title={hasGeneration ? "Inputs changed — regenerate routes" : "Generate route alternatives"} action={<Button busy={busy} onClick={onRegenerate}>{hasGeneration ? "Regenerate" : "Generate"}</Button>}>
+      {hasGeneration ? "The previous search belongs to older inputs. Regenerate to evaluate your saved changes; previous missing-input findings no longer describe this revision." : "Generate from the saved geometry and its evidence or labeled test assumptions to search the supported templates."}
     </Callout> : <Section title="Proposed routes" count={routes.length}>
       <table className="fa-table fa-routes"><thead><tr><th>Route</th><th>Proposal</th><th>State</th></tr></thead>
         <tbody>{routes.map(r => {
@@ -150,7 +153,7 @@ export function RouteComparison({ routes, baseline, baselineResult, focusId, sel
       {routes.length === 1 && <p className="fa-muted small">Only one route fits. Review it before selecting.</p>}
       <p className="fa-muted small">{ROUTE_ORDER_NOTE}{searchDescription ? ` Search: ${searchDescription}` : ""}</p>
     </Section>}
-    {rejected.length > 0 && <Section title="Layouts the planner rejected" count={rejected.length} defaultOpen={false}>
+    {current && rejected.length > 0 && <Section title="Layouts the planner rejected" count={rejected.length} defaultOpen={false}>
       <ul className="fa-list">{rejected.map(r => <li key={r.id}>{r.reason}</li>)}</ul>
     </Section>}
     {focus && <Section title={`Changes with Route ${focus.letter}`}>

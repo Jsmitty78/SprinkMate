@@ -95,11 +95,13 @@ describe("facts", () => {
 });
 
 describe("sample inputs", () => {
-  it("are labelled as sample and satisfy every presence check", () => {
+  it("are labelled as sample with usable geometry but no physical confirmation", () => {
     for (const kind of ["prepare", "adapt"] as const) {
       const inputs = sampleInputs(kind, "asset-1");
       const s = { ...inputs, intent: kind === "prepare" ? "prepare_from_drawing" : "adapt_to_site" } as unknown as WorkPackageSnapshot;
-      expect(requirements(s).filter(r => !r.done)).toEqual([]);
+      expect(requirements(s).find(r => r.id === "run")?.done).toBe(true);
+      expect(requirements(s).find(r => r.id === "workAreaAccess")?.done).toBe(false);
+      if (kind === "adapt") expect(requirements(s).find(r => r.id === "duct")).toMatchObject({ done: true, label: "Obstacle geometry (all six faces) — synthetic test input" });
       expect([...inputs.detailing, ...inputs.siteFacts].every(f => f.source.description.startsWith("SAMPLE"))).toBe(true);
     }
   });

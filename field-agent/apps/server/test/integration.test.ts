@@ -370,7 +370,7 @@ it("keeps unsupported product cuts unresolved and retains context without adding
   expect(blocked.outputs.results.every(r => !r.materials.some(m => m.entityIds.includes("protected-head")))).toBe(true);
   expect(blocked.outputs.results[0].gaps.some(g => g.id === "protected-context")).toBe(true);
 });
-it("blocks an empty search and exposes required checks plus raw source-bound detail through the authenticated API", async () => {
+it("requests missing geometry, resumes after a saved correction, and exposes source-bound detail through the authenticated API", async () => {
   const t = setup(),
     s = await create(t, 3, false, (input) => {
       input.detailing = input.detailing.filter(
@@ -378,8 +378,18 @@ it("blocks an empty search and exposes required checks plus raw source-bound det
       );
     });
   const result = await run(t, s.id);
-  expect(result.run?.status).toBe("blocked");
+  expect(result.run?.status).toBe("waiting_input");
   expect(result.outputs.candidates?.candidates).toHaveLength(0);
+  const request = result.outputs.requests.at(-1)!;
+  expect(request.question).toContain("workEnvelope");
+  expect(request.question).toContain("Work boundary");
+  t.packages.answer(s.id, { expectedRevision: result.inputRevision, requestId: request.id, value: null, unavailableReason: "Measurement unavailable" });
+  expect((await run(t, s.id)).run?.status).toBe("blocked");
+  const missing = integratedInput(s.sourceDrawing!.assetId, 3).detailing.find(f => f.field === "workEnvelope.min.x")!;
+  t.packages.edit(s.id, { expectedRevision: t.packages.get(s.id).inputRevision, patch: { detailing: [...result.detailing, missing] } });
+  const recovered = await run(t, s.id);
+  expect(recovered.outputs.candidates?.candidates.length).toBeGreaterThan(0);
+  expect(recovered.run?.status).toBe("waiting_input");
   const good = await create(t, 2, true);
   await run(t, good.id);
   const path = `/api/work-packages/${good.id}/detail`;

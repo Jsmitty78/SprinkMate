@@ -29,6 +29,7 @@ export const PackageFactSchema = object({
   unit: nullableText, unknownReason: nullableText,
   confirmation: Type.Union([Type.Literal('proposed'), Type.Literal('confirmed')]),
   context: Type.Union([Type.Literal('observed'), Type.Literal('installed'), Type.Literal('detailing')]),
+  provenance: Type.Optional(choices('machine_proposal', 'user_entered', 'confirmed_evidence', 'synthetic_assumption')),
   source,
 });
 const sheetPoint = object({ x: Type.Number(), y: Type.Number() });

@@ -43,13 +43,18 @@ export interface AssemblyStep {
   status: ValueStatus;
   unresolvedReason: string | null;
 }
+export interface InputFactRow {
+  id: string; subjectIds: string[]; field: string; value: string | number | boolean | null; unit: string | null;
+  confirmation: string; provenance: string; context: string; unknownReason: string | null;
+  source: { description: string; assetId: string | null; page: number | null };
+}
 export interface PlanView {
   id: string;
   title: string;
   unit: string;
-  segments: { id: string; pieceIds: string[]; from: [number, number, number]; to: [number, number, number] }[];
+  segments: { sourceLabel?: string; id: string; pieceIds: string[]; from: [number, number, number]; to: [number, number, number] }[];
   joints: { id: string; position: [number, number, number] }[];
-  context?: { id: string; kind: string; positions: [number, number, number][] }[];
+  context?: { sourceLabel?: string; id: string; kind: string; positions: [number, number, number][] }[];
 }
 export interface ChangeRow {
   id: string;
@@ -69,6 +74,7 @@ export interface ExportSnapshot {
   title: string;
   scope: string;
   drawingReference: string;
+  inputFacts?: InputFactRow[];
   selectedPlan: PlanView;
   baselinePlan?: PlanView;
   materials: MaterialRow[];
@@ -101,6 +107,9 @@ export interface ExportManifest {
   createdAt: string;
   binding: ExportBinding;
   snapshotHash: string;
+  drawingReference?: string;
+  inputFacts?: InputFactRow[];
+  protectedContext?: PlanView["context"];
   draft: true;
   unresolvedCount: number;
   unresolvedItems: string[];

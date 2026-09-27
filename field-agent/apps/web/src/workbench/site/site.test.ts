@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { geometryFactUsable } from "@field-agent/core";
 import type { PackageInputs, PackagePlan } from "@field-agent/core";
 import { boxGaps, reopenSiteGeometry, requirements, siteFrameOf } from "../model.js";
-import { frameFormulas, frameFromYaw, spanFrame } from "./SiteInputs.js";
+import { siteEvidence, frameFormulas, frameFromYaw, spanFrame } from "./SiteInputs.js";
 
 // FS-01 P27 traced in the drawing-plan frame: N27 (12544.2133, 9620.5040) to N28 (12544.2133, 12668.1653)
 // drawing mm, Y down the sheet, so plan Y is negated.
@@ -61,6 +62,22 @@ describe("site frame", () => {
     const s = { id: "x", intent: "adapt_to_site", detailing: [], siteFacts: box("workEnvelope", [-150, null, -200, 3197.6613, 1200, 200]), baselinePlan: plan, scope: null, sourceDrawing: null, changeRequest: null } as unknown as Parameters<typeof requirements>[0];
     const labels = requirements(s).filter(r => r.group === "Site" && !r.done).map(r => r.label);
     expect(labels).toContain("Work boundary north-south (Y): the low face missing");
-    expect(labels).toContain("Obstacle entered and confirmed (all six faces)");
+    expect(labels).toContain("Obstacle geometry (all six faces)");
   });
+});
+
+
+it("keeps site test values proposed and synthetic even through measurement confirmation", () => {
+  const saved = f("duct.min.x", 100, { confirmation: "proposed", provenance: "synthetic_assumption" });
+  expect(siteEvidence(saved, "measured", true, "Edited note")).toMatchObject({ provenance: "synthetic_assumption", confirmation: "proposed" });
+  expect(siteEvidence(undefined, "assumption", true, "Test geometry")).toMatchObject({ provenance: "synthetic_assumption", confirmation: "proposed" });
+  expect(siteEvidence(undefined, "measured", false, "Tape")).toMatchObject({ provenance: "user_entered", confirmation: "proposed" });
+  expect(siteEvidence(undefined, "measured", true, "Tape")).toMatchObject({ provenance: "confirmed_evidence", confirmation: "confirmed" });
+});
+it("invalidates usable proposed synthetic geometry when the affected span changes", () => {
+  const assumption = f("duct.min.x", 100, { confirmation: "proposed", provenance: "synthetic_assumption" });
+  expect(geometryFactUsable(assumption)).toBe(true);
+  const changed = reopenSiteGeometry({ detailing: [assumption], siteFacts: [] });
+  expect(changed.detailing[0]).toMatchObject({ value: null, provenance: "synthetic_assumption", confirmation: "proposed" });
+  expect(geometryFactUsable(changed.detailing[0])).toBe(false);
 });
