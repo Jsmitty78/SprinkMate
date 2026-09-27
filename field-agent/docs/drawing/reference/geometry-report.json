@@ -1,0 +1,289 @@
+{
+  "directPdfComparison": {
+    "description": "Independent PyMuPDF raster vs extracted original SVG raster",
+    "meanAbsoluteChannelDifference": 0.49587903911564624,
+    "channelsDifferingOver32Percent": 0.18861607142857142
+  },
+  "source": {
+    "id": "itd-fs01-mezzanine",
+    "document": "FM32361 / FS-01",
+    "title": "FIRE SPRINKLER PLAN - MEZZANINE",
+    "url": "https://apps.itd.idaho.gov/Apps/NonHwyConstructionProjects/PDFS/FM32361_ITB_Drawings_Fire_Sprinkler_Plan.pdf",
+    "page": 1,
+    "sha256": "a21d5748d0b7f15bea1da772fdb41a424651cb1e717534177b5144c6d51eef1f",
+    "cropPdfPoints": [
+      1460,
+      1500,
+      2020,
+      2060
+    ],
+    "mmPerPdfPoint": 33.86666666666666,
+    "scale": "1/8 inch = 1 foot (1:96)",
+    "method": "PDF vector path extraction; symbol-edge endpoints extended to symbol centers; T-junctions split",
+    "scope": "FS-01 mezzanine plan only; main floor and details excluded",
+    "coordinateTolerancePdfPoints": 0.02,
+    "physicalAccuracy": "unverified"
+  },
+  "counts": {
+    "backgroundPaths": 8671,
+    "sourcePipePaths": 32,
+    "editableSegments": 41,
+    "heads": 19
+  },
+  "tolerancePdfPoints": 0.02,
+  "maxHeadCenterErrorPdfPoints": 0.007036212015609987,
+  "landmarks": [
+    {
+      "id": "H1",
+      "pdfPathIndex": 16469,
+      "expectedPdfPoint": [
+        1830.3999633789062,
+        1784.074951171875
+      ],
+      "mappedPdfPoint": [
+        1830.399999015748,
+        1784.0700000000002
+      ],
+      "errorPdfPoints": 0.004951300124075244
+    },
+    {
+      "id": "H2",
+      "pdfPathIndex": 16470,
+      "expectedPdfPoint": [
+        1911.3800659179688,
+        1784.074951171875
+      ],
+      "mappedPdfPoint": [
+        1911.38,
+        1784.0700000000002
+      ],
+      "errorPdfPoints": 0.004951610658438287
+    },
+    {
+      "id": "H3",
+      "pdfPathIndex": 16471,
+      "expectedPdfPoint": [
+        1830.3999633789062,
+        1874.0550537109375
+      ],
+      "mappedPdfPoint": [
+        1830.399999015748,
+        1874.0599990157482
+      ],
+      "errorPdfPoints": 0.004945433212078499
+    },
+    {
+      "id": "H4",
+      "pdfPathIndex": 16472,
+      "expectedPdfPoint": [
+        1911.3800659179688,
+        1874.0550537109375
+      ],
+      "mappedPdfPoint": [
+        1911.38,
+        1874.0599990157482
+      ],
+      "errorPdfPoints": 0.004945744114814391
+    },
+    {
+      "id": "H5",
+      "pdfPathIndex": 16473,
+      "expectedPdfPoint": [
+        1830.3999633789062,
+        1964.0350341796875
+      ],
+      "mappedPdfPoint": [
+        1830.399999015748,
+        1964.04
+      ],
+      "errorPdfPoints": 0.004965948183395986
+    },
+    {
+      "id": "H6",
+      "pdfPathIndex": 16474,
+      "expectedPdfPoint": [
+        1911.3800659179688,
+        1964.0350341796875
+      ],
+      "mappedPdfPoint": [
+        1911.38,
+        1964.04
+      ],
+      "errorPdfPoints": 0.004966257801832888
+    },
+    {
+      "id": "H7",
+      "pdfPathIndex": 16475,
+      "expectedPdfPoint": [
+        1731.4199829101562,
+        1784.074951171875
+      ],
+      "mappedPdfPoint": [
+        1731.420000984252,
+        1784.0700000000002
+      ],
+      "errorPdfPoints": 0.00495120486418297
+    },
+    {
+      "id": "H8",
+      "pdfPathIndex": 16476,
+      "expectedPdfPoint": [
+        1731.4199829101562,
+        1874.0550537109375
+      ],
+      "mappedPdfPoint": [
+        1731.420000984252,
+        1874.0599990157482
+      ],
+      "errorPdfPoints": 0.004945337839174452
+    },
+    {
+      "id": "H9",
+      "pdfPathIndex": 16477,
+      "expectedPdfPoint": [
+        1731.4199829101562,
+        1964.0350341796875
+      ],
+      "mappedPdfPoint": [
+        1731.420000984252,
+        1964.04
+      ],
+      "errorPdfPoints": 0.004965853204497238
+    },
+    {
+      "id": "H10",
+      "pdfPathIndex": 16478,
+      "expectedPdfPoint": [
+        1645.9400024414062,
+        1811.070068359375
+      ],
+      "mappedPdfPoint": [
+        1645.94,
+        1811.0700000000002
+      ],
+      "errorPdfPoints": 0.00006840295748152717
+    },
+    {
+      "id": "H11",
+      "pdfPathIndex": 16479,
+      "expectedPdfPoint": [
+        1758.4149780273438,
+        1712.0899658203125
+      ],
+      "mappedPdfPoint": [
+        1758.41,
+        1712.0899990157482
+      ],
+      "errorPdfPoints": 0.004978138022519721
+    },
+    {
+      "id": "H12",
+      "pdfPathIndex": 16480,
+      "expectedPdfPoint": [
+        1695.4299926757812,
+        1671.5999755859375
+      ],
+      "mappedPdfPoint": [
+        1695.429999015748,
+        1671.6000000000001
+      ],
+      "errorPdfPoints": 0.000025223830673171492
+    },
+    {
+      "id": "H13",
+      "pdfPathIndex": 16481,
+      "expectedPdfPoint": [
+        1713.4249877929688,
+        1599.6199951171875
+      ],
+      "mappedPdfPoint": [
+        1713.420000984252,
+        1599.6199990157481
+      ],
+      "errorPdfPoints": 0.004986810240591917
+    },
+    {
+      "id": "H14",
+      "pdfPathIndex": 16482,
+      "expectedPdfPoint": [
+        1767.4149780273438,
+        1640.1099853515625
+      ],
+      "mappedPdfPoint": [
+        1767.41,
+        1640.110000984252
+      ],
+      "errorPdfPoints": 0.004978051889574092
+    },
+    {
+      "id": "H15",
+      "pdfPathIndex": 16483,
+      "expectedPdfPoint": [
+        1803.4049682617188,
+        1590.6199951171875
+      ],
+      "mappedPdfPoint": [
+        1803.399999015748,
+        1590.6199990157481
+      ],
+      "errorPdfPoints": 0.004969247499925673
+    },
+    {
+      "id": "H16",
+      "pdfPathIndex": 16484,
+      "expectedPdfPoint": [
+        1803.4049682617188,
+        1707.5899658203125
+      ],
+      "mappedPdfPoint": [
+        1803.399999015748,
+        1707.5899990157482
+      ],
+      "errorPdfPoints": 0.004969356845074758
+    },
+    {
+      "id": "H17",
+      "pdfPathIndex": 16485,
+      "expectedPdfPoint": [
+        1803.4049682617188,
+        1680.39501953125
+      ],
+      "mappedPdfPoint": [
+        1803.399999015748,
+        1680.400000984252
+      ],
+      "errorPdfPoints": 0.007036212015609987
+    },
+    {
+      "id": "H18",
+      "pdfPathIndex": 16486,
+      "expectedPdfPoint": [
+        1875.3899536132812,
+        1684.89501953125
+      ],
+      "mappedPdfPoint": [
+        1875.390000984252,
+        1684.900000984252
+      ],
+      "errorPdfPoints": 0.004981678233361675
+    },
+    {
+      "id": "H19",
+      "pdfPathIndex": 16487,
+      "expectedPdfPoint": [
+        1875.3899536132812,
+        1599.409912109375
+      ],
+      "mappedPdfPoint": [
+        1875.390000984252,
+        1599.409999015748
+      ],
+      "errorPdfPoints": 0.00009897841463097043
+    }
+  ],
+  "visualComparison": {
+    "description": "Exact original SVG vs editable reconstruction, whole crop; not physical measurement accuracy",
+    "meanAbsoluteChannelDifference": 0.011319355867346939,
+    "channelsDifferingOver32Percent": 0.006218112244897959
+  }
+}

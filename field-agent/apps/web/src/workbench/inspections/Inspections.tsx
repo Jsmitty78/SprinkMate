@@ -19,6 +19,7 @@ export function Inspections({ token, onAuthFailure }: { token: string; onAuthFai
   const [newTitle, setNewTitle] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [planOrientation, setPlanOrientation] = useState("pendent");
+  const [drawingPreset, setDrawingPreset] = useState("reference");
   const selected = useRef<string | null>(null);
   const currentToken = useRef(token);
   const requestSerial = useRef(0);
@@ -86,7 +87,7 @@ export function Inspections({ token, onAuthFailure }: { token: string; onAuthFai
 
   async function createTask() {
     await action("仕事を作成", async () => {
-      const created = await write<TaskSnapshot>(token, "/tasks", { ...(newTitle.trim() ? { title: newTitle.trim() } : {}), planOrientation });
+      const created = await write<TaskSnapshot>(token, "/tasks", { ...(newTitle.trim() ? { title: newTitle.trim() } : {}), planOrientation, reference: drawingPreset === "reference" });
       selected.current = created.id; setSelectedId(created.id); setTask(created);
     }, () => { setNewTitle(""); setCreateOpen(false); });
   }
@@ -96,7 +97,8 @@ export function Inspections({ token, onAuthFailure }: { token: string; onAuthFai
       <div className="inspection-list-heading"><h2>Field inspections</h2><Button aria-label="New inspection" onClick={() => setCreateOpen(v => !v)} disabled={!!busy}><Icon name="plus" /></Button></div>
       {createOpen && <div className="inspection-panel"><form onSubmit={event => { event.preventDefault(); void createTask(); }}>
         <Field label="仕事の名前"><input id="inspection-title" value={newTitle} onChange={e => setNewTitle(e.target.value)} autoFocus /></Field>
-        <Field label="図面の指定方向"><select id="inspection-orientation" value={planOrientation} onChange={e => setPlanOrientation(e.target.value)}>{["pendent", "upright", "sideways"].map(value => <option key={value} value={value}>{label(value)}</option>)}</select></Field>
+        <Field label="元図"><select value={drawingPreset} onChange={e => setDrawingPreset(e.target.value)}><option value="reference">実図面 FS-01 中二階</option><option value="sample">操作練習用サンプル</option></select></Field>
+        <Field label="サンプルの指定方向"><select id="inspection-orientation" value={planOrientation} onChange={e => setPlanOrientation(e.target.value)}>{["pendent", "upright", "sideways"].map(value => <option key={value} value={value}>{label(value)}</option>)}</select></Field>
         <Button type="submit" variant="primary" busy={busy === "仕事を作成"} disabled={!!busy}>作成</Button>
       </form></div>}
       <nav aria-label="現場確認の仕事一覧">{tasks.map(item => <Button key={item.id} variant="quiet" className={item.id === selectedId ? "is-selected" : ""} aria-current={item.id === selectedId ? "page" : undefined} onClick={() => selectTask(item.id)} disabled={!!busy}>

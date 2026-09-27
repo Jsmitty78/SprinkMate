@@ -101,35 +101,3 @@ unresolved reason and document status. ID collections are JSON arrays inside
 quoted cells to avoid ambiguous delimiters. Empty tables have one
 `record_type=package_status` row with blank quantity and explicit unresolved status.
 Do not sum that row as a material. Ordinary rows are `material` or `cut`.
-
-## Verification and remaining acceptance gates
-
-Run with the project's pinned pnpm 10.17.1 and Node >=22.19:
-
-```sh
-pnpm install --frozen-lockfile
-pnpm test
-pnpm typecheck
-pnpm build
-pnpm exec tsx scripts/export-fixtures.ts /tmp/field-export-review
-pdftoppm -scale-to 1200 -png /tmp/field-export-review/adaptation.pdf /tmp/adaptation
-```
-
-The fixture is explicitly SYNTHETIC. Independent arithmetic: baseline 1200 mm
-centerline minus two assumed 30 mm takeouts = 1140 mm. Detour centerlines are
-200 + 1200 + 200 = 1600 mm; synthetic cuts are 140 + 1140 + 140 = 1420 mm,
-which is +280 mm from baseline. These assumptions are NOT product evidence.
-The long negative fixture exercises missing makeup, missing verification,
-45 material rows, multi-page source text and continued table rows.
-
-Do not close #13 until the real API adapter and browser download actions are
-connected, both source-backed positive scenarios match browser quantities, and
-the actual product PDF/CSV exports have been reviewed. Synthetic tests establish
-serialization/layout/version behavior only, not engineering or field readiness.
-
-Verified for this change: 118 tests pass (32 exporter tests), workspace typecheck
-passes, and the production web build passes. The drawing, adaptation and negative
-PDFs were rendered with Poppler and visually reviewed (3, 6 and 10 pages).
-Python's independent CSV parser verified column structure, 1140/1420 mm totals,
-45-row pagination fixture and explicit blank/unresolved negative cut values.
-The lockfile is accepted by pinned pnpm 10.17.1 in frozen lockfile-only mode.

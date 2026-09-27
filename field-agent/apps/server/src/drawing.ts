@@ -1,8 +1,9 @@
 import type { PlanModel } from './models.js';
 
+import { exampleDrawing, renderDrawingSvg } from '@field-agent/core';
+
 export function planSvg(plan: PlanModel): string {
-  const up = plan.orientation === 'upright';
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 300"><rect width="800" height="300" fill="#f3f5f1"/><g stroke="#d8ded5" stroke-width="1">${Array.from({length:17},(_,i)=>`<path d="M${i*50} 0v300"/>`).join('')}${Array.from({length:7},(_,i)=>`<path d="M0 ${i*50}h800"/>`).join('')}</g><path d="M100 135H690" stroke="#376959" stroke-width="12" fill="none"/><path d="M480 135v${up?'-50':'50'}" stroke="#376959" stroke-width="7"/><path d="M456 ${up?80:190}h48" stroke="#cf673a" stroke-width="6"/><g font-family="system-ui" fill="#20392e"><text x="35" y="35" font-size="17">PLAN / REV ${plan.revision} — SYNTHETIC</text><text x="120" y="115">P1</text><text x="520" y="${up?85:200}">H1 · TY3231</text><text x="305" y="265">${plan.lengthMeters.toFixed(2)} m · ${up?'upright':'pendent'}</text></g><path d="M100 225h590m-590 -8v16m590 -16v16" fill="none" stroke="#89988d"/></svg>`;
+  return renderDrawingSvg(plan.drawing ?? exampleDrawing(plan.orientation), plan.revision);
 }
 
 export function sceneSvg(orientation: string, detail = false, obstacle = false): string {
