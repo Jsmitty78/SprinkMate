@@ -161,11 +161,11 @@ export function PlanCanvas(props: CanvasProps) {
         {baseline && (baselineIsWork ? drawPieces(baseShape, baseCallouts, "fa-work", true) : drawPieces(baseShape, baseCallouts, "fa-existing", false))}
         {others.map(({ route, shape }) => <g key={route.plan.id} data-route={route.plan.id} className={`fa-alt ${props.staleRoutes ? "is-stale" : ""}`}>
           {drawPieces(shape, props.calloutsFor(route.plan), "", false)}
-          <RouteBadge shape={shape} letter={route.letter} px={px} Y={Y} />
+          <RouteBadge shape={{ ...shape, segments: shape.segments.filter(s => !protectedIds.has(s.id)) }} letter={route.letter} px={px} Y={Y} />
         </g>)}
         {focus && <g className={`fa-focus ${focus.route.plan.id === selectedRouteId ? "is-selected" : ""}`}>
           {drawPieces(focus.shape, props.calloutsFor(focus.route.plan), "fa-work", true)}
-          <RouteBadge shape={focus.shape} letter={focus.route.letter} px={px} Y={Y} filled />
+          <RouteBadge shape={{ ...focus.shape, segments: focus.shape.segments.filter(s => !protectedIds.has(s.id)) }} letter={focus.route.letter} px={px} Y={Y} filled />
         </g>}
         {duct && mode === "adapt" && <g className="fa-obstruction" transform={`translate(${boxLabel(duct).x} ${-boxLabel(duct).y})`}>
           <circle r={px(9)} /><text y={px(4)} fontSize={px(12)}>!</text>

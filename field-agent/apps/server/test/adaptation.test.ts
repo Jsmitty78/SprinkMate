@@ -51,7 +51,7 @@ it("preserves missing-height and bounded no-route states instead of fabricating 
   expect(result.reasons[0].message).toContain("not proof of global infeasibility");
 });
 
-it("generates steel routes for frozen FS-01 P27 with fictional site bounds and preserves the entire source context", () => {
+it("generates steel routes for frozen FS-01 P27 with fictional site bounds and preserves the saved source pipe-graph context", () => {
   const s = { ...fixture(), ...fs01Adaptation("asset"), projectId: "idaho-source-test" };
   const result = search(s);
   expect(result.candidates).toHaveLength(2);

@@ -21,6 +21,10 @@ export function fs01Adaptation(assetId: string): PackageInputs {
   const add = (field: string, value: number | string, unit: string | null, subjects: string[] = []) => detailing.push({ id: `fs-${detailing.length}`, field, value, unit, subjectIds: subjects, confirmation: "confirmed", context: "detailing", unknownReason: null, source: { description: "SAMPLE supplement: fictional horizontal geometry, obstacle and work-space assumptions from #1. Not measured site facts or approved product selection.", assetId: null, page: null } });
   for (const end of ["start", "end"]) add(`datum.${end}`, "scope_interface", null, ["P27"]);
   add("requiredConnectionMethod", "steel_threaded", null, ["P27"]);
+  add("requiredPipeSpecification", "Schedule 40 black steel, threaded cast-iron fittings", null, ["P27"]);
+  for (const f of detailing) f.source = { description: f.field.startsWith("datum.")
+    ? "FS-01 source P27 projected endpoint stations. Physical end assemblies, joints and elevation remain unresolved."
+    : "FS-02 general notes: Schedule 40 black steel/threaded cast-iron fittings. Public design source; exact product and current approval unknown. See parent #1 source packet.", assetId: null, page: f.field.startsWith("datum.") ? 1 : 2 };
   for (const [field, n] of [["origin.x", 12544.2133], ["origin.y", 9620.504], ["origin.z", 0], ["yaw", 90]] as const) add(`adaptationFrame.${field}`, n, field === "yaw" ? "deg" : "mm");
   for (const [prefix, values] of [["duct", [1200, -250, -300, 1800, 250, 300]], ["workEnvelope", [-150, -1400, -200, 3197.6613, 1200, 200]]] as const)
     ["min.x", "min.y", "min.z", "max.x", "max.y", "max.z"].forEach((key, i) => add(`${prefix}.${key}`, values[i], "mm"));
