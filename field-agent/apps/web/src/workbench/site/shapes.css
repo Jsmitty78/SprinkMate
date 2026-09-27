@@ -18,6 +18,6 @@
 .wf-canvas-stage .fa-shape-editor > .fa-canvas,
 .wf-canvas-stage .fa-shape-editor > .fa-sheet { height: auto; min-height: 180px; border: 1px solid var(--fa-line); border-radius: 8px; box-shadow: none; }
 .wf-canvas-stage .fa-shape-tools { border: 1px solid var(--fa-line); border-bottom: 0; border-radius: 8px 8px 0 0; }
-.fa-shape-tools button[aria-pressed=true] { color: var(--fa-blue-ink); background: var(--fa-blue-soft); border-color: var(--fa-blue); }
+.fa-shape-tools button[aria-pressed=true] { color: var(--fa-accent-hover); background: var(--fa-accent-soft); border-color: var(--fa-accent); }
 .fa-shape-limits { font-size: 11px; color: var(--fa-muted); }
 .fa-shape-limits summary { cursor: pointer; }
