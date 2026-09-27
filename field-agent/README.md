@@ -1,5 +1,7 @@
 # 現場カメラエージェント
 
+The independent [Pi + JEV workflow connection](packages/workflow/README.md) provides the new two-scenario runner and reproducible connection fixtures. It is not yet connected to this older camera-workflow server/UI or the pending work-package services.
+
 配管1区間の図面と観測を照合し、追加撮影・計測・人による確認を経て、根拠と未解決事項を含む変更検討資料を作ります。
 
 **設備全体の適合判定は対象外。採用した限定ルールの判定は対象です。** TFP171に基づくメーカー条件10項目を採用しています。各条件と図面比較の結果を独立に表示します。実装済みの範囲とNFPA側の残件は [ルール台帳](docs/rule-inventory.md) を参照してください。
