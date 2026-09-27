@@ -239,3 +239,19 @@ it("clears site targets on reshape but preserves them for coordinate-only edits"
     expect(runEditPatch(cur, moved, shifted)).not.toHaveProperty("changeRequest");
   }
 });
+
+describe("run reconstruction", () => {
+  const run: RunNode[] = [{ kind: "tie_in", x: 0, y: 0 }, { kind: "elbow", x: 1000, y: 0 }, { kind: "elbow", x: 1000, y: 800 }, { kind: "tie_in", x: 2000, y: 800 }];
+  it("follows connections, not the order pipes are stored in", () => {
+    const built = buildRun(run, "baseline", "test");
+    if ("problems" in built) throw new Error("bad run");
+    const shuffled = { ...built.plan, entities: [...built.plan.entities].reverse() };
+    expect(runNodes(shuffled)).toEqual(runNodes(built.plan));
+    expect(runNodes(built.plan)?.map(n => n.kind)).toEqual(run.map(n => n.kind));
+  });
+  it("refuses a plan whose connections it would not reproduce", () => {
+    const built = buildRun(run, "baseline", "test");
+    if ("problems" in built) throw new Error("bad run");
+    expect(runNodes({ ...built.plan, connections: built.plan.connections.slice(1) })).toBeNull();
+  });
+});

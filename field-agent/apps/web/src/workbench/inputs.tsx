@@ -54,10 +54,11 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
   useEffect(() => { setRev(d?.revision ?? "A"); setPage(String(d?.page ?? 1)); setScale(d?.scale.value != null ? String(d.scale.value) : ""); }, [d?.assetId, d?.revision, d?.page, d?.scale.value]);
 
   const upload = (file: File) => act("upload", async cur => {
+    pageNumber(page);
     const asset = await api.upload(cur.id, file);
     await patchClearing(cur, {
       sourceDrawing: {
-        assetId: asset.id, drawingId: safeId(file.name), revision: rev.trim() || "A", page: Math.max(1, Number(page) || 1), approval: "unreviewed",
+        assetId: asset.id, drawingId: safeId(file.name), revision: rev.trim() || "A", page: pageNumber(page), approval: "unreviewed",
         scale: { value: null, unit: scaleUnit, reason: "Scale not confirmed yet", basis: "unknown" },
       },
     }, setNotice);
@@ -68,7 +69,7 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
     const known = scale.trim() !== "" && Number.isFinite(value) && value > 0;
     await patchClearing(cur, {
       sourceDrawing: {
-        ...cur.sourceDrawing, revision: rev.trim() || cur.sourceDrawing.revision, page: Math.max(1, Number(page) || 1),
+        ...cur.sourceDrawing, revision: rev.trim() || cur.sourceDrawing.revision, page: pageNumber(page),
         scale: known ? { value, unit: scaleUnit, reason: null, basis: confirm ? "confirmed_inputs" : "proposed_inputs" } : { value: null, unit: scaleUnit, reason: "Scale not confirmed yet", basis: "unknown" },
       },
     }, setNotice);
@@ -80,7 +81,7 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
     <p className="fa-muted">Upload the approved sheet for this work (PDF, PNG or JPEG, up to 20 MB). It stays linked to every result.</p>
     <div className="fa-row2">
       <Field label="Revision"><input value={rev} onChange={e => setRev(e.target.value)} maxLength={40} /></Field>
-      <Field label="Page"><input value={page} inputMode="numeric" onChange={e => setPage(e.target.value)} /></Field>
+      <Field label="Page"><input value={page} inputMode="numeric" aria-invalid={!pageOk(page)} className={pageOk(page) ? undefined : "is-invalid"} onChange={e => setPage(e.target.value)} /></Field>
     </div>
     <label className={`fa-drop ${busy === "upload" ? "is-busy" : ""}`}>
       <Icon name="upload" /><span>{busy === "upload" ? "Uploading…" : "Choose drawing file"}</span>
@@ -98,7 +99,7 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
     {frozen ? <p className="fa-muted">{runConfirmed ? "The drawing is frozen with the confirmed run." : "The approved drawing is frozen in this package."} Start a new package for a new revision.</p> : <>
       <div className="fa-row3">
         <Field label="Revision"><input value={rev} onChange={e => setRev(e.target.value)} maxLength={40} /></Field>
-        <Field label="Page"><input value={page} inputMode="numeric" onChange={e => setPage(e.target.value)} /></Field>
+        <Field label="Page"><input value={page} inputMode="numeric" aria-invalid={!pageOk(page)} className={pageOk(page) ? undefined : "is-invalid"} onChange={e => setPage(e.target.value)} /></Field>
         <Field label="Scale, mm per pixel"><input value={scale} inputMode="decimal" placeholder="e.g. 1" onChange={e => setScale(e.target.value)} /></Field>
       </div>
       <div className="fa-actions">
@@ -111,6 +112,10 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
 }
 
 // ---------------------------------------------------------------- run editor
+
+/** The contract wants a positive whole page number; anything else stops the action before the upload or patch. */
+const pageOk = (text: string) => /^\s*\d+\s*$/.test(text) && Number(text) >= 1;
+const pageNumber = (text: string) => { if (!pageOk(text)) throw new Error("Page must be a whole number, 1 or more."); return Number(text); };
 
 const KIND_LABEL: Record<RunNodeKind, string> = { tie_in: "Tie-in", open_end: "Open end", elbow: "90° elbow" };
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { PackageIntent } from "@field-agent/core";
 import { api, ApiError, session, type Summary } from "./api.js";
 import { dateTime } from "./format.js";
@@ -82,10 +82,13 @@ function Home({ open, onAuthFailure }: { open: (id: string) => void; onAuthFailu
   const [busy, setBusy] = useState<PackageIntent | "">("");
   const [titles, setTitles] = useState<Record<PackageIntent, string>>({ prepare_from_drawing: "", adapt_to_site: "" });
 
+  // Only the newest request may update the list, so a slow answer for an earlier project cannot replace it.
+  const serial = useRef(0);
   const load = useCallback(async () => {
+    const n = ++serial.current;
     setError("");
-    try { setItems(await api.list(project)); }
-    catch (e) { if (e instanceof ApiError && e.status === 401) onAuthFailure(); setError(e instanceof Error ? e.message : "Could not load packages"); setItems([]); }
+    try { const list = await api.list(project); if (n === serial.current) setItems(list); }
+    catch (e) { if (n !== serial.current) return; if (e instanceof ApiError && e.status === 401) onAuthFailure(); setError(e instanceof Error ? e.message : "Could not load packages"); setItems([]); }
   }, [project, onAuthFailure]);
   useEffect(() => { try { localStorage.setItem(PROJECT_KEY, project); } catch { /* ignore */ } const t = setTimeout(() => void load(), 250); return () => clearTimeout(t); }, [project, load]);
 
