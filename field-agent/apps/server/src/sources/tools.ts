@@ -53,7 +53,7 @@ export function toMm(value: number, unit: string): number | null {
 // ------------------------------------------------------------------ pipe-to-duct clearance
 
 export interface ClearanceArgs {
-  segment: { id: string; start: Point | null; end: Point | null; origin: Origin; detail: string } | null;
+  segment: { id: string; productId: string | null; start: Point | null; end: Point | null; origin: Origin; detail: string } | null;
   duct: { box: Box | null; origin: Origin; detail: string } | null;
   /** Vertical move of the pipe the user asked about (negative = down), in mm. */
   verticalOffsetMm: { value: number; origin: Origin; detail: string } | null;
@@ -74,6 +74,8 @@ export function pipeDuctClearance(args: ClearanceArgs): CalculationResult {
   if (!seg?.start || !seg.end) missing.push('Pipe endpoints for the selected piece');
   if (!args.duct?.box) missing.push('Measured duct box (all six faces)');
   if (missing.length) return { ...base, status: 'missing_inputs', inputs, outputs: [], missing, message: 'The calculation needs the inputs listed.', ms: performance.now() - t0 };
+  // The pipe envelope uses the catalog diameter of one product, so any other pipe is outside what the script can measure.
+  if (seg!.productId !== PIPE_ID) return { ...base, status: 'out_of_scope', inputs, outputs: [], missing, message: `The clearance script only knows the outside diameter of ${PIPE_ID}; piece ${seg!.id} is ${seg!.productId ?? 'an unidentified product'}.`, ms: performance.now() - t0 };
 
   const dz = args.verticalOffsetMm?.value ?? 0;
   if (!Number.isFinite(dz) || Math.abs(dz) > MAX_MM) return { ...base, status: 'invalid_input', inputs, outputs: [], missing, message: 'The vertical move must be a finite length under 100 m.', ms: performance.now() - t0 };

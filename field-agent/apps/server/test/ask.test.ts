@@ -11,7 +11,7 @@ import { WorkPackageService } from '../src/work-packages/service.js';
 import { SourceStore } from '../src/sources/store.js';
 import { loadDemoSources, DEMO_DIR } from '../src/sources/demo.js';
 import { ask, NO_SOURCE, supports, validateClaims, type AskAnswer, type Composer } from '../src/sources/ask.js';
-import { geometryScriptVersion } from '../src/sources/tools.js';
+import { geometryScriptVersion, pipeDuctClearance } from '../src/sources/tools.js';
 import type { SourceDocumentInput } from '../src/sources/types.js';
 import { integratedInput } from './fixtures/integrated-package.js';
 
@@ -318,5 +318,60 @@ describe('Ask Sprink', () => {
     const p = (xs: number[], q: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(q * xs.length))];
     console.log(`Ask Sprink latency over ${wall.length} requests: HTTP p50 ${p(wall, 0.5).toFixed(1)} ms, p95 ${p(wall, 0.95).toFixed(1)} ms; retrieval p95 ${p(retrieval, 0.95).toFixed(1)} ms; answer p95 ${p(total, 0.95).toFixed(1)} ms`);
     expect(p(wall, 0.95)).toBeLessThan(2000);
+  });
+});
+
+describe('review fixes', () => {
+  it('does not measure clearance for a pipe product the script has no diameter for', () => {
+    const seg = { id: 'P-9', productId: 'other/steel-sch10', start: { x: 0, y: 0, z: 3000 }, end: { x: 2000, y: 0, z: 3000 }, origin: 'project' as const, detail: 'test' };
+    const duct = { box: { min: { x: 800, y: -400, z: 3100 }, max: { x: 1200, y: 400, z: 3500 } }, origin: 'project' as const, detail: 'test' };
+    const r = pipeDuctClearance({ segment: seg, duct, verticalOffsetMm: null });
+    expect(r.status).toBe('out_of_scope');
+    expect(r.outputs).toEqual([]);
+    expect(r.message).toMatch(/other\/steel-sch10/);
+  });
+
+  it('uses manufacturer instructions only for a product known to be in the run', async () => {
+    const { app, sources, pkg } = await setup();
+    const question = 'How far must CPVC pipe be kept from heat sources?';
+    const withRun = await askHttp(app, { question, packageId: pkg.id });
+    expect(withRun.sources.some(s => s.sectionId === 'DEMO-M-4.2')).toBe(true);
+    const a = await askHttp(app, { question });
+    expect(a.sources.some(s => s.type === 'manufacturer')).toBe(false);
+    const manufacturer = a.excluded.find(e => sources.document(e.docId)?.type === 'manufacturer');
+    expect(manufacturer?.reason).toMatch(/No product in the run is known/);
+    expect(a.missing.join(' ')).toMatch(/installed product/);
+  });
+
+  it('counts a directly matched local amendment as a supporting source', async () => {
+    const { app, pkg } = await setup();
+    const a = await askHttp(app, { question: 'What does DEMO-SF-9.1.1 say?', packageId: pkg.id });
+    expect(a.sources.find(x => x.sectionId === 'DEMO-SF-9.1.1')?.role).toBe('amendment');
+    expect(a.status).not.toBe('no_source');
+    expect(a.summary.startsWith(NO_SOURCE)).toBe(false);
+  });
+
+  it('finds the applicable passage even when many passages from another edition rank higher', async () => {
+    const { app, sources, pkg } = await setup();
+    const content = Array.from({ length: 150 }, (_, i) => `## 9.${i + 1} Hanger spacing after a route change\nRoute change, reroute, rerouting, relocation: hanger support spacing and the distance between hangers on relocated pipe is ${i + 1} m.`).join('\n\n');
+    sources.import({ id: 'other-2019', title: 'Other code 2019', publisher: 'Test', type: 'published_code', edition: '2019', scope: { standard: 'nfpa13' }, demonstration: true,
+      authorization: { basis: 'Invented test text', storeAndIndex: true, useWithAi: true, display: 'full' }, filename: 'other.md', content });
+    const a = await askHttp(app, { question: 'What hanger spacing applies to relocated pipe?', packageId: pkg.id });
+    expect(sectionIds(a)).toContain('DEMO-9.1');
+    expect(a.excluded.some(e => e.docId === 'other-2019')).toBe(true);
+  });
+
+  it('refuses explanation notes without text or with malformed conditions', async () => {
+    const { app } = await setup();
+    const document = { id: 'note-check', title: 'Note check', publisher: 'Test', type: 'company_procedure', edition: 'Rev A', scope: {}, demonstration: true,
+      authorization: { basis: 'Invented test text', storeAndIndex: true, useWithAi: true, display: 'full' }, filename: 'n.md', content: '## 1.1 Title\nText shall apply.' };
+    const noText = await app.request('/api/sources', post({ document, explanations: { author: 'Test', notes: [{ sectionId: '1.1' }] } }));
+    expect(noText.status).toBe(400);
+    expect((await noText.json()).code).toBe('invalid_note');
+    const badCondition = await app.request('/api/sources', post({ document, explanations: { author: 'Test', notes: [{ sectionId: '1.1', text: 'Explained.', conditions: [{ id: 'c', question: 'How wide?', input: { name: 'w', unit: 'ft' }, appliesWhen: { op: '<=', value: 1 } }] }] } }));
+    expect((await badCondition.json()).code).toBe('invalid_note');
+    const ok = await app.request('/api/sources', post({ document, explanations: { author: 'Test', notes: [{ sectionId: '1.1', text: 'Explained.' }] } }));
+    expect(ok.status).toBe(201);
+    expect((await askHttp(app, { question: 'Title text' })).status).not.toBe('error');
   });
 });

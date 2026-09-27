@@ -75,7 +75,9 @@ export class SourceStore {
     return (this.db.prepare('SELECT data FROM source_notes WHERE section_key=?').all(key) as { data: string }[]).map(r => JSON.parse(r.data));
   }
   /** Full-text search with BM25 ranking. The query is built by retrieve.ts from escaped terms only. */
-  search(match: string, limit = 60): Array<{ key: string; docId: string; rank: number }> {
+  search(match: string, limit = 60, docIds?: string[]): Array<{ key: string; docId: string; rank: number }> {
+    if (docIds) return (this.db.prepare('SELECT section_key AS key, doc_id AS docId, bm25(source_fts, 0, 0, 4, 3, 1) AS rank FROM source_fts WHERE source_fts MATCH ? AND doc_id IN (SELECT value FROM json_each(?)) ORDER BY rank LIMIT ?')
+      .all(match, JSON.stringify(docIds), limit) as Array<{ key: string; docId: string; rank: number }>);
     return (this.db.prepare('SELECT section_key AS key, doc_id AS docId, bm25(source_fts, 0, 0, 4, 3, 1) AS rank FROM source_fts WHERE source_fts MATCH ? ORDER BY rank LIMIT ?')
       .all(match, limit) as Array<{ key: string; docId: string; rank: number }>);
   }
@@ -128,11 +130,20 @@ function validate(d: SourceDocumentInput) {
   if (d.type === 'manufacturer' && !(Array.isArray(s.productIds) && s.productIds.length)) fail(400, 'missing_products', 'Manufacturer documents need scope.productIds.');
 }
 
+const validCondition = (c: unknown): boolean => {
+  const x = c as ExplanationNote['conditions'] extends (infer T)[] | undefined ? Partial<T> : never;
+  return !!x && typeof x === 'object' && text(x.id, 120) && text(x.question, 400) && !!x.input && text(x.input.name, 60) && (x.input.unit === 'mm' || x.input.unit === 'count')
+    && !!x.appliesWhen && ['<=', '<', '>=', '>'].includes(x.appliesWhen.op) && typeof x.appliesWhen.value === 'number' && Number.isFinite(x.appliesWhen.value);
+};
+
 function resolveNotes(sections: SourceSection[], file: ExplanationFile): ExplanationNote[] {
   if (!text(file.author, 200) || !Array.isArray(file.notes)) fail(400, 'invalid_notes', 'Explanation notes need an author and a notes list.');
   return file.notes.map(n => {
     const target = sections.find(s => s.sectionId === n.sectionId);
     if (!target) fail(400, 'note_section_missing', `Explanation note refers to section ${n.sectionId}, which is not in the document.`);
+    if (!text(n.text, 4000)) fail(400, 'invalid_note', `The note for ${n.sectionId} needs text (up to 4000 characters).`);
+    if ((n.topic !== undefined && !text(n.topic, 120)) || (n.position !== undefined && !text(n.position, 400))) fail(400, 'invalid_note', `The note for ${n.sectionId} has an invalid topic or position.`);
+    if (n.conditions !== undefined && !(Array.isArray(n.conditions) && n.conditions.every(validCondition))) fail(400, 'invalid_note', `The note for ${n.sectionId} has an invalid condition. Each needs an id, a question, an input name with unit mm or count, and a comparison with a number.`);
     return { sectionKey: target!.key, text: n.text, author: file.author, topic: n.topic, position: n.position, conditions: n.conditions };
   });
 }

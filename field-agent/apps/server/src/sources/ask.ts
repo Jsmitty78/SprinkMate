@@ -137,7 +137,7 @@ interface Context {
   edition: AskAnswer['context']['edition'];
   jurisdiction: string | null;
   productIds: string[];
-  selected: { id: string; start: Point | null; end: Point | null; origin: Origin; detail: string } | null;
+  selected: { id: string; productId: string | null; start: Point | null; end: Point | null; origin: Origin; detail: string } | null;
   duct: { box: Box; origin: Origin; detail: string } | null;
 }
 
@@ -179,7 +179,7 @@ function buildContext(req: AskRequest, snapshot: WorkPackageSnapshot | null): Co
     }
     if (piece) {
       const [a, b] = piece.ports;
-      selected = { id: piece.id, start: a?.position ?? null, end: b?.position ?? null, origin: sampleRun ? 'sample' : 'project',
+      selected = { id: piece.id, productId: piece.productId ?? null, start: a?.position ?? null, end: b?.position ?? null, origin: sampleRun ? 'sample' : 'project',
         detail: `From the ${snapshot.baselinePlan!.confirmation} run on drawing ${snapshot.sourceDrawing?.drawingId ?? '(none)'}` };
       put({ name: 'selectedElement', label: 'Selected piece', value: piece.id, unit: null, origin: selected.origin, detail: selected.detail });
     }
@@ -249,7 +249,7 @@ function resolveEdition(s: WorkPackageSnapshot): AskAnswer['context']['edition']
 
 // ------------------------------------------------------------------ applicability of documents
 
-function applicability(doc: SourceDocument, ctx: Context): { ok: boolean; reason: string; blockedBy?: 'edition' | 'jurisdiction' | 'standard' } {
+function applicability(doc: SourceDocument, ctx: Context): { ok: boolean; reason: string; blockedBy?: 'edition' | 'jurisdiction' | 'standard' | 'product' } {
   switch (doc.type) {
     case 'published_code':
       if (!ctx.standard) return { ok: false, reason: 'The project standard is not confirmed.', blockedBy: 'standard' };
@@ -264,7 +264,8 @@ function applicability(doc: SourceDocument, ctx: Context): { ok: boolean; reason
       if (doc.scope.amendsEdition !== ctx.edition.value) return { ok: false, reason: `This amends the ${doc.scope.amendsEdition} edition, not ${ctx.edition.value}.` };
       return { ok: true, reason: '' };
     case 'manufacturer':
-      if (ctx.productIds.length && !doc.scope.productIds!.some(p => ctx.productIds.includes(p))) return { ok: false, reason: 'None of the products it covers are in this run.' };
+      if (!ctx.productIds.length) return { ok: false, reason: 'No product in the run is known, so these instructions were not matched to one.', blockedBy: 'product' };
+      if (!doc.scope.productIds!.some(p => ctx.productIds.includes(p))) return { ok: false, reason: 'None of the products it covers are in this run.' };
       return { ok: true, reason: '' };
     case 'project_document':
       if (!ctx.snapshot) return { ok: false, reason: 'No project is open.' };
@@ -431,6 +432,7 @@ export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSn
   // ---------------- retrieval
   const r0 = performance.now();
   let items: Retrieved[] = [];
+  const mainKeys = new Set<string>();
   if (classification.kind !== 'calculation') {
     const plan = planQuery(question);
     const docs = store.documents();
@@ -439,7 +441,11 @@ export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSn
     const blocked = new Set<string>();
     const mains: Retrieved[] = [];
     const seen = new Set<string>();
-    if (plan.match) for (const hit of store.search(plan.match)) {
+    // Applicable documents are searched on their own first, so passages from other editions or projects cannot crowd them out;
+    // a second search finds inapplicable matches only to report them under "Not used".
+    const okIds = docs.filter(d => verdicts.get(d.id)!.ok).map(d => d.id);
+    const hits = plan.match ? [...store.search(plan.match, 60, okIds), ...store.search(plan.match, 60).filter(h => !verdicts.get(h.docId)?.ok)] : [];
+    for (const hit of hits) {
       const section = store.section(hit.key)!, doc = docById.get(hit.docId)!;
       const top = section.parentKey ? store.section(section.parentKey)! : section;
       if (seen.has(top.key)) continue;
@@ -455,6 +461,7 @@ export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSn
       if (top.kind === 'definition' || top.kind === 'commentary') continue; // attached to the passages they explain
       if (mains.length < 8) mains.push({ section: top, doc, role: 'main', score: hit.rank, notes: store.notes(top.key) });
     }
+    for (const m of mains) mainKeys.add(m.section.key);
     items = expand(store, mains, docs.filter(d => verdicts.get(d.id)!.ok));
     if (blocked.has('edition') || blocked.has('standard')) {
       const editions = [...new Set(docs.filter(d => d.type === 'published_code').map(d => d.edition))].sort().reverse();
@@ -466,6 +473,8 @@ export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSn
     const codeMatches = excluded.filter(e => docById.get(e.docId)?.type === 'published_code' && docById.get(e.docId)?.scope.standard === ctx.standard);
     if (ctx.edition.value && codeMatches.length && !items.some(i => i.doc.type === 'published_code'))
       missing.push(`No ${ctx.standard?.toUpperCase().replace('NFPA', 'NFPA ')} ${ctx.edition.value} text is in the project library. It holds ${[...new Set(codeMatches.map(e => e.edition))].join(' and ')}, which were not substituted.`);
+    if (blocked.has('product'))
+      missing.push('The installed product. Manufacturer instructions are used only for products known to be in the run; open the work package with its confirmed run.');
     if (blocked.has('jurisdiction')) {
       followUps.push({ id: 'jurisdiction', field: 'jurisdiction', kind: 'choice', question: 'Which jurisdiction is this project in?',
         options: [...new Set(docs.filter(d => d.type === 'local_amendment').map(d => d.scope.jurisdiction!))].map(j => ({ value: j, label: j.replace(/_/g, ' ') })) });
@@ -541,7 +550,8 @@ export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSn
   const label = (key: string) => { const s = sources.find(x => x.key === key)!; return `${s.sectionId} (${s.edition})`; };
   const conflicts = findConflicts(items).map(c => ({ ...c, items: c.items.map(i => ({ ...i, label: label(i.key) })) }));
 
-  const hasSources = items.some(i => i.role === 'main');
+  // A direct match counts even when expansion relabels it (a matched amendment becomes role "amendment").
+  const hasSources = items.some(i => i.role === 'main' || mainKeys.has(i.section.key));
   let status: AskAnswer['status'];
   let summary: string;
   if (classification.kind === 'calculation') {
