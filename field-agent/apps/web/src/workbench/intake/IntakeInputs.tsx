@@ -3,37 +3,32 @@ import type { DrawingRef, DrawingView, PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "../api.js";
 import { lengthText } from "../format.js";
 import { factStatus, patchClearing, type Act, type Unit } from "../inputs.js";
-import { dropOrphanFacts, dropSubjectFacts, ELBOW, findFact, PIPE, upsertFacts, type FactSpec } from "../model.js";
+import { dropOrphanFacts, dropSubjectFacts, evidenceSpec, factProvenance, findFact, PROVENANCE_LABELS, upsertFacts, type FactSpec, type Provenance } from "../model.js";
+import { PRODUCT_SETS, productSetOf, applyRunProducts } from "../products.js";
 import { Badge, Button, Callout, Field, Icon, Section } from "../ui.js";
 import { buildTracePlan, FRAME_ID, sheetDistance, spanLengths, type LengthUnit, type TraceNodeKind } from "./sheet.js";
 import type { Intake, IntakeTool } from "./useIntake.js";
 
 interface Props { s: Snapshot; act: Act; busy: string; unit: Unit; setNotice: (t: string) => void; intake: Intake; showSheet: () => void }
 
-export const PRODUCT_SETS: Record<string, { label: string; pipe: string | null; elbow: string | null; material: string | null }> = {
-  none: { label: "Not selected yet", pipe: null, elbow: null, material: null },
-  cpvc: { label: "Spears FlameGuard CPVC NPS 1 (supported catalog)", pipe: PIPE, elbow: ELBOW, material: "cpvc" },
-};
 export const MATERIALS: Array<[string, string]> = [["steel", "Steel"], ["cpvc", "CPVC"], ["copper", "Copper"], ["other", "Other"]];
 const UNITS: LengthUnit[] = ["ft", "in", "mm", "m"];
 const KIND_LABEL: Record<TraceNodeKind, string> = { interface: "Interface", elbow: "Turn (elbow)", open_end: "Open end" };
 
 const safeId = (text: string) => (text.replace(/\.[a-z0-9]+$/i, "").replace(/[^a-zA-Z0-9_.-]+/g, "-").replace(/^[^a-zA-Z0-9]+/, "") || "drawing").slice(0, 100);
-const productSetOf = (s: Snapshot) => {
-  const pipe = s.baselinePlan?.entities.find(e => e.kind === "pipe" && s.scope?.includedEntityIds.includes(e.id));
-  return pipe?.productId === PIPE ? "cpvc" : "none";
-};
-
 /** Upload, work area, scale, plan frame, trace and source requirements: the shared drawing intake. */
 export function IntakeInputs(props: Props) {
   const { s, act, busy, setNotice, intake, showSheet } = props;
   const d = s.sourceDrawing;
   const confirmed = s.baselinePlan?.confirmation === "confirmed";
   const frozen = confirmed || d?.approval === "approved";
+
   const [rev, setRev] = useState(d?.revision ?? "A");
   const [sheetId, setSheetId] = useState(d?.drawingId ?? "");
   const [copyOf, setCopyOf] = useState(d?.view?.derivativeOf ?? "");
   const [products, setProducts] = useState(productSetOf(s));
+  const productDirty = products !== productSetOf(s);
+  const metadataDirty = rev !== (d?.revision ?? "A") || sheetId !== (d?.drawingId ?? "") || copyOf !== (d?.view?.derivativeOf ?? "");
   useEffect(() => { setRev(d?.revision ?? "A"); setSheetId(d?.drawingId ?? ""); setCopyOf(d?.view?.derivativeOf ?? ""); setProducts(productSetOf(s)); }, [s.inputRevision]);
 
   const upload = (file: File) => act("upload", async cur => {
@@ -84,17 +79,21 @@ export function IntakeInputs(props: Props) {
       const set = PRODUCT_SETS[products];
       const built = buildTracePlan(intake.trace, t, { pipe: set.pipe, elbow: set.elbow }, cur.baselinePlan?.id ?? "baseline");
       if ("problems" in built) throw new Error(built.problems[0]);
-      const shape = (p: typeof built.plan | null | undefined) => p ? p.entities.map(e => `${e.id}:${e.kind}`).join(",") : "";
-      const reshaped = shape(built.plan) !== shape(cur.baselinePlan);
-      const base = reshaped ? dropSubjectFacts(cur) : cur;
+      if (!intake.traceDirty && !intake.viewDirty && cur.baselinePlan && cur.scope) {
+        built.plan = applyRunProducts(cur.baselinePlan, cur.scope.includedEntityIds, set);
+        built.scope = cur.scope;
+      }
+      const graphChanged = JSON.stringify(built.plan.entities) !== JSON.stringify(cur.baselinePlan?.entities)
+        || JSON.stringify(built.plan.connections) !== JSON.stringify(cur.baselinePlan?.connections);
+      const base = graphChanged ? dropSubjectFacts(cur) : cur;
       const kept = { detailing: base.detailing.filter(f => f.field !== "sourceLabel"), siteFacts: base.siteFacts.filter(f => f.field !== "sourceLabel") };
-      const labels: FactSpec[] = built.labels.map(l => ({ field: "sourceLabel", value: l.label, subjectIds: [l.subjectId], confirmation: "confirmed", context: "detailing", source: `Label read by you from ${cur.sourceDrawing!.drawingId} p${cur.sourceDrawing!.page}; application IDs are separate` }));
+      const labels: FactSpec[] = built.labels.map(l => ({ field: "sourceLabel", value: l.label, subjectIds: [l.subjectId], confirmation: "confirmed", context: "detailing", source: `Label read by you from ${cur.sourceDrawing!.drawingId} p${cur.sourceDrawing!.page}; application IDs are separate`, assetId: cur.sourceDrawing!.assetId, page: cur.sourceDrawing!.page }));
       // The nominal size applies to the traced spans, whatever their new ids are.
       const nominal = findFact(cur, "nominalSize", cur.scope?.includedEntityIds.find(id => id.startsWith("p")));
       const pipes = built.scope.includedEntityIds.filter(id => built.plan.entities.find(e => e.id === id)?.kind === "pipe");
-      const carry: FactSpec[] = nominal && typeof nominal.value === "string" ? [{ field: "nominalSize", value: nominal.value, subjectIds: pipes, confirmation: nominal.confirmation, context: "detailing", source: nominal.source.description }] : [];
+      const carry: FactSpec[] = nominal && typeof nominal.value === "string" ? [{ field: "nominalSize", value: nominal.value, subjectIds: pipes, confirmation: nominal.confirmation, context: "detailing", source: nominal.source.description, assetId: nominal.source.assetId, page: nominal.source.page }] : [];
       Object.assign(patch, {
-        baselinePlan: built.plan, scope: built.scope, ...(reshaped ? { changeRequest: null } : {}),
+        baselinePlan: built.plan, scope: built.scope, ...(graphChanged ? { changeRequest: null } : {}),
         ...dropOrphanFacts(upsertFacts(kept, [...labels, ...carry]), built.plan),
       });
     } else if (traced && !t) throw new Error("Set the scale before saving the trace. The trace stays in this browser until then.");
@@ -104,8 +103,16 @@ export function IntakeInputs(props: Props) {
   });
 
   const confirmTrace = () => {
-    if (!window.confirm("Confirm this trace against the drawing? The confirmed run and the drawing, scale and frame saved with it are frozen in this package; a later change needs a new package.")) return;
+    if (!window.confirm("Confirm this trace against the drawing? Later corrections must reopen the trace for review and invalidate generated results.")) return;
     void act("confirm-trace", cur => cur.baselinePlan ? patchClearing(cur, { baselinePlan: { ...cur.baselinePlan, confirmation: "confirmed" } }, setNotice) : Promise.resolve());
+  };
+
+  const reopenTrace = () => {
+    if (!window.confirm("Reopen the drawing and trace for correction? Current results will become stale. Review the source, scale and trace and confirm them again before generating new results.")) return;
+    void act("reopen-trace", cur => cur.sourceDrawing && cur.sourceDrawing.approval !== "approved" ? patchClearing(cur, {
+      sourceDrawing: { ...cur.sourceDrawing, approval: "unreviewed", scale: cur.sourceDrawing.scale.value === null ? cur.sourceDrawing.scale : { ...cur.sourceDrawing.scale, basis: "proposed_inputs" } },
+      ...(cur.baselinePlan ? { baselinePlan: { ...cur.baselinePlan, confirmation: "proposed" } } : {}),
+    }, setNotice) : Promise.resolve());
   };
 
   if (!d) return <div className="fa-stack">
@@ -132,6 +139,10 @@ export function IntakeInputs(props: Props) {
   const calibrated = savedScale.basis === "confirmed_inputs";
 
   return <div className="fa-stack">
+    {confirmed && d.approval !== "approved" && <Callout title="Confirmed drawing inputs">
+      Reopen to correct the file, scale, frame, product selection or trace. Existing results become stale and the corrected inputs need confirmation.
+      <Button busy={busy === "reopen-trace"} disabled={!!busy} onClick={reopenTrace}>Reopen drawing and trace</Button>
+    </Callout>}
     <Section title="Sheet" defaultOpen={!calibrated}>
       <div className="fa-kv">
         <span>File</span><strong>{d.view?.sheetUnit === "pdf_pt" ? "PDF" : "Image"}{d.view?.derivativeOf ? `, copy of ${d.view.derivativeOf}` : ""}</strong>
@@ -200,7 +211,7 @@ export function IntakeInputs(props: Props) {
     </Section>
 
     <div className="fa-actions">
-      <Button busy={busy === "view"} disabled={!!busy || frozen || !intake.viewDirty} onClick={() => void save("view")}>Save sheet settings</Button>
+      <Button busy={busy === "view"} disabled={!!busy || frozen || (!intake.viewDirty && !metadataDirty)} onClick={() => void save("view")}>Save sheet settings</Button>
       <Button variant="primary" busy={busy === "scale"} disabled={!!busy || frozen || !t || (calibrated && !intake.viewDirty)} onClick={() => void save("scale", { confirmScale: true })}>Confirm scale</Button>
     </div>
 
@@ -244,14 +255,14 @@ export function IntakeInputs(props: Props) {
         <select value={products} onChange={e => setProducts(e.target.value)}>{Object.entries(PRODUCT_SETS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
       </Field>}
       {conflict && <Callout title="Material conflict">The source requires {String(material!.value)} but {PRODUCT_SETS[products].label} is selected. Keep the source material, or record a documented design change before substituting.</Callout>}
-      {intake.traceDirty && <p className="fa-warn small">Unsaved trace, kept in this browser until you save.</p>}
+      {(intake.traceDirty || productDirty) && <p className="fa-warn small">Unsaved trace, kept in this browser until you save.</p>}
       {!frozen && <div className="fa-actions">
         <Button variant="primary" busy={busy === "trace"} disabled={!!busy || intake.trace.nodes.length < 2 || !t} onClick={() => void save("trace")}>Save trace</Button>
-        <Button busy={busy === "confirm-trace"} disabled={!!busy || !s.baselinePlan || intake.traceDirty || intake.viewDirty || !calibrated} onClick={confirmTrace}>Confirm trace</Button>
+        <Button busy={busy === "confirm-trace"} disabled={!!busy || !s.baselinePlan || intake.traceDirty || productDirty || intake.viewDirty || metadataDirty || !calibrated} onClick={confirmTrace}>Confirm trace</Button>
       </div>}
       {!frozen && !t && intake.trace.nodes.length > 0 && <p className="fa-muted small">Set the scale to save the trace.</p>}
       {!frozen && s.baselinePlan && !calibrated && <p className="fa-muted small">Confirm the scale before confirming the trace.</p>}
-      {confirmed && <p className="fa-muted"><Badge tone="green">Trace confirmed</Badge> The trace, drawing and scale are frozen in this package.</p>}
+      {confirmed && <p className="fa-muted"><Badge tone="green">Trace confirmed</Badge> {d.approval === "approved" ? "Approved source inputs are immutable; use a new package for a changed drawing." : "Reopen the drawing and trace above to make a reviewed correction."}</p>}
     </Section>
 
     <SourceRequirements {...props} nominal={nominal} requirement={requirement} material={material} />
@@ -259,7 +270,7 @@ export function IntakeInputs(props: Props) {
 }
 
 /** What the source states about size and material, kept apart from any product selection. */
-function SourceRequirements({ s, act, busy, setNotice, nominal, requirement, material }: Props & { nominal: ReturnType<typeof findFact>; requirement: ReturnType<typeof findFact>; material: ReturnType<typeof findFact> }) {
+function SourceRequirements({ s, act, busy, setNotice, intake, nominal, requirement, material }: Props & { nominal: ReturnType<typeof findFact>; requirement: ReturnType<typeof findFact>; material: ReturnType<typeof findFact> }) {
   const pipes = s.scope?.includedEntityIds.filter(id => s.baselinePlan?.entities.find(e => e.id === id)?.kind === "pipe") ?? [];
   const [size, setSize] = useState(typeof nominal?.value === "string" ? nominal.value : "");
   const [text, setText] = useState(typeof requirement?.value === "string" ? requirement.value : "");
@@ -267,13 +278,30 @@ function SourceRequirements({ s, act, busy, setNotice, nominal, requirement, mat
   const [ref, setRef] = useState(requirement?.source.description.replace(/^Read by you from /, "") ?? "");
   useEffect(() => { setSize(typeof nominal?.value === "string" ? nominal.value : ""); }, [nominal?.id, nominal?.value]);
   useEffect(() => { setText(typeof requirement?.value === "string" ? requirement.value : ""); setMat(typeof material?.value === "string" ? material.value : ""); setRef(requirement?.source.description.replace(/^Read by you from /, "") ?? ""); }, [requirement?.id, requirement?.value, material?.value]);
+  const previousRequirement = requirement ?? material;
+  const [provenance, setProvenance] = useState<Provenance>(() => factProvenance(previousRequirement));
+  const syntheticLocked = [requirement, material].some(f => !!f && factProvenance(f) === "synthetic_assumption");
+  useEffect(() => setProvenance(factProvenance(previousRequirement)), [requirement?.id, requirement?.provenance, material?.id, material?.provenance]);
+  const savedPage = requirement?.source.page ?? material?.source.page ?? s.sourceDrawing?.page ?? 1;
+  const [sourcePage, setSourcePage] = useState(String(savedPage));
+  useEffect(() => setSourcePage(String(savedPage)), [savedPage, s.sourceDrawing?.assetId]);
+  const page = Number(sourcePage);
+  const maxPage = intake.sheet?.pages;
+  const validPage = Number.isInteger(page) && page >= 1 && (!maxPage || page <= maxPage);
   const source = `Read by you from ${ref.trim() || "the drawing"}`;
   const save = () => act("requirements", cur => {
+    if (!validPage) throw new Error("Choose a valid requirement source page.");
     const specs: FactSpec[] = [];
-    if (size.trim() && pipes.length) specs.push({ field: "nominalSize", value: size.trim(), subjectIds: pipes, confirmation: "confirmed", context: "detailing", source: `Read by you from ${cur.sourceDrawing?.drawingId ?? "the drawing"} p${cur.sourceDrawing?.page ?? 1}` });
-    if (text.trim()) specs.push({ field: "materialRequirement", value: text.trim(), confirmation: "confirmed", context: "detailing", source });
-    if (mat) specs.push({ field: "materialRequirement.material", value: mat, confirmation: "confirmed", context: "detailing", source });
-    return patchClearing(cur, upsertFacts(cur, specs), setNotice);
+    const evidence = { assetId: cur.sourceDrawing?.assetId, page: cur.sourceDrawing?.page };
+    const requirementEvidence = (field: string) => evidenceSpec(findFact(cur, field), syntheticLocked ? "synthetic_assumption" : provenance, source);
+    if (size.trim() && pipes.length) specs.push({ ...evidence, field: "nominalSize", value: size.trim(), subjectIds: pipes, confirmation: "confirmed", provenance: "confirmed_evidence", context: "detailing", source: `Read by you from ${cur.sourceDrawing?.drawingId ?? "the drawing"} p${cur.sourceDrawing?.page ?? 1}` });
+    if (text.trim()) specs.push({ ...evidence, page, field: "materialRequirement", value: text.trim(), ...requirementEvidence("materialRequirement"), context: "detailing" });
+    if (mat) specs.push({ ...evidence, page, field: "materialRequirement.material", value: mat, ...requirementEvidence("materialRequirement.material"), context: "detailing" });
+    const owned = (f: typeof cur.detailing[number]) => f.field === "nominalSize"
+      ? f.subjectIds.some(id => pipes.includes(id))
+      : (f.field === "materialRequirement" || f.field === "materialRequirement.material") && f.subjectIds.length === 0;
+    const kept = { detailing: cur.detailing.filter(f => !owned(f)), siteFacts: cur.siteFacts.filter(f => !owned(f)) };
+    return patchClearing(cur, upsertFacts(kept, specs), setNotice);
   });
   return <Section title="Source requirements" count={requirement ? "entered" : undefined} defaultOpen={!requirement}>
     <p className="fa-muted">What the drawing or its notes require. This is kept as stated and is not a product selection or an approval.</p>
@@ -281,9 +309,12 @@ function SourceRequirements({ s, act, busy, setNotice, nominal, requirement, mat
       <Field label="Nominal size as printed" hint={pipes.length ? undefined : "Save a trace first."}><div className="fa-fact-head"><input value={size} onChange={e => setSize(e.target.value)} placeholder='e.g. 2"' maxLength={40} disabled={!pipes.length} />{nominal && factStatus(nominal)}</div></Field>
       <Field label="Material"><select value={mat} onChange={e => setMat(e.target.value)}><option value="">Not stated</option>{MATERIALS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
     </div>
+    <Field label="Requirement provenance"><select value={syntheticLocked ? "synthetic_assumption" : provenance} disabled={syntheticLocked} onChange={e => setProvenance(e.target.value as Provenance)}>{Object.entries(PROVENANCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+    {syntheticLocked && <small className="fa-warn">This requirement remains a synthetic test assumption; saving it cannot turn it into confirmed source evidence.</small>}
     <Field label="Requirement text"><textarea rows={2} value={text} onChange={e => setText(e.target.value)} placeholder="e.g. Schedule 40 black steel pipe with threaded cast-iron fittings" maxLength={1000} /></Field>
     <Field label="Where it is stated"><input value={ref} onChange={e => setRef(e.target.value)} placeholder="e.g. FS-02 general notes" maxLength={300} /></Field>
-    <div className="fa-actions"><Button busy={busy === "requirements"} disabled={!!busy || (!size.trim() && !text.trim() && !mat)} onClick={() => void save()}>Save requirements</Button></div>
+    <Field label="Requirement source page" hint="Page containing the material requirement or notes. The nominal-size label remains linked to the traced drawing page."><input type="number" min={1} max={maxPage} step={1} value={sourcePage} onChange={e => setSourcePage(e.target.value)} /></Field>
+    <div className="fa-actions"><Button busy={busy === "requirements"} disabled={!!busy || !validPage} onClick={() => void save()}>Save requirements</Button></div>
   </Section>;
 }
 

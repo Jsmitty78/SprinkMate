@@ -166,6 +166,16 @@ export function evaluateProfile(
     if (e) e.subjectIds.push(s.projectId);
   }
   const project = evaluateProject(request);
+  // Intake requirements can be package-wide or scoped. Never borrow another entity's facts.
+  const requirement = (field: string, subject: string) => {
+    const scoped = fact<string>(s, field, subject);
+    return scoped.evidenceIds.length ? scoped : fact<string>(s, field);
+  };
+  const sourceFields = ["requiredConnectionMethod", "requiredPipeSpecification", "materialRequirement", "materialRequirement.material", "nominalSize"];
+  const nominal = (value: string | null) => {
+    const match = value?.trim().toLowerCase().match(/^(?:nps\s*)?(\d+(?:\.\d+)?)\s*(?:inch(?:es)?|in|")?$/);
+    return match ? Number(match[1]) : null;
+  };
   const checks: CheckResult[] = [
     {
       id: "PROJECT_BASIS",
@@ -185,21 +195,38 @@ export function evaluateProfile(
       id: `PRODUCT-SUITABILITY-${p.id}`, subjectIds: input.pieces.filter(x => x.productId === p.id).map(x => x.id),
       status: "unknown" as const, state: "input_missing", reason: p.limitations!.join(" "), sourceRefs: p.sourceIds,
     })),
-    ...input.pieces.flatMap(p => ["requiredConnectionMethod", "requiredPipeSpecification"].flatMap(field => {
-      const requirement = fact<string>(s, field, p.id);
-      return requirement.confirmed && requirement.value ? [{
+    ...input.pieces.flatMap(p => sourceFields.flatMap(field => {
+      const req = requirement(field, p.id);
+      return req.value ? [{
         id: `SOURCE-REQUIREMENT-${p.id}-${field}`, subjectIds: [p.id], status: "unknown" as const,
-        state: "review_required", reason: `Source requirement: ${requirement.value}. Selection and project suitability require independent review.`,
-        sourceRefs: requirement.evidenceIds,
+        state: "review_required", reason: `Source ${field}: ${req.value} (${req.confirmed ? "confirmed source input" : "unconfirmed source input"}). Selection and project suitability require independent review.`,
+        sourceRefs: req.evidenceIds,
       }] : [];
     })),
     ...input.pieces.flatMap(p => {
-      const required = fact<string>(s, "requiredConnectionMethod", p.id);
+      const connection = requirement("requiredConnectionMethod", p.id);
+      const material = requirement("materialRequirement.material", p.id);
+      const size = requirement("nominalSize", p.id);
       const product = output.selectedProducts.find(x => x.id === p.productId);
-      return required.confirmed && product && required.value !== product.connection ? [{
-        id: `MATERIAL-CONFLICT-${p.id}`, subjectIds: [p.id], status: "fail" as const, state: "conflict",
-        reason: "Selected product conflicts with the explicit source connection requirement; document a design change before using it.", sourceRefs: required.evidenceIds,
-      }] : [];
+      if (!product) return [];
+      const productMaterial = product.connection === "steel_threaded" ? "steel" : product.connection === "cpvc_socket_solvent" ? "cpvc" : null;
+      const conflictRefs = [
+        ...(connection.confirmed && connection.value && connection.value !== product.connection ? connection.evidenceIds : []),
+        ...(material.confirmed && ["steel", "cpvc", "copper"].includes(material.value?.toLowerCase() ?? "") && productMaterial && material.value?.toLowerCase() !== productMaterial ? material.evidenceIds : []),
+      ];
+      const requiredSize = nominal(size.value), selectedSize = nominal(product.nominalSize);
+      return [
+        ...(conflictRefs.length ? [{
+          id: `MATERIAL-CONFLICT-${p.id}`, subjectIds: [p.id], status: "fail" as const, state: "conflict",
+          reason: `Selected ${product.id} (${productMaterial ?? product.connection}) conflicts with the explicit source material or connection requirement; document a design change before using it.`,
+          sourceRefs: [...new Set(conflictRefs)],
+        }] : []),
+        ...(size.confirmed && requiredSize !== null && selectedSize !== null && requiredSize !== selectedSize ? [{
+          id: `NOMINAL-SIZE-CONFLICT-${p.id}`, subjectIds: [p.id], status: "fail" as const, state: "conflict",
+          reason: `Source nominal size ${size.value} differs from selected product ${product.nominalSize}. Resolve the selection or source requirement before using it.`,
+          sourceRefs: size.evidenceIds,
+        }] : []),
+      ];
     }),
     ...output.cuts.map((c) => ({
       id: `CUT-${c.pieceId}`,

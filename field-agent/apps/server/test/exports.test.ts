@@ -39,6 +39,24 @@ describe('revision-bound exports', () => {
     const restarted = new WorkPackageExports({ directory: t.directory, loadCurrent: async () => t.current });
     expect((await restarted.download('fixture-package', manifest.exportId, 'bom.csv')).bytes.length).toBeGreaterThan(100);
   });
+  it('keeps readable source values and provenance in every artifact manifest and CSV', async () => {
+    const t = await setup();
+    t.current.inputFacts = [{ id: 'source-P27', field: 'sourceLabel', value: 'P27', unit: null, subjectIds: ['P0'], confirmation: 'confirmed', provenance: 'confirmed_evidence', context: 'detailing', unknownReason: null, source: { description: 'FS-01 source label', assetId: 'official-drawing', page: 1 } },
+      { id: 'test-obstacle', field: 'duct.width', value: 200, unit: 'mm', subjectIds: [], confirmation: 'proposed', provenance: 'synthetic_assumption', context: 'observed', unknownReason: null, source: { description: 'Fictional software test only', assetId: null, page: null } }];
+    t.current.selectedPlan.context = [{ id: 'h1', sourceLabel: 'H1', kind: 'head', positions: [[0, 0, 0]] }];
+    const manifest = await t.service.create(t.current.binding.packageId, t.current.binding);
+    expect(manifest.inputFacts).toEqual(t.current.inputFacts);
+    expect(manifest.protectedContext?.[0].sourceLabel).toBe('H1');
+    expect(manifest.drawingReference).toBe(t.current.drawingReference);
+    for (const filename of ['bom.csv', 'cut-list.csv']) {
+      const text = (await t.service.download(t.current.binding.packageId, manifest.exportId, filename)).bytes.toString();
+      expect(text).toContain('P27');
+      expect(text).toContain('synthetic_assumption');
+      expect(text).toContain('Fictional software test only');
+    }
+    t.current.inputFacts[1].provenance = 'user_entered';
+    await expect(t.service.download(t.current.binding.packageId, manifest.exportId, 'manifest.json')).rejects.toMatchObject({ status: 409 });
+  });
   it.each(['inputRevision', 'configVersion', 'modelVersion', 'selectionId', 'catalogVersion', 'engineVersion', 'rulesVersion', 'evidenceVersion', 'outputVersion'] as const)('rejects stale %s, including the manifest', async key => {
     const t = await setup();
     const manifest = await t.service.create('fixture-package', t.current.binding);

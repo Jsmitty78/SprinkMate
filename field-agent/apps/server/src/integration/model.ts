@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { adaptationInterval, adaptationMillimetres, restoreAdaptation, type PackagePlan, type WorkPackageSnapshot } from "@field-agent/core";
+import { adaptationInterval, adaptationMillimetres, confirmedPackageEvidence, geometryFactUsable, restoreAdaptation, type PackagePlan, type WorkPackageSnapshot } from "@field-agent/core";
 import {
   fabricationCatalog,
   toLocalPlanGeometry,
@@ -50,7 +50,7 @@ export function value<T extends string | number | boolean>(
   return {
     value: (f?.value ?? null) as T | null,
     status:
-      f?.confirmation === "confirmed" && f.value !== null
+      confirmedPackageEvidence(f)
         ? "confirmed"
         : "unknown",
     evidenceIds: f ? [f.id] : [],
@@ -370,7 +370,7 @@ function boxFact(s: WorkPackageSnapshot, prefix: string): Fact<Box> {
     fs.some(
       (f) =>
         !f ||
-        f.confirmation !== "confirmed" ||
+        !geometryFactUsable(f) ||
         typeof f.value !== "number" ||
         !["mm", "m", "in", "ft"].includes(f.unit ?? ""),
     )
@@ -392,7 +392,7 @@ export function generationInput(s: WorkPackageSnapshot): GenerateInput {
   const input = fabricationInput(s, s.baselinePlan!),
     baseline = planningPlan(s, input);
   baseline.ducts = [
-    { id: "measured-duct", roomId: "work-area", geometry: boxFact(s, "duct") },
+    { id: "site-duct", roomId: "work-area", geometry: boxFact(s, "duct") },
   ];
   const clearance = savedFact(s, "requiredPipeClearance");
   return {
@@ -410,7 +410,7 @@ export function generationInput(s: WorkPackageSnapshot): GenerateInput {
     protectedSegmentIds: [],
     workEnvelope: boxFact(s, "workEnvelope"),
     requiredPipeClearance:
-      clearance?.confirmation === "confirmed" &&
+      clearance && geometryFactUsable(clearance) &&
       typeof clearance.value === "number" &&
       ["mm", "m", "in", "ft"].includes(clearance.unit ?? "")
         ? known({ value: adaptationMillimetres(clearance.value, clearance.unit), unit: "mm" }, [clearance.id])

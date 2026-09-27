@@ -1,0 +1,71 @@
+# Work-package fixes: verification record
+
+Verified on 2026-09-27 UTC against the production web build and an isolated
+localhost server/database. The existing development server and its data were
+not changed. These are software acceptance results, not construction approval.
+
+## Browser workflows
+
+Each row started with a new package and an actual PDF upload, page/view
+selection, scale calibration and manual trace. No generated route was supplied
+as an input. Every workflow produced PDF, BOM CSV, cut CSV and manifest files.
+
+| Workflow | Result |
+| --- | --- |
+| FS-01 preparation | P27 projected length 3047.661333 mm; NPS 2 steel selected; H1/H3 and adjacent P30/P28 retained as context. Material notes reference page 2; nominal size references page 1. |
+| MSU preparation | Two projected legs, 1236.133333 and 728.133333 mm; products remain unknown; terminal head retained outside purchase quantities. |
+| FS-01 adaptation | Missing outside diameter produces a specific input request. Reopen trace, select steel, reconfirm, enter synthetic site geometry, generate two alternatives, select and export. Independently calculated centerline increases: 1550 / 1750 mm. |
+| MSU adaptation | Independent L-shaped trace, supplemental CPVC catalog assumption and synthetic site geometry produce four alternatives. Select and export while preserving the other leg, corner and terminal head. Centerline increases: 350 / 350 / 730 / 730 mm. |
+
+Both drawings used the printed scale 1/8 inch = 1 foot (33.8666667 mm/PDF point).
+Manual source points were FS-01 page 1: (1830.4, 1784.07) to
+(1830.4, 1874.06), and MSU page 3, right new-work view:
+(1949, 1130), (1949, 1166.5), (1927.5, 1166.5).
+
+Input PDF SHA-256 values:
+
+- FS-01/FS-02: `a21d5748d0b7f15bea1da772fdb41a424651cb1e717534177b5144c6d51eef1f`
+- MSU Extrusion Lab Addendum 1: `e15619951310b03ff676a1cdb3b695d74f033d0cfd9881a8e57b1b190eea114d`
+
+The adaptation frame was explicitly aligned to the selected span; drawing Z
+was labeled an assumed horizontal test plane. Geometry inputs below are in mm,
+in that local frame, and were saved as synthetic/proposed:
+
+| Case | Obstacle min / max | Work bounds min / max | Surface clearance |
+| --- | --- | --- | --- |
+| FS-01 | (1200,-250,-300) / (1800,250,300) | (-150,-1400,-200) / (3197.661333,1200,200) | 100 |
+| MSU | (300,-80,-100) / (600,80,100) | (-50,-600,-200) / (1286.133333,600,200) | 50 |
+
+Independent arithmetic over the saved candidate coordinates checked length,
+pipe outside-diameter clearance and containment within the work bounds. The
+complete FS-01 source-graph API control also preserved all 82 protected
+entities and 80 protected connections, without numeric purchase quantities
+for that context. All physical cut lengths remained null.
+
+## Automated and artifact verification
+
+- `pnpm test`: 40 files, 808 tests passed, no skips.
+- `pnpm typecheck`: passed for every package.
+- `pnpm build`: passed; the existing large-chunk warning remains.
+- Live JEV smoke: `jev-1.13.0` returned `request_input:joint_datum` for one
+  synthetic Choice request. This verifies connectivity, not engineering accuracy.
+- PDF pages were rendered and inspected; final changed source tables and
+  schematic pages were rechecked after label-layout corrections.
+- PDF/CSV file hashes and byte sizes matched the manifests. Revision bindings,
+  source labels, material values, provenance and protected exclusions matched
+  saved inputs.
+- Editing inputs invalidated the previous artifact: its authenticated download
+  returned 409 `stale_artifact`; the new revision exported successfully.
+- The export dialog was checked at desktop size and 390 × 844 CSS pixels.
+
+## Limits
+
+The embedded browser emitted `Page.downloadWillBegin`, then canceled the local
+save at zero received bytes. Its download-wait API timed out. Artifact creation,
+authenticated API retrieval and file contents were verified; successful local
+saving through that browser was not established.
+
+Field measurements, steel thread engagement, physical fixed-end assembly,
+practitioner review and construction approval remain unverified. Unknown facts
+were not promoted to evidence. Raster/rotation/unit variants were covered by
+automated tests, not all repeated manually in the browser during this run.

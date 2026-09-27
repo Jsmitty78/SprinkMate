@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "./api.js";
-import { lengthInput, lengthText, parseLength, toMetres } from "./format.js";
+import { lengthInput, lengthText, millimetres, parseLength, toMetres } from "./format.js";
 import {
-  showCpvcInputs, showSfInputs, activeDetailingPlan, BOX_KEYS, buildRun, ELBOW, inScope, PIPE, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
-  syncRunDraft, type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
+  showCpvcInputs, showSfInputs, activeDetailingPlan, BOX_KEYS, buildRun, inScope, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
+  alignedFrameInputs, exactFrameLengthInput, evidenceSpec, factProvenance, PROVENANCE_LABELS, type Provenance, syncRunDraft, type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
 } from "./model.js";
+import { PRODUCT_SETS, productSetOf } from "./products.js";
 import { Badge, Button, Callout, Field, Icon, Section } from "./ui.js";
 
 export type Act = (label: string, fn: (s: Snapshot) => Promise<unknown>) => Promise<boolean>;
 export type Unit = "mm" | "in";
-interface Common { s: Snapshot; act: Act; busy: string; unit: Unit; setNotice: (t: string) => void }
+export interface Common { s: Snapshot; act: Act; busy: string; unit: Unit; setNotice: (t: string) => void }
 
 export const BY_YOU = "Confirmed by you in Sprink";
 export const MEASURED = "Measured on site by you";
@@ -32,8 +33,10 @@ export async function patchClearing(s: Snapshot, patch: Partial<PackageInputs>, 
 
 export function factStatus(f: Fact | undefined) {
   if (!f || f.value === null) return <Badge tone="amber">Missing</Badge>;
-  if (f.source.description.startsWith("SAMPLE")) return <Badge tone="sample">Sample</Badge>;
-  if (f.confirmation === "confirmed") return <Badge tone="green">{f.context === "observed" ? "Measured by you" : "Confirmed"}</Badge>;
+  if (factProvenance(f) === "synthetic_assumption") return <Badge tone="sample">Synthetic test assumption</Badge>;
+  if (f.provenance === "machine_proposal") return <Badge tone="amber">Machine proposal</Badge>;
+  if (f.provenance === "user_entered") return <Badge tone="amber">Entered, unverified</Badge>;
+  if (f.confirmation === "confirmed") return <Badge tone="green">{f.context === "observed" ? "Confirmed evidence" : "Confirmed"}</Badge>;
   return <Badge tone="amber">Proposed</Badge>;
 }
 
@@ -51,9 +54,10 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
 
   const nodes: RunNode[] = rows.map(r => ({ kind: r.kind, x: parseLength(r.x, unit), y: parseLength(r.y, unit) }));
   // No product is assumed: a typed run is only sized with a product the user chose.
-  const [product, setProduct] = useState(() => s.baselinePlan?.entities.find(e => e.kind === "pipe")?.productId === PIPE ? "cpvc" : "none");
-  const built = buildRun(nodes, s.baselinePlan?.id ?? "baseline", undefined, product === "cpvc" ? { pipe: PIPE, elbow: ELBOW } : { pipe: null, elbow: null });
-  const productChanged = !!s.baselinePlan && (s.baselinePlan.entities.find(e => e.kind === "pipe")?.productId ?? null) !== (product === "cpvc" ? PIPE : null);
+  const [product, setProduct] = useState(() => productSetOf(s));
+  useEffect(() => setProduct(productSetOf(s)), [s.inputRevision]);
+  const built = buildRun(nodes, s.baselinePlan?.id ?? "baseline", undefined, PRODUCT_SETS[product]);
+  const productChanged = !!s.baselinePlan && (s.baselinePlan.entities.find(e => e.kind === "pipe")?.productId ?? null) !== PRODUCT_SETS[product].pipe;
   const problems = "problems" in built ? built.problems : [];
   const dirty = runChanged(nodes, saved, unit) || productChanged;
   const drawingReady = s.sourceDrawing?.scale.basis === "confirmed_inputs";
@@ -117,7 +121,7 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
         setRows(next);
       }}>+ Add a point (the current end becomes an elbow)</button>
       <Field label="Pipe and fittings"><select value={product} onChange={e => setProduct(e.target.value)}>
-        <option value="none">Not selected yet</option><option value="cpvc">Spears FlameGuard CPVC NPS 1 (supported catalog)</option></select></Field>
+        {Object.entries(PRODUCT_SETS).map(([key, value]) => <option key={key} value={key}>{value.label}</option>)}</select></Field>
       {problems.length > 0 && <ul className="fa-problems">{problems.map(p => <li key={p}>{p}</li>)}</ul>}
       <div className="fa-actions">
         <Button busy={busy === "run"} disabled={!!busy || problems.length > 0} onClick={() => void save()}>Save run</Button>
@@ -142,6 +146,9 @@ export function FactRow({ s, act, busy, unit, setNotice, spec }: Common & { spec
     if (spec.kind.type === "length" && typeof f.value === "number") { const m = toMetres(f.value, f.unit ?? "mm"); return m === null ? "" : lengthInput(m * 1000, unit); }
     return String(f.value);
   };
+  const [provenance, setProvenance] = useState<Provenance>(() => factProvenance(f));
+  const [source, setSource] = useState(f?.source.description ?? "");
+  useEffect(() => { setProvenance(factProvenance(f)); setSource(f?.source.description ?? ""); }, [JSON.stringify(f)]);
   const [value, setValue] = useState(initial);
   const [editing, setEditing] = useState(!isConfirmed(f));
   useEffect(() => { setValue(initial()); setEditing(!isConfirmed(f)); }, [f?.id, f?.value, unit]);
@@ -149,10 +156,10 @@ export function FactRow({ s, act, busy, unit, setNotice, spec }: Common & { spec
   const parsed = spec.kind.type === "length" ? parseLength(value, unit) : spec.kind.type === "bool" ? (value === "true" ? true : value === "false" ? false : null) : value.trim() || null;
   const save = () => act(key, cur => patchClearing(cur, upsertFacts(cur, [{
     field: spec.field, subjectIds: spec.subject ? [spec.subject] : [], value: parsed, unit: spec.kind.type === "length" ? "mm" : null,
-    confirmation: "confirmed", context: spec.context ?? "detailing", source: spec.context === "observed" ? MEASURED : BY_YOU,
+    ...evidenceSpec(findFact(cur, spec.field, spec.subject), provenance, source), context: provenance === "synthetic_assumption" ? "detailing" : spec.context ?? "detailing",
   }]), setNotice));
   const shown = f?.value === null || f?.value === undefined ? null
-    : spec.kind.type === "length" && typeof f.value === "number" ? lengthText({ value: f.value, unit: f.unit ?? "mm", basis: "confirmed_inputs" }).primary
+    : spec.kind.type === "length" && typeof f.value === "number" ? (unit === "mm" ? millimetres(toMetres(f.value, f.unit ?? "mm")!) : lengthText({ value: f.value, unit: f.unit ?? "mm", basis: "confirmed_inputs" }).primary)
     : spec.kind.type === "bool" ? (f.value ? spec.kind.yes : spec.kind.no)
     : spec.kind.type === "choice" ? spec.kind.options.find(o => o[0] === f.value)?.[1] ?? String(f.value) : String(f.value);
 
@@ -164,8 +171,9 @@ export function FactRow({ s, act, busy, unit, setNotice, spec }: Common & { spec
           : spec.kind.type === "choice" && spec.kind.options.length ? <select value={value} onChange={e => setValue(e.target.value)} aria-label={spec.label}><option value="">Choose…</option>{spec.kind.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           : spec.kind.type === "text" ? <textarea value={value} onChange={e => setValue(e.target.value)} rows={2} aria-label={spec.label} />
           : <input value={value} onChange={e => setValue(e.target.value)} aria-label={spec.label} className={spec.kind.type === "length" ? "mono" : ""} placeholder={spec.kind.type === "length" ? (unit === "mm" ? "mm" : `ft-in`) : ""} />}
-        <Button variant="primary" busy={busy === key} disabled={!!busy || parsed === null} onClick={() => void save()}>{spec.context === "observed" ? "Save measurement" : "Confirm"}</Button>
+        <Button variant="primary" busy={busy === key} disabled={!!busy || parsed === null || !source.trim()} onClick={() => void save()}>Save fact</Button>
       </div>}
+    {editing && <SourceEvidenceInputs provenance={provenance} setProvenance={setProvenance} source={source} setSource={setSource} syntheticLocked={!!f && factProvenance(f) === "synthetic_assumption"} />}
     {spec.help && <small className="fa-muted">{spec.help}</small>}
   </div>;
 }
@@ -206,18 +214,23 @@ export function BoxInputs({ s, act, busy, unit, setNotice, prefix, title, help }
   useEffect(() => { setVals(box.values.map(v => lengthInput(v, unit))); }, [box.values.join(","), unit]);
   const parsed = vals.map(v => v.trim() ? parseLength(v, unit) : null);
   const invalid = vals.some((v, i) => v.trim() && parsed[i] === null);
-  const sample = BOX_KEYS.some(k => findFact(s, `${prefix}.${k}`)?.source.description.startsWith("SAMPLE"));
+  const firstFact = BOX_KEYS.map(k => findFact(s, `${prefix}.${k}`)).find(Boolean);
+  const syntheticLocked = BOX_KEYS.some(k => { const f = findFact(s, `${prefix}.${k}`); return !!f && factProvenance(f) === "synthetic_assumption"; });
+  const [provenance, setProvenance] = useState<Provenance>(() => factProvenance(firstFact));
+  const [source, setSource] = useState(firstFact?.source.description ?? "");
+  useEffect(() => { setProvenance(factProvenance(firstFact)); setSource(firstFact?.source.description ?? ""); }, [JSON.stringify(firstFact)]);
   const save = () => act(prefix, async cur => {
-    const facts = upsertFacts(cur, BOX_KEYS.map((k, i) => ({ field: `${prefix}.${k}`, value: parsed[i], unit: "mm", confirmation: "confirmed", context: "observed", source: MEASURED, unknownReason: "Not measured yet" })));
+    const facts = upsertFacts(cur, BOX_KEYS.map((k, i) => ({ field: `${prefix}.${k}`, value: parsed[i], unit: "mm", ...evidenceSpec(findFact(cur, `${prefix}.${k}`), syntheticLocked ? "synthetic_assumption" : provenance, source), context: syntheticLocked || provenance === "synthetic_assumption" ? "detailing" : "observed", unknownReason: "Not measured yet" })));
     const patch: Partial<PackageInputs> = { ...facts };
-    if (prefix === "duct" && cur.changeRequest) patch.changeRequest = { ...cur.changeRequest, factIds: facts.siteFacts.filter(f => f.field.startsWith("duct.")).map(f => f.id) };
+    if (prefix === "duct" && cur.changeRequest) patch.changeRequest = { ...cur.changeRequest, factIds: [...facts.detailing, ...facts.siteFacts].filter(f => f.field.startsWith("duct.")).map(f => f.id) };
     await patchClearing(cur, patch, setNotice);
   });
   return <div className="fa-stack">
-    <div className="fa-fact-head"><span className="fa-muted">{help}</span>{sample ? <Badge tone="sample">Sample</Badge> : box.confirmed ? <Badge tone="green">Measured by you</Badge> : <Badge tone="amber">{box.values.some(v => v !== null) ? "Incomplete" : "Not measured"}</Badge>}</div>
+    <div className="fa-fact-head"><span className="fa-muted">{help}</span>{factStatus(firstFact)}</div>
+    <SourceEvidenceInputs provenance={provenance} setProvenance={setProvenance} source={source} setSource={setSource} syntheticLocked={syntheticLocked} />
     <div className="fa-grid3">{AXIS_LABEL.map((l, i) => <Field key={l} label={l}><input className={`mono ${vals[i].trim() && parsed[i] === null ? "is-invalid" : ""}`} value={vals[i]} placeholder="Unknown" onChange={e => setVals(vals.map((v, j) => j === i ? e.target.value : v))} /></Field>)}</div>
     {parsed.some(v => v === null) && <small className="fa-warn">Empty faces are saved as unknown, not zero. Routes cannot be generated around an incomplete {title.toLowerCase()}.</small>}
-    <div className="fa-actions"><Button variant="primary" busy={busy === prefix} disabled={!!busy || invalid} onClick={() => void save()}>Save measurement</Button></div>
+    <div className="fa-actions"><Button variant="primary" busy={busy === prefix} disabled={!!busy || invalid || !source.trim()} onClick={() => void save()}>Save site geometry</Button></div>
   </div>;
 }
 
@@ -247,8 +260,8 @@ export function EvidenceInputs({ s, act, busy, setNotice }: Common) {
     const asset = await api.upload(cur.id, file);
     const n = cur.siteFacts.filter(f => f.field.startsWith("evidence.photo")).length + 1;
     await patchClearing(cur, upsertFacts(cur, [{
-      field: `evidence.photo.${n}`, value: file.name.slice(0, 200), subjectIds: cur.changeRequest?.affectedEntityIds ?? [], confirmation: "confirmed",
-      context: "observed", source: caption.trim() || `Site photo taken by you: ${file.name}`, assetId: asset.id,
+      field: `evidence.photo.${n}`, value: file.name.slice(0, 200), subjectIds: cur.changeRequest?.affectedEntityIds ?? [], confirmation: "proposed", provenance: "user_entered",
+      context: "observed", source: caption.trim() || `Uploaded site photo: ${file.name}`, assetId: asset.id,
     }]), setNotice);
     setCaption("");
   });
@@ -274,4 +287,58 @@ function Thumb({ packageId, assetId, caption }: { packageId: string; assetId: st
 
 export function ClearanceInput(props: Common) {
   return <FactRow {...props} spec={{ field: "requiredPipeClearance", label: "Required clearance from pipe to obstacle", kind: { type: "length" }, context: "observed", help: "The planner keeps every route at least this far from the measured duct box." }} />;
+}
+
+function SourceEvidenceInputs({ provenance, setProvenance, source, setSource, syntheticLocked = false }: {
+  provenance: Provenance; setProvenance: (v: Provenance) => void; source: string; setSource: (v: string) => void; syntheticLocked?: boolean;
+}) {
+  return <div className="fa-stack">
+    <Field label="Input provenance"><select value={syntheticLocked ? "synthetic_assumption" : provenance} disabled={syntheticLocked} onChange={e => setProvenance(e.target.value as Provenance)}>
+      {Object.entries(PROVENANCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+    </select></Field>
+    <Field label="Source / measurement description"><textarea rows={2} value={source} onChange={e => setSource(e.target.value)} placeholder="Describe the measurement, document, proposal or test assumption" /></Field>
+    {(syntheticLocked || provenance === "synthetic_assumption") && <small className="fa-warn">Software test assumption only. Saving or confirming keeps this synthetic; it is not field evidence or construction approval.</small>}
+    {provenance === "confirmed_evidence" && !syntheticLocked && <small className="fa-muted">Choose only after checking the value against the evidence described above.</small>}
+  </div>;
+}
+
+const FRAME_FIELDS = ["adaptationFrame.origin.x", "adaptationFrame.origin.y", "adaptationFrame.origin.z", "adaptationFrame.yaw"] as const;
+
+export function AdaptationFrameInputs({ s, act, busy, unit, setNotice }: Common) {
+  const facts = FRAME_FIELDS.map(field => findFact(s, field));
+  const saved = facts.map((f, i) => typeof f?.value === "number" ? i === 3 ? String(f.value) : exactFrameLengthInput(f.unit === "mm" ? f.value : (toMetres(f.value, f.unit ?? "mm") ?? 0) * 1000, unit) : "");
+  const signature = JSON.stringify(facts);
+  const [values, setValues] = useState(saved);
+  const firstFact = facts.find(Boolean);
+  const [provenance, setProvenance] = useState<Provenance>(() => factProvenance(firstFact));
+  const [source, setSource] = useState(firstFact?.source.description ?? "");
+  useEffect(() => { setValues(saved); setProvenance(factProvenance(firstFact)); setSource(firstFact?.source.description ?? ""); }, [signature, unit]);
+  const syntheticLocked = facts.some(f => !!f && factProvenance(f) === "synthetic_assumption");
+  const parsed = values.map((v, i) => i === 3 ? v.trim() && Number.isFinite(Number(v)) ? Number(v) : null : parseLength(v, unit));
+  const selected = s.baselinePlan?.entities.find(e => e.kind === "pipe" && s.changeRequest?.affectedEntityIds.includes(e.id));
+  const align = () => {
+    const aligned = alignedFrameInputs(s, unit);
+    if (!aligned) return;
+    setValues(aligned);
+    setProvenance("synthetic_assumption");
+    setSource(`Synthetic local frame aligned to drawing span ${selected!.id}; drawing Z is an assumed horizontal test plane, not a measured site elevation. Source geometry is unchanged.`);
+  };
+  const save = () => act("adaptation-frame", cur => patchClearing(cur, upsertFacts(cur, FRAME_FIELDS.map((field, i) => ({
+    field, value: parsed[i], unit: i === 3 ? "deg" : "mm", context: "detailing" as const,
+    ...evidenceSpec(findFact(cur, field), syntheticLocked ? "synthetic_assumption" : provenance, source),
+    unknownReason: "Local frame coordinate not supplied",
+  }))), setNotice));
+  const clear = () => act("adaptation-frame", cur => patchClearing(cur, {
+    detailing: cur.detailing.filter(f => !f.field.startsWith("adaptationFrame.")),
+    siteFacts: cur.siteFacts.filter(f => !f.field.startsWith("adaptationFrame.")),
+  }, setNotice));
+  return <div className="fa-stack">
+    <p className="fa-muted">Obstacle and work bounds use this local coordinate frame. Origin is in the saved drawing frame; yaw turns local X counterclockwise about Z. With no saved frame, they use drawing coordinates.</p>
+    <Button disabled={!!busy || !selected} onClick={align}>Align local X to selected span</Button>
+    <SourceEvidenceInputs provenance={provenance} setProvenance={setProvenance} source={source} setSource={setSource} syntheticLocked={syntheticLocked} />
+    <div className="fa-grid3">{["Origin X", "Origin Y", "Origin Z", "Yaw (degrees)"].map((label, i) => <Field key={label} label={label}><input aria-label={label} className="mono" value={values[i]} placeholder={i === 3 ? "degrees" : unit} onChange={e => setValues(values.map((v, j) => i === j ? e.target.value : v))} /></Field>)}</div>
+    <div className="fa-actions"><Button variant="primary" busy={busy === "adaptation-frame"} disabled={!!busy || parsed.some(v => v === null) || !source.trim()} onClick={() => void save()}>Save local frame</Button>
+      <Button disabled={!!busy || !firstFact} onClick={() => void clear()}>Use drawing coordinates</Button></div>
+    <small className="fa-muted">The frame changes interpretation of site coordinates only. Original pipe and endpoint geometry remains unchanged. Photos remain evidence attachments; no dimensions are inferred from them.</small>
+  </div>;
 }

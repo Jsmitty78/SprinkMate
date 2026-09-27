@@ -22,19 +22,23 @@ function view(d: Detail, s: WorkPackageSnapshot): PlanView {
     const q = s.intent === "adapt_to_site" ? adaptationFrame(s).toDrawing(raw) : raw;
     return [q.x, q.y, q.z] as [number, number, number];
   };
+  const label = (id: string) => s.detailing.find(f => f.field === "sourceLabel" && f.subjectIds.includes(id))?.value?.toString();
+  const active = s.intent === "adapt_to_site" ? s.changeRequest!.affectedEntityIds : s.scope?.includedEntityIds ?? [];
   return {
     id: d.plan.id,
     title: d.plan.id,
     unit: "mm",
     segments: d.fabrication.cuts.map((c) => ({
       id: c.pieceId,
+      sourceLabel: label(c.pieceId),
       pieceIds: [c.pieceId],
       from: point(c.start),
       to: point(c.end),
     })),
-    context: s.intent === "adapt_to_site" ? s.baselinePlan!.entities.filter(e => !s.changeRequest!.affectedEntityIds.includes(e.id)).map(e => ({
-      id: e.id, kind: e.kind, positions: e.ports.flatMap(p => p.position ? [[p.position.x, p.position.y, p.position.z] as [number, number, number]] : []),
-    })) : [],
+    context: s.baselinePlan!.entities.filter(e => !active.includes(e.id)).map(e => ({
+      id: e.id, sourceLabel: label(e.id), kind: e.kind,
+      positions: e.ports.flatMap(p => p.position ? [[p.position.x, p.position.y, p.position.z] as [number, number, number]] : []),
+    })),
     joints: d.fabrication.joints.map((j) => {
       const c = d.fabrication.cuts.find((c) => c.pieceId === j.pieceId)!;
       return { id: j.id, position: point(j.end === "start" ? c.start : c.end) };
@@ -80,6 +84,8 @@ export function exportSnapshot(
     ]),
   );
   for (const e of f.evidence) sources.set(e.id, { id: e.id, title: e.id, reference: e.description });
+  const inputFacts = [...s.detailing, ...s.siteFacts].map(f => ({ ...f, provenance: f.provenance ?? "unspecified_legacy" }));
+  for (const fact of inputFacts) sources.set(fact.id, { id: fact.id, title: `${fact.field}: ${fact.value ?? "unknown"} ${fact.unit ?? ""}`, reference: `${fact.confirmation}; ${fact.provenance}; ${fact.source.description}; asset ${fact.source.assetId ?? "none"}; page ${fact.source.page ?? "unknown"}` });
   for (const c of d.profile.checks)
     for (const ref of c.sourceRefs)
       if (!sources.has(ref))
@@ -156,7 +162,8 @@ export function exportSnapshot(
     intent: s.intent,
     title: s.title,
     scope: `${(s.intent === "adapt_to_site" ? s.changeRequest?.affectedEntityIds : s.scope?.includedEntityIds)?.join(", ") || "Scope unresolved"}; ${f.quantityBasis}; no construction approval`,
-    drawingReference: `${s.sourceDrawing.drawingId} revision ${s.sourceDrawing.revision}, ${s.sourceDrawing.approval}`,
+    drawingReference: `${s.sourceDrawing.drawingId} revision ${s.sourceDrawing.revision}, page ${s.sourceDrawing.page}, ${s.sourceDrawing.approval}; asset ${s.sourceDrawing.assetId}`,
+    inputFacts,
     selectedPlan: view(d, s),
     ...(s.intent === "adapt_to_site" ? { baselinePlan: view(baseline, s) } : {}),
     materials: f.materials.map((m) => ({
@@ -215,7 +222,7 @@ export function exportSnapshot(
     })),
     unresolvedItems: [
       ...(s.intent === "adapt_to_site" ? ["Full quantities and delta cover only the active interval. Protected context is retained, excluded from purchase quantities, and not checked for clearance or constructability.", ...s.baselinePlan!.entities.filter(e => !s.changeRequest!.affectedEntityIds.includes(e.id) && !e.ports.some(p => p.position)).map(e => `Protected context ${e.id}: position unknown; retained in saved plan but cannot be drawn.`)] : []),
-      ...s.siteFacts.map(f => `${f.field}: ${f.value ?? "unknown"} ${f.unit ?? ""}; ${f.confirmation}; ${f.source.description}`),
+      ...s.siteFacts.map(f => `${f.field}: ${f.value ?? "unknown"} ${f.unit ?? ""}; ${f.confirmation}; ${f.provenance ?? "unspecified_legacy"}; ${f.source.description}`),
       ...s.detailing.filter(f => /fixture|fictional|invented|assum/i.test(f.source.description)).map(f => `${f.field}: ${f.source.description}`),
       ...f.gaps.map((g) => `${g.subjectId}: ${g.reason}`),
       ...(f.planRole === "candidate"

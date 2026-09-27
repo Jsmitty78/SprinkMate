@@ -107,30 +107,52 @@ export async function renderPdf(s: ExportSnapshot, options: PdfOptions = {}): Pr
       const minB = Math.min(...points.map(p => p[b])), maxB = Math.max(...points.map(p => p[b]));
       const scale = Math.min(420 / Math.max(maxA - minA, 1), 130 / Math.max(maxB - minB, 1));
       const xy = (p: number[]): [number, number] => [left + 40 + (p[a] - minA) * scale, top + 175 - (p[b] - minB) * scale];
+      const occupied: { x: number; y: number; w: number }[] = [];
+      const annotate = (text: string, preferredX: number, preferredY: number, size = 7) => {
+        doc.font(font).fontSize(size);
+        const w = doc.widthOfString(text);
+        for (let lane = 0; lane < 8; lane++) {
+        const x = Math.max(left + 6, Math.min(preferredX + (lane % 2 ? -1 : 1) * Math.ceil(lane / 2) * (w + 12), left + width - w - 6));
+        for (let step = 0; step < 40; step++) {
+          const offset = Math.ceil(step / 2) * 11 * (step % 2 ? 1 : -1);
+          const yy = Math.max(top + 28, Math.min(preferredY + offset, top + 204));
+          if (occupied.some(r => x < r.x + r.w + 3 && x + w + 3 > r.x && yy < r.y + 10 && yy + 10 > r.y)) continue;
+          occupied.push({ x, y: yy, w }); at(text, x, yy, size); return;
+        }
+        }
+        // Dense projections retain a complete, unambiguous callout table below.
+      };
+      const contextLanes = new Map<string, number>();
       (view.context ?? []).forEach((r, index) => {
         const pts = r.positions.map(xy);
         if (r.kind === 'pipe' && pts.length === 2) doc.moveTo(...pts[0]).lineTo(...pts[1]).lineWidth(1).strokeColor('#8B9298').stroke();
         else pts.slice(0, 1).forEach(([x, cy]) => doc.circle(x, cy, 4).strokeColor('#8B9298').stroke());
         const label = r.kind === "pipe" && pts.length === 2 ? [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2] : pts[0];
-        if (label) at(`C${index + 1}`, label[0] - 18, label[1] - 18, 7);
+        if (label) {
+          const key = `${label[0].toFixed(1)}:${label[1].toFixed(1)}`;
+          const lane = contextLanes.get(key) ?? 0;
+          contextLanes.set(key, lane + 1);
+          const source = r.sourceLabel && r.sourceLabel.length <= 6 ? ` / ${r.sourceLabel}` : '';
+          annotate(`C${index + 1}${source}`, label[0] - 18, label[1] - 18 - lane * 10);
+        }
       });
       view.segments.forEach((r, index) => {
         const [x1, y1] = xy(r.from), [x2, y2] = xy(r.to);
         doc.moveTo(x1, y1).lineTo(x2, y2).lineWidth(2).strokeColor('#235B67').stroke();
         // Numbered callouts avoid unbounded user IDs overflowing the drawing.
-        at(String(index + 1), (x1 + x2) / 2 + 4, (y1 + y2) / 2 - 13, 8);
+        annotate(`${index + 1}${r.sourceLabel && r.sourceLabel.length <= 6 ? ` / ${r.sourceLabel}` : ""}`, (x1 + x2) / 2 + 4, (y1 + y2) / 2 - 13, 8);
       });
       const jointLanes = new Map<string, number>();
       view.joints.forEach((r, index) => {
         const [x, cy] = xy(r.position);
         const key = `${x.toFixed(1)}:${cy.toFixed(1)}`, lane = jointLanes.get(key) ?? 0;
         jointLanes.set(key, lane + 1);
-        doc.circle(x, cy, 3).fill('#E4A03B'); at(`J${index + 1}`, x + 5, cy + 4 + lane * 10, 7);
+        doc.circle(x, cy, 3).fill('#E4A03B'); annotate(`J${index + 1}`, x + 5, cy + 4 + lane * 10);
       });
       y += 230;
     }
-    table(['Callout', 'Segment / pieces', 'Coordinates (' + view.unit + ')'], [55, 220, 236], view.segments.map((r, i) => [String(i + 1), `${r.id}\nPieces: ${r.pieceIds.join(', ') || 'unresolved'}`, `${r.from.join(', ')} -> ${r.to.join(', ')}`]));
-    if (view.context?.length) table(['Context', 'Retained item (not purchase)', 'Coordinates (' + view.unit + ')'], [55, 220, 236], view.context.map((r, i) => [`C${i + 1}`, `${r.id} (${r.kind})`, r.positions.map(p => p.join(', ')).join(' -> ') || 'Unknown position']));
+    table(['Callout', 'Segment / pieces', 'Coordinates (' + view.unit + ')'], [55, 220, 236], view.segments.map((r, i) => [String(i + 1), `${r.id}${r.sourceLabel ? ` / source ${r.sourceLabel}` : ""}\nPieces: ${r.pieceIds.join(', ') || 'unresolved'}`, `${r.from.join(', ')} -> ${r.to.join(', ')}`]));
+    if (view.context?.length) table(['Context', 'Retained item (not purchase)', 'Coordinates (' + view.unit + ')'], [55, 220, 236], view.context.map((r, i) => [`C${i + 1}`, `${r.id}${r.sourceLabel ? ` / source ${r.sourceLabel}` : ""} (${r.kind})`, r.positions.map(p => p.join(', ')).join(' -> ') || 'Unknown position']));
     table(['Callout', 'Joint', 'Coordinates (' + view.unit + ')'], [55, 220, 236], view.joints.map((r, i) => [`J${i + 1}`, r.id, r.position.join(', ')]));
   };
   try {
@@ -138,6 +160,14 @@ export async function renderPdf(s: ExportSnapshot, options: PdfOptions = {}): Pr
     paragraph('Construction approval: not established by this export. Selection, successful calculations and available files do not constitute approval.');
     paragraph('Drawing: ' + s.drawingReference);
     table(['Binding', 'Value'], [150, 361], Object.entries(s.binding).map(([key, value]) => [key, String(value)]));
+    if (s.inputFacts?.length) {
+      heading('Saved source and site inputs');
+      paragraph('Values below preserve their saved provenance and confirmation. Drawing labels are distinct from application IDs. Synthetic assumptions and proposed values are not field measurements.');
+      table(['Field / subjects', 'Value / evidence'], [160, 351], s.inputFacts.map(f => [
+        `${f.field}\nSubjects: ${f.subjectIds.join(', ') || 'package'}\nID: ${f.id}`,
+        `${f.value ?? 'UNKNOWN'} ${f.unit ?? ''}\n${f.confirmation}; ${f.provenance}; ${f.context}\n${f.source.description}\nAsset: ${f.source.assetId ?? 'none'}; page: ${f.source.page ?? 'unknown'}${f.unknownReason ? `\n${f.unknownReason}` : ''}`,
+      ]));
+    }
     const gaps = unresolved(s);
     heading('Unresolved items and review conditions');
     if (!gaps.length) paragraph('No unresolved items reported by the supplied outputs. This is not a compliance or constructability certification.');

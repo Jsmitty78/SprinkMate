@@ -68,3 +68,56 @@ it("generates steel routes for frozen FS-01 P27 with fictional site bounds and p
   expect(s.detailing.some(f => f.field === "jurisdiction")).toBe(false);
   expect(result.candidates.every(c => c.geometry.totalCutLengthM === null)).toBe(true);
 });
+
+it("uses labeled proposed assumptions only for geometry while keeping fabrication evidence unknown", async () => {
+  const { value } = await import("../src/integration/model.js");
+  const s = fixture(31);
+  const original = structuredClone(s.baselinePlan);
+  for (const f of [...s.detailing, ...s.siteFacts]) {
+    if (/^(adaptationFrame\.|duct\.|workEnvelope\.|requiredPipeClearance$)/.test(f.field)) {
+      f.provenance = "synthetic_assumption";
+      f.confirmation = "proposed";
+      f.source.description = "Synthetic geometry test assumption; not field evidence";
+    }
+  }
+  expect(search(s).candidates).toHaveLength(2);
+  expect(s.baselinePlan).toEqual(original);
+  const datum = s.detailing.find(f => f.field === "datum.start")!;
+  datum.provenance = "synthetic_assumption";
+  datum.confirmation = "proposed";
+  expect(value(s, datum.field, datum.subjectIds[0]).status).toBe("unknown");
+  const height = s.detailing.find(f => f.field === "duct.max.z")!;
+  height.value = null;
+  height.unknownReason = "Height not measured";
+  expect(search(s).state).toBe("input_missing");
+});
+
+it("rejects unverified entered and machine geometry, and never uses legacy SAMPLE as physical evidence", async () => {
+  const { value } = await import("../src/integration/model.js");
+  for (const provenance of ["user_entered", "machine_proposal"] as const) {
+    const s = fixture();
+    const height = s.detailing.find(f => f.field === "duct.max.z")!;
+    height.provenance = provenance;
+    height.confirmation = "proposed";
+    expect(search(s).state).toBe("input_missing");
+    s.detailing.find(f => f.field === "adaptationFrame.yaw")!.provenance = provenance;
+    expect(() => adaptationFrame(s)).toThrow("Confirm all adaptation frame");
+  }
+  const s = fixture();
+  const datum = s.detailing.find(f => f.field === "datum.start")!;
+  datum.source.description = "SAMPLE confirmed in old UI";
+  expect(value(s, datum.field, datum.subjectIds[0]).status).toBe("unknown");
+});
+
+it("rejects confirmed status on explicitly unverified provenance at the saved-input boundary", async () => {
+  const { validateInputs } = await import("../src/work-packages/validation.js");
+  for (const provenance of ["synthetic_assumption", "machine_proposal", "user_entered"] as const) {
+    const s = fixture();
+    const height = s.detailing.find(f => f.field === "duct.max.z")!;
+    height.provenance = provenance;
+    height.confirmation = "confirmed";
+    expect(() => validateInputs(s, () => {})).toThrow("unverified_provenance_cannot_be_confirmed");
+    height.confirmation = "proposed";
+    expect(() => validateInputs(s, () => {})).not.toThrow();
+  }
+});

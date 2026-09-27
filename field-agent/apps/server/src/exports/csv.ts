@@ -9,8 +9,8 @@ export function csvCell(value: string | number | null): string {
 }
 const table = (rows: (string | number | null)[][]): Buffer => Buffer.from('\uFEFF' + rows.map(row => row.map(csvCell).join(',')).join('\r\n') + '\r\n', 'utf8');
 export function csvFiles(s: ExportSnapshot): { bom: Buffer; cuts: Buffer } {
-  const metadata = [s.binding.packageId, s.binding.inputRevision, s.binding.configVersion, s.binding.selectionId, s.binding.outputVersion, JSON.stringify(unresolved(s)), 'not_established_by_export'];
-  const headings = ['package_id', 'input_revision', 'config_version', 'selected_plan_id', 'output_version', 'package_unresolved_items', 'approval_status'];
+  const metadata = [s.binding.packageId, s.binding.inputRevision, s.binding.configVersion, s.binding.selectionId, s.binding.outputVersion, JSON.stringify(unresolved(s)), 'not_established_by_export', s.drawingReference, JSON.stringify(s.inputFacts ?? []), JSON.stringify(s.selectedPlan.context ?? [])];
+  const headings = ['package_id', 'input_revision', 'config_version', 'selected_plan_id', 'output_version', 'package_unresolved_items', 'approval_status', 'drawing_reference', 'input_facts', 'protected_context_not_for_purchase'];
   return {
     bom: table([
       [...headings, 'record_type', 'material_id', 'description', 'quantity', 'unit', 'status', 'subject_ids', 'source_ids', 'unresolved_reason', 'document_status'],

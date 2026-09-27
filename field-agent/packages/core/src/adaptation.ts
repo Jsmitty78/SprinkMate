@@ -2,6 +2,19 @@ import type { PackagePlan, WorkPackageSnapshot } from "./work-package.js";
 
 type Inputs = Pick<WorkPackageSnapshot, "baselinePlan" | "scope" | "changeRequest" | "siteFacts" | "detailing">;
 type Point = { x: number; y: number; z: number };
+type PackageFact = Inputs["detailing"][number];
+/** Legacy SAMPLE records remain test assumptions even if older clients marked them confirmed. */
+export function isSyntheticPackageFact(f: PackageFact | undefined): boolean {
+  return !!f && (f.provenance === "synthetic_assumption" || (!f.provenance && /SAMPLE|SYNTHETIC|FICTIONAL|not measured on site/i.test(f.source.description)));
+}
+export function confirmedPackageEvidence(f: PackageFact | undefined): boolean {
+  return !!f && !isSyntheticPackageFact(f) && (!f.provenance || f.provenance === "confirmed_evidence") && f.confirmation === "confirmed" && f.value !== null;
+}
+/** Only route geometry may consume labeled test assumptions; this is not physical confirmation. */
+export function geometryFactUsable(f: PackageFact | undefined): boolean {
+  return !!f && f.value !== null && !!f.source.description.trim() && (confirmedPackageEvidence(f) || isSyntheticPackageFact(f));
+}
+
 const scales: Record<string, number> = { mm: 1, m: 1000, in: 25.4, ft: 304.8 };
 export function adaptationMillimetres(value: number, unit: string | null): number {
   const n = value * (scales[unit ?? ""] ?? NaN);
@@ -16,8 +29,8 @@ export function adaptationFrame(s: Pick<Inputs, "siteFacts" | "detailing">) {
   const names = ["origin.x", "origin.y", "origin.z", "yaw"];
   const facts = names.map(n => [...s.siteFacts, ...s.detailing].filter(f => f.field === `adaptationFrame.${n}` && !f.subjectIds.length));
   if (facts.every(f => !f.length)) return { toLocal: (p: Point) => ({ ...p }), toDrawing: (p: Point) => ({ ...p }), explicit: false };
-  if (facts.some(f => f.length !== 1 || f[0].confirmation !== "confirmed" || typeof f[0].value !== "number"))
-    throw new Error("Confirm all adaptation frame origin coordinates and yaw, with evidence descriptions");
+  if (facts.some(f => f.length !== 1 || !geometryFactUsable(f[0]) || typeof f[0].value !== "number"))
+    throw new Error("Confirm all adaptation frame origin coordinates and yaw, or label each as a synthetic test assumption, with source descriptions");
   const origin = facts.slice(0, 3).map(([f]) => adaptationMillimetres(f.value as number, f.unit));
   const yaw = facts[3][0];
   if (yaw.unit !== "deg" || !Number.isFinite(yaw.value)) throw new Error("Adaptation frame yaw requires finite degrees");

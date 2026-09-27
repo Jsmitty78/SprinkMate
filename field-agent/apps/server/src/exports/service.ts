@@ -41,7 +41,7 @@ export class WorkPackageExports {
     ];
     const exportId = randomUUID();
     const manifest: ExportManifest = { schemaVersion: 1, exportId, createdAt: new Date().toISOString(), binding: snapshot.binding,
-      snapshotHash: hash, draft: true, unresolvedCount: unresolved(snapshot).length, unresolvedItems: unresolved(snapshot),
+      snapshotHash: hash, drawingReference: snapshot.drawingReference, inputFacts: snapshot.inputFacts ?? [], protectedContext: snapshot.selectedPlan.context ?? [], draft: true, unresolvedCount: unresolved(snapshot).length, unresolvedItems: unresolved(snapshot),
       files: files.map(f => ({ name: f.name, sha256: sha256(f.bytes), bytes: f.bytes.length, contentType: f.contentType })) };
     const parent = join(this.options.directory, safeId(packageId));
     const temporary = join(parent, '.' + exportId + '.tmp'), target = join(parent, exportId);

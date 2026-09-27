@@ -1,4 +1,4 @@
-import { adaptationInterval } from "@field-agent/core";
+import { adaptationInterval, confirmedPackageEvidence, geometryFactUsable, isSyntheticPackageFact } from "@field-agent/core";
 import type { PackageInputs, PackagePlan, PackageResult, WorkPackageSnapshot } from "@field-agent/core";
 import { lengthInput, parseLength } from "./format.js";
 
@@ -21,12 +21,29 @@ export const ELBOW = "spears/4206-010S";
 export function findFact(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">, field: string, subject?: string): Fact | undefined {
   return [...s.detailing, ...s.siteFacts].find(f => f.field === field && (subject ? f.subjectIds.includes(subject) : f.subjectIds.length === 0));
 }
-export const isConfirmed = (f: Fact | undefined) => !!f && f.confirmation === "confirmed" && f.value !== null;
+export const isConfirmed = confirmedPackageEvidence;
 
 export interface FactSpec {
   field: string; value: Fact["value"]; subjectIds?: string[]; unit?: string | null;
   confirmation: Fact["confirmation"]; context: Fact["context"];
+  provenance?: Fact["provenance"];
   source: string; assetId?: string | null; page?: number | null; unknownReason?: string | null;
+}
+
+export type Provenance = NonNullable<Fact["provenance"]>;
+export const PROVENANCE_LABELS: Record<Provenance, string> = {
+  machine_proposal: "Machine proposal", user_entered: "Entered measurement (unverified)",
+  confirmed_evidence: "Confirmed evidence", synthetic_assumption: "Synthetic test assumption",
+};
+export function factProvenance(f: Fact | undefined): Provenance {
+  if (f?.provenance) return f.provenance;
+  if (/SAMPLE|SYNTHETIC|FICTIONAL|not measured on site/i.test(f?.source.description ?? "")) return "synthetic_assumption";
+  return f?.confirmation === "confirmed" ? "confirmed_evidence" : "user_entered";
+}
+/** Editing or confirming a test assumption must not turn it into field evidence. */
+export function evidenceSpec(previous: Fact | undefined, provenance: Provenance, source: string): Pick<FactSpec, "provenance" | "confirmation" | "source"> {
+  const effective = previous && factProvenance(previous) === "synthetic_assumption" ? "synthetic_assumption" : provenance;
+  return { provenance: effective, confirmation: effective === "confirmed_evidence" ? "confirmed" : "proposed", source: source.trim() };
 }
 
 /**
@@ -48,12 +65,17 @@ export function upsertFacts(s: Pick<WorkPackageSnapshot, "detailing" | "siteFact
     used.add(id);
     return id;
   };
-  for (const spec of specs) {
+  for (const requested of specs) {
+    const previous = [...s.detailing, ...s.siteFacts].find(f => same(f, requested));
+    const spec = previous && factProvenance(previous) === "synthetic_assumption"
+      ? { ...requested, provenance: "synthetic_assumption" as const, confirmation: "proposed" as const, context: "detailing" as const }
+      : requested;
     const fact: Fact = {
       id: nextId(`${spec.field}${spec.subjectIds?.length ? `.${spec.subjectIds.join(".")}` : ""}`),
       field: spec.field, value: spec.value, subjectIds: spec.subjectIds ?? [], unit: spec.unit ?? null,
       unknownReason: spec.value === null ? spec.unknownReason ?? "Not measured yet" : null,
       confirmation: spec.value === null ? "proposed" : spec.confirmation, context: spec.context,
+      ...(spec.provenance ? { provenance: spec.provenance } : {}),
       source: { description: spec.source, assetId: spec.assetId ?? null, page: spec.page ?? null },
     };
     if (spec.context === "detailing") detailing = [...detailing, fact];
@@ -103,6 +125,19 @@ function toMm(value: number, unit: string | null): number | null {
   const factor: Record<string, number> = { mm: 1, m: 1000, cm: 10, in: 25.4, ft: 304.8 };
   const f = factor[unit ?? "mm"];
   return f === undefined ? null : value * f;
+}
+
+/** Preserve derived frame coordinates across save/reload without display rounding. */
+export function exactFrameLengthInput(mm: number, unit: "mm" | "in"): string {
+  const text = String(unit === "mm" ? mm : mm / 25.4);
+  return parseLength(text, unit) === mm ? text : `${mm} mm`;
+}
+export function alignedFrameInputs(s: WorkPackageSnapshot, unit: "mm" | "in"): string[] | null {
+  const pipe = s.baselinePlan?.entities.find(e => e.kind === "pipe" && s.changeRequest?.affectedEntityIds.includes(e.id));
+  const a = pipe?.ports[0]?.position, b = pipe?.ports[1]?.position;
+  if (!a || !b || (a.x === b.x && a.y === b.y)) return null;
+  return [a.x, a.y, a.z].map(n => exactFrameLengthInput(toMm(n, s.baselinePlan!.coordinateFrame.lengthUnit)!, unit))
+    .concat(String(Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI));
 }
 
 // ---------------------------------------------------------------- plan geometry for drawing
@@ -311,8 +346,8 @@ export function requirements(s: WorkPackageSnapshot): Requirement[] {
   add({ id: "scale", group: "Drawing", label: "Drawing scale confirmed", done: d?.scale.basis === "confirmed_inputs", hint: d?.scale.reason ?? undefined });
   const plan = activeDetailingPlan(s);
   const work = inScope(s);
-  add({ id: "run", group: "Run", label: "Run traced or entered (points, turns, ends)", done: !!plan?.entities.length && !!s.scope });
-  add({ id: "run-confirmed", group: "Run", label: "Run confirmed against the drawing", done: plan?.confirmation === "confirmed" });
+  add({ id: "run", group: "Run", label: "Run traced or entered (points, turns, ends)", done: !!s.baselinePlan?.entities.some(e => e.kind === "pipe") && !!s.scope });
+  add({ id: "run-confirmed", group: "Run", label: "Run confirmed against the drawing", done: s.baselinePlan?.confirmation === "confirmed" });
   if (plan) {
     for (const pipe of plan.entities.filter(e => e.kind === "pipe" && work(e.id)))
       for (const end of ["start", "end"])
@@ -328,9 +363,15 @@ export function requirements(s: WorkPackageSnapshot): Requirement[] {
   for (const b of showSfInputs(s) ? PROJECT_BASIS : []) add({ id: b.field, group: "Project", label: b.label, done: isConfirmed(findFact(s, b.field)) });
   if (s.intent === "adapt_to_site") {
     add({ id: "change", group: "Site", label: "Affected pipe chosen", done: !!s.changeRequest?.affectedEntityIds.length });
-    add({ id: "duct", group: "Site", label: "Obstacle measured (all six faces)", done: readBox(s, "duct").confirmed });
-    add({ id: "workEnvelope", group: "Site", label: "Work boundary measured", done: readBox(s, "workEnvelope").confirmed });
-    add({ id: "requiredPipeClearance", group: "Site", label: "Required pipe clearance", done: isConfirmed(findFact(s, "requiredPipeClearance")) });
+    for (const [id, label, fields] of [
+      ["duct", "Obstacle geometry (all six faces)", BOX_KEYS.map(k => `duct.${k}`)],
+      ["workEnvelope", "Work boundary geometry", BOX_KEYS.map(k => `workEnvelope.${k}`)],
+      ["requiredPipeClearance", "Required pipe clearance", ["requiredPipeClearance"]],
+    ] as const) {
+      const facts = fields.map(field => findFact(s, field));
+      const synthetic = facts.some(isSyntheticPackageFact);
+      add({ id, group: "Site", label: `${label}${synthetic ? " — synthetic test input" : ""}`, done: facts.every(f => geometryFactUsable(f) && typeof f?.value === "number"), hint: synthetic ? "Usable for software route testing; field measurement remains unverified." : undefined });
+    }
   }
   return out;
 }

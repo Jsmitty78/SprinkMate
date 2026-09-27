@@ -24,6 +24,57 @@ export interface WorkPackageRunner {
   execute(context: PackageRunContext): Promise<{ status: Extract<PackageRunStatus, 'completed' | 'waiting_input' | 'blocked'>; stopReason: string }>;
 }
 
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const sourceFields = new Set(['sourceLabel', 'nominalSize', 'materialRequirement', 'materialRequirement.material']);
+
+/** Reopening is a separate review action, never permission to replace a confirmed graph in the same patch. */
+function isDrawingReopen(before: WorkPackageSnapshot, after: WorkPackageSnapshot): boolean {
+  if (!before.sourceDrawing || before.sourceDrawing.approval === 'approved' || !before.baselinePlan
+      || after.baselinePlan?.confirmation !== 'proposed' || after.sourceDrawing?.approval !== 'unreviewed') return false;
+  const expectedSource = { ...before.sourceDrawing, approval: 'unreviewed',
+    scale: before.sourceDrawing.scale.value === null ? before.sourceDrawing.scale : { ...before.sourceDrawing.scale, basis: 'proposed_inputs' } };
+  return same(after.baselinePlan, { ...before.baselinePlan, confirmation: 'proposed' })
+    && same(after.sourceDrawing, expectedSource) && same(after.scope, before.scope);
+}
+
+/** Remove copied facts that no longer describe the corrected source or graph. */
+function invalidateCorrectedInputs(before: WorkPackageSnapshot, after: WorkPackageSnapshot) {
+  const a = before.sourceDrawing, b = after.sourceDrawing;
+  const identity = (d: typeof a) => d && [d.assetId, d.drawingId, d.revision, d.page];
+  const transform = (d: typeof a) => d && [d.scale.value, d.view?.sheetUnit, d.view?.frame];
+  const sourceChanged = !!a && !same(identity(a), identity(b));
+  const frameChanged = !!a && !same(transform(a), transform(b));
+  const graph = (p: typeof before.baselinePlan) => p && [p.coordinateFrame, p.entities, p.connections];
+  const graphChanged = !!before.baselinePlan && !same(graph(before.baselinePlan), graph(after.baselinePlan));
+  const spatial = (p: typeof before.baselinePlan) => p && [p.coordinateFrame, p.entities.map(({ productId: _product, ...entity }) => entity), p.connections];
+  const spatialChanged = !!before.baselinePlan && (!same(spatial(before.baselinePlan), spatial(after.baselinePlan)) || !same(before.scope, after.scope));
+  const localFrame = (s: WorkPackageSnapshot) => ['origin.x', 'origin.y', 'origin.z', 'yaw'].map(name => {
+    const f = [...s.detailing, ...s.siteFacts].find(f => f.field === `adaptationFrame.${name}` && !f.subjectIds.length);
+    return f ? [f.value, f.unit] : null;
+  });
+  const localFrameChanged = !same(localFrame(before), localFrame(after));
+  if (!sourceChanged && !frameChanged && !graphChanged && !spatialChanged && !localFrameChanged) return;
+  const previous = new Map([...before.detailing, ...before.siteFacts].map(f => [f.id, f]));
+  const entities = new Set(after.baselinePlan?.entities.map(e => e.id) ?? []);
+  const keep = (f: WorkPackageSnapshot['detailing'][number]) => {
+    if (f.subjectIds.some(id => !entities.has(id))) return false;
+    // Newly supplied evidence is allowed; an unchanged copied fact still belongs to the previous revision.
+    if (!same(previous.get(f.id), f)) return true;
+    if (sourceChanged && sourceFields.has(f.field)) return false;
+    if (localFrameChanged && /^(duct|workEnvelope)\./.test(f.field)) return false;
+    if ((frameChanged || sourceChanged || spatialChanged) && /^(adaptationFrame|duct|workEnvelope)\./.test(f.field)) return false;
+    if ((graphChanged || frameChanged || sourceChanged) && f.subjectIds.length && !sourceFields.has(f.field)) return false;
+    return true;
+  };
+  after.detailing = after.detailing.filter(keep);
+  after.siteFacts = after.siteFacts.filter(keep);
+  if (sourceChanged || frameChanged || graphChanged || spatialChanged) after.changeRequest = null;
+  else if (after.changeRequest) {
+    const remaining = new Set([...after.detailing, ...after.siteFacts].map(f => f.id));
+    after.changeRequest = { ...after.changeRequest, factIds: after.changeRequest.factIds.filter(id => remaining.has(id)) };
+  }
+}
+
 export class WorkPackageService {
   private active = new Map<string, { runId: string; controller: AbortController }>();
   constructor(readonly store: WorkPackageStore, readonly configVersion = DEFAULT_PACKAGE_CONFIG_VERSION, private readonly runner?: WorkPackageRunner) {
@@ -91,7 +142,8 @@ export class WorkPackageService {
     this.expected(snapshot, data.expectedRevision);
     const next = { ...snapshot, ...data.patch };
     if (snapshot.baselinePlan?.confirmation === 'confirmed' &&
-        (JSON.stringify(snapshot.baselinePlan) !== JSON.stringify(next.baselinePlan) || JSON.stringify(snapshot.sourceDrawing) !== JSON.stringify(next.sourceDrawing))) {
+        (!same(snapshot.baselinePlan, next.baselinePlan) || !same(snapshot.sourceDrawing, next.sourceDrawing) || !same(snapshot.scope, next.scope))
+        && !isDrawingReopen(snapshot, next)) {
       throw new PackageError(409, 'confirmed_baseline_is_immutable');
     }
     if (snapshot.sourceDrawing?.approval === 'approved' && JSON.stringify(snapshot.sourceDrawing) !== JSON.stringify(next.sourceDrawing)) {
@@ -101,6 +153,7 @@ export class WorkPackageService {
     if (snapshot.selectedPlan && JSON.stringify(snapshot.baselinePlan) !== JSON.stringify(next.baselinePlan)) {
       throw new PackageError(409, 'selected_plan_baseline_conflict');
     }
+    invalidateCorrectedInputs(snapshot, next);
     this.validate(next);
     return this.changed(next);
   }
