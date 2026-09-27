@@ -223,7 +223,8 @@ function derive(
     }
   }
   // A run traced on a sheet is a plan projection: its length is useful, not a verified physical length.
-  if (s.sourceDrawing?.view)
+  // Generated candidates are planner geometry, not the trace, so they are not labelled this way.
+  if (s.sourceDrawing?.view && plan.id === s.baselinePlan?.id)
     for (const c of fabrication.cuts)
       if (c.cutLength.value === null)
         c.cutLength.reasons.push(
@@ -390,7 +391,7 @@ export function createIntegratedServices(
               1,
             ],
           ] as const) {
-            if (key === "curePlan" && !base?.entities.some(e => !s.scope?.excludedEntityIds.includes(e.id) && fabricationCatalog(s.configVersion).products.some(p => p.id === e.productId && p.connection === "cpvc_socket_solvent"))) continue;
+            if (key === "curePlan" && !base?.entities.some(e => (s.intent === "adapt_to_site" ? !!s.changeRequest?.affectedEntityIds.includes(e.id) : !s.scope?.excludedEntityIds.includes(e.id)) && fabricationCatalog(s.configVersion).products.some(p => p.id === e.productId && p.connection === "cpvc_socket_solvent"))) continue;
             if (
               value(s, key).status === "unknown" &&
               !state.acknowledgedQuestions?.includes(key) &&
