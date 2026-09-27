@@ -3,36 +3,35 @@ import { buildRun, upsertFacts, type FactSpec, type RunNode } from "./model.js";
 
 /**
  * SAMPLE INPUT, NOT FIELD DATA.
- * The same invented confirmations the server's integration fixture uses
- * (apps/server/test/fixtures/integrated-package.ts), so a demo can run the real API end to end.
+ * Invented values for exercising the real API end to end.
  * Everything written here carries a "SAMPLE" source line, and the UI shows a Sample badge while
  * any sample fact is in the package. Production behaviour never reads this file.
  */
-export const SAMPLE_SOURCE = "SAMPLE: invented demo confirmation, not field evidence";
+export const SAMPLE_SOURCE = "SAMPLE: invented test assumption, not field evidence";
 export const SAMPLE_CURE = "SAMPLE: FG-3 pp27-28 new work, 70 F, dry normal fit, 1 inch, up to 225 psi, minimum 90 minutes. Invented, not a field confirmation.";
 
-const PREPARE_RUN: RunNode[] = [{ kind: "open_end", x: 0, y: 0 }, { kind: "elbow", x: 609.6, y: 0 }, { kind: "open_end", x: 609.6, y: 457.2 }];
+const PREPARE_RUN: RunNode[] = [{ kind: "tie_in", x: 0, y: 0 }, { kind: "elbow", x: 609.6, y: 0 }, { kind: "tie_in", x: 609.6, y: 457.2 }];
 const ADAPT_RUN: RunNode[] = [{ kind: "tie_in", x: 0, y: 0 }, { kind: "tie_in", x: 10000, y: 0 }];
 
 export function sampleInputs(kind: "prepare" | "adapt", assetId: string): Pick<PackageInputs, "sourceDrawing" | "baselinePlan" | "scope" | "detailing" | "siteFacts" | "changeRequest"> {
   const built = buildRun(kind === "prepare" ? PREPARE_RUN : ADAPT_RUN, "baseline", SAMPLE_SOURCE);
   if ("problems" in built) throw new Error(built.problems.join(" "));
-  const confirmed = (spec: Omit<FactSpec, "confirmation" | "context" | "source"> & { context?: FactSpec["context"] }): FactSpec =>
-    ({ context: "detailing", ...spec, confirmation: "confirmed", source: SAMPLE_SOURCE });
-  const specs: FactSpec[] = built.datums.map(d => ({ ...d, confirmation: "confirmed", source: SAMPLE_SOURCE }));
-  for (const tie of built.scope.tieInEntityIds) specs.push(confirmed({ field: "netCutOffset", value: 50, unit: "mm", subjectIds: [tie] }));
+  const assumed = (spec: Omit<FactSpec, "confirmation" | "context" | "source"> & { context?: FactSpec["context"] }): FactSpec =>
+    ({ context: "detailing", ...spec, confirmation: "proposed", provenance: "synthetic_assumption", source: SAMPLE_SOURCE });
+  const specs: FactSpec[] = built.datums.map(d => ({ ...d, confirmation: "proposed", provenance: "synthetic_assumption", source: SAMPLE_SOURCE }));
+  for (const tie of built.scope.tieInEntityIds) specs.push(assumed({ field: "netCutOffset", value: 50, unit: "mm", subjectIds: [tie] }));
   for (const fit of built.plan.entities.filter(e => e.kind === "fitting"))
-    for (const port of fit.ports) specs.push(confirmed({ field: `movement.${port.id}`, value: true, subjectIds: [fit.id] }));
-  specs.push(confirmed({ field: "workAreaAccess", value: true }), confirmed({ field: "curePlan", value: SAMPLE_CURE }));
+    for (const port of fit.ports) specs.push(assumed({ field: `movement.${port.id}`, value: true, subjectIds: [fit.id] }));
+  specs.push(assumed({ field: "workAreaAccess", value: true }), assumed({ field: "curePlan", value: SAMPLE_CURE }));
   for (const [field, value] of [["jurisdiction", "san_francisco"], ["standard", "nfpa13"], ["permitKind", "revision"], ["originalNfpa13Edition", "2025"],
     ["originalFirePermitNumber", "SAMPLE-ONLY"], ["systemType", "wet"], ["sprinklerType", "standard_spray"], ["storage", "non_storage"]] as const)
-    specs.push(confirmed({ field, value }));
+    specs.push(assumed({ field, value }));
   if (kind === "adapt") {
     const box = (prefix: string, values: number[]) => ["min.x", "min.y", "min.z", "max.x", "max.y", "max.z"].forEach((k, i) =>
-      specs.push(confirmed({ field: `${prefix}.${k}`, value: values[i], unit: "mm", context: "observed" })));
+      specs.push(assumed({ field: `${prefix}.${k}`, value: values[i], unit: "mm", context: "observed" })));
     box("duct", [4000, -400, -500, 6000, 400, 500]);
     box("workEnvelope", [-200, -2800, -300, 10200, 2300, 300]);
-    specs.push(confirmed({ field: "requiredPipeClearance", value: 100, unit: "mm", context: "observed" }));
+    specs.push(assumed({ field: "requiredPipeClearance", value: 100, unit: "mm", context: "observed" }));
   }
   const facts = upsertFacts({ detailing: [], siteFacts: [] }, specs);
   return {
@@ -67,7 +66,7 @@ export async function sampleDrawing(kind: "prepare" | "adapt"): Promise<File> {
   g.stroke();
   if (kind === "adapt") { g.setLineDash([12, 8]); g.lineWidth = 3; g.strokeRect(680, 420, 240, 160); g.setLineDash([]); }
   g.fillStyle = "#b45309"; g.font = "bold 44px sans-serif"; g.fillText("SAMPLE DRAWING, NOT A REAL SHEET", 60, 90);
-  g.fillStyle = "#374151"; g.font = "28px sans-serif"; g.fillText(`SAMPLE-FP-201 Rev C · ${kind === "prepare" ? "open CPVC spool" : "branch between two tie-ins"}`, 60, 140);
+  g.fillStyle = "#374151"; g.font = "28px sans-serif"; g.fillText(`SAMPLE-FP-201 Rev C · ${kind === "prepare" ? "two-span branch between tie-ins" : "branch between two tie-ins"}`, 60, 140);
   g.strokeStyle = "#111827"; g.lineWidth = 3; g.strokeRect(1080, 820, 480, 140);
   g.font = "24px sans-serif"; g.fillText("Sprink demo sheet", 1100, 870); g.fillText("Invented for demonstration", 1100, 910);
   const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error("Could not draw the sample sheet")), "image/png"));
