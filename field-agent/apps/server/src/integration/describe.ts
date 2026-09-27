@@ -55,9 +55,28 @@ export function materialDescription(
 
 /** Entities outside the scope: kept visible and traceable, never part of the work or a purchase. */
 export function retainedContext(s: WorkPackageSnapshot) {
+  const plan = s.baselinePlan;
   const excluded = new Set(s.scope?.excludedEntityIds ?? []);
-  return (s.baselinePlan?.entities ?? [])
-    .filter((e) => excluded.has(e.id))
+  // In adaptation only the affected span and its tie-in interfaces are worked; everything else is protected context.
+  const affected = new Set(
+    s.intent === "adapt_to_site" ? (s.changeRequest?.affectedEntityIds ?? []) : [],
+  );
+  const tieIns = new Set(
+    (plan?.connections ?? []).flatMap((c) =>
+      affected.has(c.from.entityId)
+        ? [c.to.entityId]
+        : affected.has(c.to.entityId)
+          ? [c.from.entityId]
+          : [],
+    ),
+  );
+  for (const id of s.scope?.tieInEntityIds ?? []) if (affected.size) tieIns.add(id);
+  const retained = (e: { id: string; kind: string }) =>
+    affected.size
+      ? !affected.has(e.id) && !tieIns.has(e.id)
+      : excluded.has(e.id);
+  return (plan?.entities ?? [])
+    .filter(retained)
     .map((e) => ({
       id: e.id,
       kind: e.kind,

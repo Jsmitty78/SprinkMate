@@ -52,6 +52,9 @@ import { evaluateProfile, type ProfileOutput } from "./profiles.js";
 import { materialDescription } from "./describe.js";
 import { exportSnapshot } from "./snapshot.js";
 
+/** The coordinate frame of runs typed in the web run editor (apps/web/src/workbench/model.ts). */
+const TYPED_RUN_FRAME = "room";
+
 export const INTEGRATION_VERSION = "scenario-integration-3-steel-interval";
 export interface Detail {
   id: string;
@@ -224,7 +227,12 @@ function derive(
   }
   // A run traced on a sheet is a plan projection: its length is useful, not a verified physical length.
   // Generated candidates are planner geometry, not the trace, so they are not labelled this way.
-  if (s.sourceDrawing?.view && plan.id === s.baselinePlan?.id)
+  // A run typed in the run editor ("room" frame) is not a projection even when a sheet view is saved.
+  if (
+    s.sourceDrawing?.view &&
+    plan.id === s.baselinePlan?.id &&
+    s.baselinePlan.coordinateFrame.id !== TYPED_RUN_FRAME
+  )
     for (const c of fabrication.cuts)
       if (c.cutLength.value === null)
         c.cutLength.reasons.push(
