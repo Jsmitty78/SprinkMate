@@ -123,3 +123,12 @@ and connection-conflict evaluation, and exported provenance. Changing the drawin
 revision still removes these stale source requirements. The full suite passes
 43 files / 845 tests, with typecheck and diff checks passing. Browser E2E and the
 web build were not repeated for this server-only correction.
+
+## PR #39 integration
+
+Merged main through `e22b134`, retaining the typed-run projection guard and
+expanded adaptation context from #39, together with generation recovery guidance
+and provenance-aware input handling from this PR. The server integration version
+was advanced so earlier derived results are not reused under the changed logic.
+The merged tree passes 43 files / 847 tests, typecheck and diff checks. Browser
+E2E and the web build were not repeated for this server behavior integration.

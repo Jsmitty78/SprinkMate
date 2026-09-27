@@ -52,7 +52,7 @@ import { evaluateProfile, type ProfileOutput } from "./profiles.js";
 import { materialDescription } from "./describe.js";
 import { exportSnapshot } from "./snapshot.js";
 
-export const INTEGRATION_VERSION = "scenario-integration-6-merged-site-inputs";
+export const INTEGRATION_VERSION = "scenario-integration-7-projection-context";
 function generationRecovery(path: string, message: string): string {
   const action = path === "outsideDiameter" || path.startsWith("product")
     ? "Open drawing inputs, reopen the trace if confirmed, select a compatible pipe and fitting catalog pair, save and confirm the trace."
@@ -62,6 +62,8 @@ function generationRecovery(path: string, message: string): string {
     : "Open inputs and correct this field, including its units and source.";
   return `${path}: ${message} ${action} Run route generation again after saving. Synthetic assumptions support test geometry only.`;
 }
+/** Coordinate frame used by manually entered runs. */
+const TYPED_RUN_FRAME = "room";
 export interface Detail {
   id: string;
   input: FabricationInput;
@@ -233,7 +235,12 @@ function derive(
   }
   // A run traced on a sheet is a plan projection: its length is useful, not a verified physical length.
   // Generated candidates are planner geometry, not the trace, so they are not labelled this way.
-  if (s.sourceDrawing?.view && plan.id === s.baselinePlan?.id)
+  // A run typed in the run editor ("room" frame) is not a projection even when a sheet view is saved.
+  if (
+    s.sourceDrawing?.view &&
+    plan.id === s.baselinePlan?.id &&
+    s.baselinePlan.coordinateFrame.id !== TYPED_RUN_FRAME
+  )
     for (const c of fabrication.cuts)
       if (c.cutLength.value === null)
         c.cutLength.reasons.push(
