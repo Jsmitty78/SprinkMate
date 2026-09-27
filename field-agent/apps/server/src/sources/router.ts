@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { WorkPackageSnapshot } from '@field-agent/core';
-import { ask, AskInputError, type AskRequest } from './ask.js';
+import { ask, AskInputError, notesComposer, type AskRequest, type AttachmentInput } from './ask.js';
+import type { UploadService } from '../uploads/service.js';
+import { UploadError } from '../uploads/formats.js';
 import { loadDemoSources } from './demo.js';
 import { SourceError, type SourceStore } from './store.js';
 import type { ExplanationFile, SourceDocumentInput } from './types.js';
@@ -9,11 +11,12 @@ import type { ExplanationFile, SourceDocumentInput } from './types.js';
 const TEXT_FILE = /\.(md|markdown|txt)$/i;
 
 /** Mount only under the authenticated /api middleware. */
-export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => WorkPackageSnapshot) {
+export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => WorkPackageSnapshot, uploads?: UploadService) {
   const app = new Hono();
   app.onError((error, c) => {
     if (error instanceof SourceError) return c.json({ error: error.message, code: error.code }, error.status as ContentfulStatusCode);
     if (error instanceof AskInputError) return c.json({ error: error.message, code: 'invalid_question' }, 400);
+    if (error instanceof UploadError) return c.json({ error: error.message, code: error.code }, error.status as ContentfulStatusCode);
     if (error instanceof SyntaxError) return c.json({ error: 'Invalid JSON', code: 'invalid_json' }, 400);
     return c.json({ error: 'Source library operation failed', code: 'internal_error' }, 500);
   });
@@ -24,7 +27,7 @@ export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => W
     const doc = body?.document;
     if (!doc || typeof doc !== 'object') throw new SourceError(400, 'invalid_document', 'Send { document: {...metadata, content, filename} }.');
     if (typeof doc.filename !== 'string' || !TEXT_FILE.test(doc.filename))
-      throw new SourceError(415, 'unsupported_file', 'Import text or Markdown (.md, .txt). PDF text extraction and OCR are not part of the current stack; extract the text first and mark it as OCR if it came from a scan.');
+      throw new SourceError(415, 'unsupported_file', 'This endpoint imports prepared text or Markdown (.md, .txt). Upload PDFs and images through /api/uploads, which extracts, reviews and indexes them.');
     return c.json(store.import(doc, body.explanations), 201);
   });
   app.post('/sources/demo', async c => {
@@ -64,7 +67,16 @@ export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => W
       if (!loadPackage) throw new AskInputError('Work packages are not available on this server.');
       try { snapshot = loadPackage(body.packageId); } catch { throw new AskInputError('That work package could not be opened.'); }
     }
-    return c.json(ask(store, body, snapshot));
+    const ids = Array.isArray(body.attachments) ? body.attachments : [];
+    if (ids.length > 6) throw new AskInputError('Attach at most 6 photos to one question.');
+    const attachments: AttachmentInput[] = [];
+    for (const id of ids) {
+      if (typeof id !== 'string') throw new AskInputError('Attachments must be upload ids.');
+      if (!uploads) throw new AskInputError('Uploads are not available on this server.');
+      const { upload, observations } = await uploads.observations(id);
+      attachments.push({ upload, observations });
+    }
+    return c.json(ask(store, body, snapshot, notesComposer, attachments));
   });
   return app;
 }

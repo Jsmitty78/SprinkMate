@@ -79,6 +79,22 @@ export class SourceStore {
     return (this.db.prepare('SELECT section_key AS key, doc_id AS docId, bm25(source_fts, 0, 0, 4, 3, 1) AS rank FROM source_fts WHERE source_fts MATCH ? ORDER BY rank LIMIT ?')
       .all(match, limit) as Array<{ key: string; docId: string; rank: number }>);
   }
+  /** Records where each passage sits on its uploaded page images, for highlighting in the viewer. */
+  setRegions(docId: string, regions: Record<string, NonNullable<SourceSection['regions']>>) {
+    const upd = this.db.prepare('UPDATE source_sections SET data=? WHERE key=? AND doc_id=?');
+    this.db.transaction(() => {
+      for (const s of this.sections(docId)) if (regions[s.key]) upd.run(JSON.stringify({ ...s, regions: regions[s.key] }), s.key, docId);
+    })();
+  }
+  /** True when every section of the document is in the full-text index and a search finds it. */
+  searchable(docId: string): boolean {
+    const sections = this.sections(docId);
+    const indexed = (this.db.prepare('SELECT count(*) AS n FROM source_fts WHERE doc_id=?').get(docId) as { n: number }).n;
+    if (!sections.length || indexed !== sections.length) return false;
+    const probe = sections.map(s => `${s.heading} ${s.text}`.toLowerCase().match(/[a-z]{5,}/g) ?? []).flat()[0];
+    if (!probe) return true;
+    return this.search(`"${probe}"`, 200).some(h => h.docId === docId);
+  }
   remove(id: string) {
     this.db.transaction(() => {
       const keys = (this.db.prepare('SELECT key FROM source_sections WHERE doc_id=?').all(id) as { key: string }[]).map(r => r.key);

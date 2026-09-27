@@ -69,6 +69,8 @@ export interface SourceDocumentInput {
   /** Original text: Markdown-style headings for sections, `<!-- page: N -->` page markers. */
   content: string;
   filename: string;
+  /** Set when the document came from an uploaded file: which reviewed revision of its text was indexed. */
+  upload?: { uploadId: string; revision: number; basis: 'extracted' | 'corrected'; sha256: string; kind: string; pageCount: number };
 }
 
 export interface SourceDocument extends Omit<SourceDocumentInput, 'content'> {
@@ -93,6 +95,8 @@ export interface SourceSection {
   amends: string | null;  // for amendments: the section id amended
   flags: QualityFlag[];
   order: number;
+  /** Where the passage sits on the uploaded page images, in page-image pixels. */
+  regions?: Array<{ page: number; x: number; y: number; w: number; h: number }>;
 }
 
 export interface ExplanationCondition {

@@ -15,10 +15,22 @@ export interface AskRequest {
   /** Values the user typed in the Ask panel, e.g. {name: "obstructionWidth", value: 450, unit: "mm"}. */
   measurements?: Array<{ name: string; value: number; unit: string }>;
   /** Answers to focused follow-up questions. Kept for this question only, not saved to the package. */
-  answers?: { nfpa13Edition?: string; jurisdiction?: string };
+  answers?: { nfpa13Edition?: string; jurisdiction?: string; observations?: Record<string, 'yes' | 'no'> };
+  /** Site photos or drawings attached to this question (upload ids). Context only, never a source. */
+  attachments?: string[];
 }
 
-export interface ContextFact { name: string; label: string; value: string | number | null; unit: string | null; origin: Origin | 'document'; detail: string }
+/** A site photo attached to the question, with what could be read from it. Resolved by the router. */
+export interface AttachmentInput {
+  upload: { id: string; filename: string; kindLabel: string; purpose: string; projectId: string | null };
+  observations: Array<{ id: string; kind: 'text' | 'marking' | 'dimension_text'; text: string; confidence: number; page: number; clear: boolean }>;
+}
+export interface AttachmentView {
+  id: string; filename: string; kindLabel: string; preview: string; note: string;
+  observations: Array<{ id: string; kind: 'text' | 'marking' | 'dimension_text'; text: string; confidence: number; page: number; status: 'read' | 'unclear' | 'confirmed' | 'rejected' }>;
+}
+
+export interface ContextFact { name: string; label: string; value: string | number | null; unit: string | null; origin: Origin | 'document' | 'photo'; detail: string }
 export interface FollowUp { id: string; question: string; kind: 'choice' | 'measurement'; field: string; options?: Array<{ value: string; label: string }>; unit?: string }
 export interface Citation {
   key: string; docId: string; docTitle: string; publisher: string; type: SourceDocument['type']; typeLabel: string; edition: string;
@@ -28,8 +40,13 @@ export interface Citation {
   quote: string | null; quoteNote: string | null; table: string[][] | null;
   notes: Array<{ text: string; author: string }>;
   link: string; original: string | null;
+  /** For uploaded documents: the reviewed revision that was indexed, and where the passage sits on the page image. */
+  revision: { uploadId: string; revision: number; basis: 'extracted' | 'corrected'; label: string } | null;
+  page: { image: string; number: number; width: number | null; height: number | null } | null;
+  regions: Array<{ page: number; x: number; y: number; w: number; h: number }>;
 }
-export interface Claim { id: string; text: string; citations: string[]; kind: 'note' | 'pointer'; status: 'supported' | 'unresolved'; reason?: string }
+/** note: a reviewed plain-language note. quote: the source's own wording. pointer: go read the passage. */
+export interface Claim { id: string; text: string; citations: string[]; kind: 'note' | 'pointer' | 'quote'; status: 'supported' | 'unresolved'; reason?: string }
 export interface ConditionCheck { question: string; name: string; value: number | null; unit: string; origin: ContextFact['origin'] | null; detail: string | null; op: string; limit: number; result: 'met' | 'not_met' | 'unknown' }
 export interface ExceptionStatus { key: string; sectionId: string; parentSectionId: string; status: 'applies' | 'does_not_apply' | 'unknown'; checks: ConditionCheck[]; note: string }
 export interface AskAnswer {
@@ -53,17 +70,40 @@ export interface AskAnswer {
   conflicts: Array<Conflict & { items: Array<{ key: string; position: string; label: string }> }>;
   excluded: Array<{ docId: string; title: string; edition: string; reason: string }>;
   calculation: CalculationResult | null;
-  timings: { retrievalMs: number; calculationMs: number; totalMs: number };
+  attachments: AttachmentView[];
+  /** No language model is part of this stack: explanations come from reviewed notes or the source wording. */
+  timings: { retrievalMs: number; calculationMs: number; compositionMs: number; modelMs: null; totalMs: number };
 }
 
 /** Pluggable explanation writer. The default uses stored notes; any writer's claims are re-validated. */
-export type Composer = (items: Retrieved[]) => Array<Omit<Claim, 'status' | 'reason' | 'id'>>;
+export type Composer = (items: Retrieved[], question: string) => Array<Omit<Claim, 'status' | 'reason' | 'id'>>;
 
-export const notesComposer: Composer = items => items
-  .filter(r => ['main', 'referenced', 'amendment', 'related'].includes(r.role))
-  .map(r => r.notes.length
-    ? { text: r.notes[0].text, citations: [r.section.key], kind: 'note' as const }
-    : { text: `${r.section.sectionId}: ${r.section.heading}. Read the source wording.`, citations: [r.section.key], kind: 'pointer' as const });
+const REQUIREMENT_WORDS = /\b(shall|must|required|not required|not permitted|prohibited|at least|not more than|not exceed|no more than|minimum|maximum|within)\b/i;
+
+/**
+ * Reviewed notes where they exist. Where a passage has no note (for example a document the team
+ * just uploaded), its own wording is quoted instead: the requirement sentences, never a paraphrase,
+ * and never more than the source's display permission allows.
+ */
+export const notesComposer: Composer = (items, question) => {
+  const plan = planQuery(question);
+  return items
+    .filter(r => ['main', 'referenced', 'amendment', 'related'].includes(r.role))
+    .flatMap((r): ReturnType<Composer> => {
+      if (r.notes.length) return [{ text: r.notes[0].text, citations: [r.section.key], kind: 'note' as const }];
+      const pointer = { text: `${r.section.sectionId}: ${r.section.heading}. Read the source wording.`, citations: [r.section.key], kind: 'pointer' as const };
+      const a = r.doc.authorization;
+      // Tables are shown whole; text that reads like instructions to an assistant is never quoted as an answer.
+      if (a.display === 'reference_only' || r.section.kind === 'table' || r.section.table || r.section.flags.includes('embedded_instructions')) return [pointer];
+      const sentences = r.section.text.replace(/\s+/g, ' ').split(/(?<=[.;])\s+(?=[A-Z0-9(])/).map(x => x.trim()).filter(x => x.length > 12);
+      const scored = sentences.map(x => ({ x, hits: plan.concepts.filter(k => k.patterns.some(p => p.test(x))).length, req: REQUIREMENT_WORDS.test(x) }))
+        .filter(x => x.req || x.hits > 0).sort((p, q) => (q.hits + (q.req ? 1 : 0)) - (p.hits + (p.req ? 1 : 0))).slice(0, 2);
+      if (!scored.length) return [pointer];
+      const limit = a.display === 'excerpt' ? a.maxQuoteChars! : Infinity;
+      return sentences.filter(x => scored.some(y => y.x === x))
+        .map(x => ({ text: x.length > limit ? `${x.slice(0, limit)}…` : x, citations: [r.section.key], kind: 'quote' as const }));
+    });
+};
 
 // ------------------------------------------------------------------ classification
 
@@ -262,6 +302,13 @@ export function validateClaims(drafts: ReturnType<Composer>, retrieved: Map<stri
     // Citation ids are resolved against stored, retrieved records only; anything else is rejected.
     if (cited.some(c => !c)) return unresolved.push({ ...d, id, citations: d.citations.filter(k => retrieved.has(k)), status: 'unresolved', reason: 'A cited section is not one of the retrieved source records.' });
     if (d.kind === 'pointer') return supported.push({ ...d, id, status: 'supported' });
+    if (d.kind === 'quote') {
+      // A quotation must be the source's words exactly (whitespace aside), or it is not a quotation.
+      const flat = (t: string) => t.replace(/\s+/g, ' ').trim();
+      const q = flat(d.text.replace(/…$/, ''));
+      const ok = cited.some(c => flat(c!.section.text).includes(q));
+      return ok ? supported.push({ ...d, id, status: 'supported' }) : unresolved.push({ ...d, id, status: 'unresolved', reason: 'The quoted wording is not in the cited passage.' });
+    }
     const check = supports(d.text, cited.map(c => `${c!.section.heading}\n${c!.section.text}`));
     if (!check.ok) return unresolved.push({ ...d, id, status: 'unresolved', reason: check.reason });
     supported.push({ ...d, id, status: 'supported' });
@@ -273,7 +320,8 @@ export function validateClaims(drafts: ReturnType<Composer>, retrieved: Map<stri
 
 const ROLE_ORDER: Role[] = ['main', 'amendment', 'exception', 'referenced', 'footnote', 'related', 'definition', 'commentary'];
 function citation(r: Retrieved): Citation {
-  const a = r.doc.authorization;
+  const a = r.doc.authorization, up = r.doc.upload;
+  const pageNo = r.section.regions?.[0]?.page ?? r.section.pageStart;
   let quote: string | null = r.section.text, quoteNote: string | null = null, table = r.section.table;
   if (a.display === 'reference_only') { quote = null; table = null; quoteNote = 'The source permits reference only. Open the original to read the wording.'; }
   else if (a.display === 'excerpt' && quote.length > a.maxQuoteChars!) { quote = `${quote.slice(0, a.maxQuoteChars!)}…`; table = null; quoteNote = `Shortened to the ${a.maxQuoteChars} characters the source permits. Open the original for the full text.`; }
@@ -294,7 +342,11 @@ function citation(r: Retrieved): Citation {
     flags: r.section.flags.map(f => ({ flag: f, label: QUALITY_LABEL[f] })),
     quote, quoteNote, table, notes: r.notes.map(n => ({ text: n.text, author: n.author })),
     link: `/api/sources/${encodeURIComponent(r.doc.id)}/sections/${encodeURIComponent(r.section.key)}`,
-    original: r.doc.url ?? (a.display === 'full' ? `/api/sources/${encodeURIComponent(r.doc.id)}/file` : null),
+    original: r.doc.url ?? (a.display === 'full' ? (up ? `/api/uploads/${up.uploadId}/original` : `/api/sources/${encodeURIComponent(r.doc.id)}/file`) : null),
+    revision: up ? { uploadId: up.uploadId, revision: up.revision, basis: up.basis, label: `Revision ${up.revision} (${up.basis === 'corrected' ? 'text corrected in review' : 'as extracted, reviewed'})` } : null,
+    // The page image shows the whole page, so it is offered only where the source allows full display.
+    page: up && a.display === 'full' && pageNo ? { image: `/api/uploads/${up.uploadId}/pages/${pageNo}`, number: pageNo, width: null, height: null } : null,
+    regions: up && a.display === 'full' ? (r.section.regions ?? []) : [],
   };
 }
 
@@ -314,9 +366,48 @@ function parseQuestionNumbers(q: string): { verticalOffset?: { value: number; un
   return out;
 }
 
+// ------------------------------------------------------------------ site photos: context, never authority
+
+function attachmentContext(inputs: AttachmentInput[], req: AskRequest, ctx: Context, followUps: FollowUp[], missing: string[]): AttachmentView[] {
+  const confirmations = req.answers?.observations ?? {};
+  return inputs.map(({ upload, observations }) => {
+    if (upload.purpose !== 'site_photo') throw new AskInputError(`${upload.filename} is a reference document. Add it to the library instead of attaching it to a question.`);
+    if (ctx.snapshot && upload.projectId && upload.projectId !== ctx.snapshot.projectId) throw new AskInputError(`${upload.filename} was attached in a different project.`);
+    const view: AttachmentView = {
+      id: upload.id, filename: upload.filename, kindLabel: upload.kindLabel, preview: `/api/uploads/${upload.id}/preview`,
+      note: 'Site photo: used as context for this question. It is not a code source and is never cited as one.', observations: [],
+    };
+    ctx.facts.push({ name: `photo:${upload.id}`, label: 'Site photo attached', value: upload.filename, unit: null, origin: 'photo', detail: view.note });
+    const readable: string[] = [];
+    let dimensions = 0;
+    for (const o of observations) {
+      const answer = confirmations[o.id];
+      const status: AttachmentView['observations'][number]['status'] = answer === 'yes' ? 'confirmed' : answer === 'no' ? 'rejected' : o.clear ? 'read' : 'unclear';
+      view.observations.push({ id: o.id, kind: o.kind, text: o.text, confidence: o.confidence, page: o.page, status });
+      if (status === 'rejected') continue;
+      if (o.kind === 'marking') {
+        if (status === 'unclear') {
+          followUps.push({ id: o.id, field: `observation:${o.id}`, kind: 'choice', question: `Does the marking in ${upload.filename} read “${o.text}”?`,
+            options: [{ value: 'yes', label: 'Yes, that is what it says' }, { value: 'no', label: 'No, it is misread' }] });
+          missing.push(`Confirmation of the product marking “${o.text}” (read from the photo with low confidence).`);
+        } else ctx.facts.push({ name: `marking:${o.id}`, label: 'Product marking in the photo', value: o.text, unit: null, origin: status === 'confirmed' ? 'you' : 'photo',
+          detail: status === 'confirmed' ? `Confirmed by you from ${upload.filename}` : `Read from ${upload.filename} by OCR (confidence ${o.confidence}). Not confirmed.` });
+      } else if (o.kind === 'dimension_text') {
+        dimensions += 1;
+        // Printed or written numbers in a photo are never used as measurements.
+        ctx.facts.push({ name: `photoText:${o.id}`, label: 'Dimension text in the photo', value: o.text, unit: null, origin: 'photo',
+          detail: `Text read from ${upload.filename}. A photo has no scale, so this is not a measurement and is not used in calculations.` });
+      } else if (status !== 'unclear') readable.push(o.text);
+    }
+    if (readable.length) ctx.facts.push({ name: `photoTextAll:${upload.id}`, label: 'Other readable text in the photo', value: readable.join(' · ').slice(0, 300), unit: null, origin: 'photo', detail: `Read from ${upload.filename} by OCR. Not confirmed.` });
+    if (dimensions) missing.push('Site measurements. Numbers visible in a photo are not measurements; measure on site and enter the values.');
+    return view;
+  });
+}
+
 // ------------------------------------------------------------------ main flow
 
-export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSnapshot | null, composer: Composer = notesComposer): AskAnswer {
+export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSnapshot | null, composer: Composer = notesComposer, attachmentInputs: AttachmentInput[] = []): AskAnswer {
   const t0 = performance.now();
   if (typeof req.question !== 'string' || !req.question.trim()) throw new AskInputError('Type a question.');
   if (req.question.length > 1000) throw new AskInputError('Keep the question under 1000 characters.');
@@ -325,6 +416,7 @@ export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSn
   const classification = classify(question);
   const followUps: FollowUp[] = [], missing: string[] = [];
   const excluded: AskAnswer['excluded'] = [];
+  const attachments = attachmentContext(attachmentInputs, req, ctx, followUps, missing);
 
   // Values typed into the question itself are the user's too.
   const parsed = parseQuestionNumbers(question);
@@ -433,7 +525,8 @@ export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSn
 
   // ---------------- explanation, validated against the stored passages
   const byKey = new Map(items.map(i => [i.section.key, i]));
-  const drafts = composer(items);
+  const k0 = performance.now();
+  const drafts = composer(items, question);
   // An exception that appears to apply qualifies the requirement it belongs to, right below it.
   for (const e of exceptions.filter(x => x.status === 'applies')) {
     const ex = byKey.get(e.key), note = ex?.notes[0]?.text;
@@ -443,6 +536,7 @@ export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSn
     drafts.splice(at < 0 ? drafts.length : at + 1, 0, { text: `${e.sectionId} appears to apply: ${note}`, citations: [e.key], kind: 'note' });
   }
   const { supported, unresolved } = validateClaims(drafts, byKey);
+  const compositionMs = performance.now() - k0;
   const sources = items.map(citation).sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role));
   const label = (key: string) => { const s = sources.find(x => x.key === key)!; return `${s.sectionId} (${s.edition})`; };
   const conflicts = findConflicts(items).map(c => ({ ...c, items: c.items.map(i => ({ ...i, label: label(i.key) })) }));
@@ -462,8 +556,12 @@ export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSn
     const editionGap = missing.find(m => m.startsWith('No ') && m.includes('text is in the project library'));
     const docs = new Set(items.filter(i => i.role === 'main').map(i => i.doc.id)).size;
     const applied = exceptions.filter(e => e.status === 'applies');
+    const quoted = supported.filter(c => c.kind === 'quote').length;
+    const open = exceptions.filter(e => e.status === 'unknown');
     summary = `${supported.length} point${supported.length === 1 ? '' : 's'} from ${docs} document${docs === 1 ? '' : 's'} in the project library${ctx.edition.value ? `, project edition ${ctx.edition.value}` : ''}.`
+      + (quoted ? ` ${quoted === supported.length ? 'All are' : `${quoted} ${quoted === 1 ? 'is' : 'are'}`} quoted from the source because no reviewed note exists yet.` : '')
       + (applied.length ? ` ${applied.map(e => e.sectionId).join(', ')} appears to apply and changes what is required.` : '')
+      + (open.length ? ` ${open.map(e => e.sectionId).join(', ')} may change this; read ${open.length === 1 ? 'its' : 'their'} wording.` : '')
       + (editionGap ? ` ${editionGap}` : '')
       + (conflicts.length ? ` ${conflicts.length} disagreement${conflicts.length === 1 ? '' : 's'} between sources need${conflicts.length === 1 ? 's' : ''} resolving.` : '');
     if (calculation?.status === 'ok') summary += ` Calculation: ${calculation.message}`;
@@ -478,8 +576,8 @@ export function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSn
       siteCondition: snapshot?.changeRequest ? { id: snapshot.changeRequest.id, description: snapshot.changeRequest.description } : null,
       facts: ctx.facts,
     },
-    status, summary, explanation: supported, unresolved, exceptions, missing, followUps, sources, conflicts, excluded, calculation,
-    timings: { retrievalMs: round(retrievalMs), calculationMs: round(calculationMs), totalMs: round(totalMs) },
+    status, summary, explanation: supported, unresolved, exceptions, missing, followUps, sources, conflicts, excluded, calculation, attachments,
+    timings: { retrievalMs: round(retrievalMs), calculationMs: round(calculationMs), compositionMs: round(compositionMs), modelMs: null, totalMs: round(totalMs) },
   };
 }
 const round = (n: number) => Math.round(n * 10) / 10;

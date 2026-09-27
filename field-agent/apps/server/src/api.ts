@@ -16,6 +16,8 @@ import { defaultWorkPackages, workPackageRouter } from './work-packages/router.j
 import type { WorkPackageService } from './work-packages/service.js';
 import { SourceStore } from './sources/store.js';
 import { sourceRouter } from './sources/router.js';
+import { UploadService } from './uploads/service.js';
+import { uploadRouter } from './uploads/router.js';
 
 /** Serialize asynchronous upload/replay operations for each task, including retry races. */
 class TaskCommands {
@@ -26,7 +28,7 @@ class TaskCommands {
     try {return await next;} finally {if(this.tails.get(id)===next)this.tails.delete(id);}
   }
 }
-export function createApp(service:FieldService,options:{token:string;webDir?:string;workPackages?:WorkPackageService;workPackageExports?:WorkPackageExports;workPackageDetails?:(id:string)=>unknown;sources?:SourceStore}) {
+export function createApp(service:FieldService,options:{token:string;webDir?:string;workPackages?:WorkPackageService;workPackageExports?:WorkPackageExports;workPackageDetails?:(id:string)=>unknown;sources?:SourceStore;uploads?:UploadService}) {
   if(options.token.length<16) throw new Error('Application token must contain at least 16 characters');
   const app=new Hono(), commands=new TaskCommands();
   app.use('*',async(c,next)=>{await next();c.header('X-Content-Type-Options','nosniff');c.header('Referrer-Policy','no-referrer');});
@@ -35,7 +37,9 @@ export function createApp(service:FieldService,options:{token:string;webDir?:str
     if(actual.length!==expected.length||!timingSafeEqual(actual,expected))return c.json({error:'接続トークンが必要です'},401);
     c.header('Cache-Control','no-store');await next();
   });
-  app.use('/api/*',bodyLimit({maxSize:21*1024*1024,onError:c=>c.json({error:'送信データが大きすぎます'},413)}));
+  // File uploads carry their own, larger limit (uploads/router.ts).
+  const apiLimit=bodyLimit({maxSize:21*1024*1024,onError:c=>c.json({error:'送信データが大きすぎます'},413)});
+  app.use('/api/*',(c,next)=>c.req.method==='POST'&&c.req.path==='/api/uploads'?next():apiLimit(c,next));
   const op=(header:string|undefined)=>safeId(header??randomUUID());
   app.get('/api/health',c=>c.json({ok:true,ruleId:RULE.id}));
   app.get('/api/rules',c=>c.json(ADOPTED_RULES));
@@ -137,7 +141,10 @@ export function createApp(service:FieldService,options:{token:string;webDir?:str
   const workPackages=options.workPackages??defaultWorkPackages(service.store);
   app.route('/api/work-packages',workPackageRouter(workPackages,options.workPackageDetails));
   // Ask Sprink: source library and questions, in the same database and behind the same token.
-  app.route('/api',sourceRouter(options.sources??new SourceStore(service.store.db),id=>workPackages.get(id)));
+  const sources=options.sources??new SourceStore(service.store.db);
+  const uploads=options.uploads??new UploadService(service.store.db,service.dataDir,sources);
+  app.route('/api',uploadRouter(uploads));
+  app.route('/api',sourceRouter(sources,id=>workPackages.get(id),uploads));
   if(options.workPackageExports) app.route('/api/work-packages',exportRoutes(options.workPackageExports));
   app.all('/api/*',c=>c.json({error:'APIが見つかりません'},404));
   app.onError((error,c)=>{
