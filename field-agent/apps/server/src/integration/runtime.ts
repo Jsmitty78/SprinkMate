@@ -54,6 +54,7 @@ import { materialDescription } from "./describe.js";
 import { exportSnapshot } from "./snapshot.js";
 import { SourceStore } from "../sources/store.js";
 import { planQuery } from "../sources/retrieve.js";
+import { PackageError } from "../work-packages/validation.js";
 
 export const INTEGRATION_VERSION = "scenario-integration-8-agent-selected-rules";
 function generationRecovery(path: string, message: string): string {
@@ -84,6 +85,19 @@ export interface IntegratedState {
   details: Detail[];
   acknowledgedQuestions?: string[];
   latestRun?: RunRecord;
+}
+/** Execution evidence, not passing findings or an exhaustive regulatory checklist. */
+function unreviewedCandidates(s: Readonly<WorkPackageSnapshot>, state?: IntegratedState): string[] {
+  const candidates = s.outputs.candidates;
+  const current = (v: {inputRevision:number;configVersion:string}) => v.inputRevision === s.inputRevision && v.configVersion === s.configVersion;
+  if (!candidates || !current(candidates) || !candidates.candidates.length) return ["current_candidates"];
+  const ids = candidates.candidates.map(c => c.plan.id);
+  if (!state || !current(state)) return ids;
+  return ids.filter(id => {
+    const detail = state.details.find(d => d.plan.id === id);
+    return !detail || !["package", "evaluation"].every(kind => state.refs.some(r => current(r) && r.kind === kind && r.subjectId === id))
+      || !detail.ruleExecutions?.some(e => (e.result as {executionStatus?:string}).executionStatus === "executed");
+  });
 }
 export class IntegrationStore {
   constructor(private store: WorkPackageStore) {
@@ -309,6 +323,11 @@ export function createIntegratedServices(
     },
   });
   const runner: WorkPackageRunner = {
+    validateSelection(s) {
+      const state = detailStore.get(s.id);
+      if (unreviewedCandidates(s, state).length || !state?.refs.some(r => r.kind === "comparison" && r.subjectId === s.outputs.candidates?.id && r.inputRevision === s.inputRevision && r.configVersion === s.configVersion))
+        throw new PackageError(409, "candidate_review_incomplete");
+    },
     async execute(context) {
       const initial = context.snapshot,
         prior = detailStore.get(initial.id);
@@ -377,6 +396,10 @@ export function createIntegratedServices(
           const s = current();
           const base = s.baselinePlan;
           const gaps: WorkSnapshot["gaps"] = [];
+          if (s.intent === "adapt_to_site") {
+            const missing = unreviewedCandidates(s, state);
+            if (missing.length) gaps.push({id:"candidate_review_incomplete",description:`Calculate and execute a JEV-selected rule for every current candidate before comparing or asking for adoption. Missing: ${missing.join(", ")}. Unknown findings are allowed; an unexecuted check is not a review.`,blocks:["compare_candidates"]});
+          }
           if (
             state.candidates?.inputRevision === s.inputRevision &&
             !state.candidates.candidates.length

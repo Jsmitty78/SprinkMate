@@ -588,3 +588,48 @@ it("executes each catalog adapter on every synthetic site plan without domain ex
   }
   expect(errors).toEqual([]);
 });
+
+
+it.each(["uncalculated", "unevaluated", "baseline-only", "one-candidate", "pending-rule", "unimplemented-rule", "stale-evaluation", "stale-state", "unknown-reviewed"] as const)("guards comparison, adoption questions and the selection API: %s", async mode => {
+  const steps: {name:string;arguments:Record<string,unknown>}[] = [];
+  const stateFilter = mode === "pending-rule" ? "source_pending" : mode === "unimplemented-rule" ? "unimplemented" : undefined;
+  const ruleId = stateFilter ? getProjectRuleCatalog().find(r=>r.implementationStatus === stateFilter)!.id : "N01_SF_EDITION_BASIS";
+  const choice: ChoiceClient = {async choose(request) {
+    const ids = Object.keys(request.questions.next_action.criteria);
+    return {...request.state,response:{model:request.model,answers:{next_action:{type:"choice",choice:ruleId,confidence:1,probabilities:Object.fromEntries(ids.map(id=>[id,id===ruleId?1:0]))}}}};
+  }};
+  const t = setup(choice, scriptedStream(steps)), initial = await create(t,3);
+  const call = (name:string,args:Record<string,unknown>={}) => ({name,arguments:args});
+  const stop = () => call("finish_work",{status:"blocked",explanation:"Regression phase boundary"});
+  steps.push(call("generate_change_candidates",{subjectId:initial.changeRequest!.id}));
+  if(mode !== "uncalculated") steps.push(call("derive_work_package",{subjectId:initial.baselinePlan!.id}));
+  steps.push(stop());
+  const generated = await run(t,initial.id), candidates = generated.outputs.candidates!;
+  expect(candidates.candidates).toHaveLength(2);
+  if(!["uncalculated","unevaluated"].includes(mode)) {
+    const subjectId = mode === "baseline-only" ? initial.baselinePlan!.id : mode === "one-candidate" ? candidates.candidates[0].plan.id : initial.id;
+    steps.push(call("select_verification_rule",{context:"Select the test rule"}),call("evaluate_work_package",{subjectId,ruleId}),stop());
+    await run(t,initial.id);
+  }
+  const state = t.detailStore.get(initial.id)!;
+  if(mode === "stale-evaluation") state.refs.filter(r=>r.kind === "evaluation").forEach(r=>r.inputRevision--);
+  if(mode === "stale-state") state.inputRevision--;
+  // A pre-existing empty comparison reference must not bypass the new guard.
+  if(mode !== "unknown-reviewed") state.refs.push({id:"old-empty-comparison",kind:"comparison",subjectId:candidates.id,inputRevision:generated.inputRevision,configVersion:generated.configVersion});
+  t.detailStore.save(initial.id,state);
+  steps.push(call("compare_candidates",{subjectId:candidates.id}),...['drawing','sources','results','answers'].map(kind=>call("inspect_saved_information",{kind})),call("request_input",{id:"adopt",text:"Choose a candidate",subjectId:initial.changeRequest!.id,kind:"candidate_selection"}),stop());
+  const result = await run(t,initial.id);
+  const reviewed = mode === "unknown-reviewed";
+  expect(result.run?.status).toBe(reviewed ? "waiting_input" : "blocked");
+  expect(t.detailStore.get(initial.id)?.latestRun?.question?.kind).toBe(reviewed ? "candidate_selection" : undefined);
+  const comparison = t.toolResults.filter(r=>r.name === "compare_candidates").at(-1)!;
+  if(!reviewed) expect(JSON.stringify(comparison)).toContain("candidate_review_incomplete");
+  else expect(t.detailStore.get(initial.id)!.details.every(d=>d.profile!.checks.some(c=>c.status === "unknown"))).toBe(true);
+  const response = await t.app.request(`/api/work-packages/${initial.id}/selection`,{
+    method:"POST",headers:{Authorization:"Bearer integration-test-token","Content-Type":"application/json"},
+    body:JSON.stringify({expectedRevision:result.inputRevision,planId:candidates.candidates[0].plan.id}),
+  });
+  expect(response.status).toBe(reviewed ? 200 : 409);
+  if(!reviewed) {expect(await response.text()).toContain("candidate_review_incomplete");expect(t.packages.get(initial.id).selectedPlan).toBeNull();}
+  else expect(t.packages.get(initial.id).selectedPlan?.id).toBe(candidates.candidates[0].plan.id);
+});

@@ -170,7 +170,7 @@ export class WorkflowRunner {
           if(args.kind==='candidate_selection') {
             const outputs=currentOutputs(snapshot);
             const candidates=outputs.find(output=>output.kind==='candidates' && output.subjectId===snapshot.changeRequestId);
-            if(snapshot.intent!=='adapt_to_site' || !candidates || !outputs.some(output=>output.kind==='comparison' && output.subjectId===candidates.id))
+            if(snapshot.intent!=='adapt_to_site' || !candidates || snapshot.gaps.some(g=>g.blocks.includes('compare_candidates')) || !outputs.some(output=>output.kind==='comparison' && output.subjectId===candidates.id))
               return {error:'Generate and compare current candidates before requesting user adoption.'};
           }
           const missing=['drawing','sources','results','answers'].filter(kind=>!researched.has(kind));
