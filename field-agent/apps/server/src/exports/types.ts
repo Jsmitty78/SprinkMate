@@ -31,6 +31,8 @@ export interface CutRow {
   status: ValueStatus;
   sourceIds: string[];
   unresolvedReason: string | null;
+  /** Modeled centerline in the same unit; for a traced drawing, a plan projection. */
+  centerline?: number | null;
 }
 export interface AssemblyStep {
   id: string;
@@ -78,6 +80,8 @@ export interface ExportSnapshot {
   sources: { id: string; title: string; reference: string }[];
   /** Saved inputs as entered, with their basis, so a test assumption is never read as a measurement. */
   inputs?: InputRow[];
+  /** Entities outside the scope: shown for traceability, never part of the work or a purchase. */
+  retainedContext?: { id: string; kind: string; label: string | null }[];
 }
 export interface InputRow {
   id: string;

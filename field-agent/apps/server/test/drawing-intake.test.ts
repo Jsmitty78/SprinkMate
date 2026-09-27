@@ -8,6 +8,7 @@ import { WorkPackageStore } from "../src/work-packages/store.js";
 import { createIntegratedServices } from "../src/integration/runtime.js";
 import { exportSnapshot } from "../src/integration/snapshot.js";
 import { renderPdf } from "../src/exports/pdf.js";
+import { csvFiles } from "../src/exports/csv.js";
 import { fs01Trace, fs01View, MM_PER_PT } from "./fs01-fixture.js";
 
 const cleanup: (() => void)[] = [];
@@ -81,5 +82,43 @@ it("exports saved inputs with their basis, so a test assumption never reads as a
   await run(t, d.id);
   const snap = exportSnapshot(t.packages.get(d.id), t.detailStore.get(d.id)!)!;
   expect(snap.inputs).toEqual([expect.objectContaining({ id: "clearance", value: 100, unit: "mm", status: "confirmed", basis: "test_assumption" })]);
+  expect((await renderPdf(snap)).subarray(0, 5).toString()).toBe("%PDF-");
+});
+
+// R2 of #1: source-only partial output. The source asks for 2" Schedule 40 steel; no product is selected.
+it("gives an honest R2 partial package: requirement not purchase, projected length, context, null cut with reasons", async () => {
+  const t = setup(), d = await drawing(t);
+  const detail = (id: string, field: string, value: string, subjectIds: string[] = [], source = "FM32361 FS-02 general notes") =>
+    ({ id, field, value, subjectIds, unit: null, unknownReason: null, confirmation: "confirmed" as const, context: "detailing" as const, source: { description: source, assetId: null, page: null } });
+  t.packages.edit(d.id, { expectedRevision: 1, patch: { sourceDrawing: d.sourceDrawing, ...fs01Trace(), detailing: [
+    detail("size", "nominalSize", '2"', ["p1"], "FS-01 pipe label"),
+    detail("req", "materialRequirement", "Schedule 40 black steel pipe with threaded cast-iron fittings"),
+    detail("p27", "sourceLabel", "P27", ["p1"], "FS-01"), detail("h1", "sourceLabel", "H1", ["h1"], "FS-01"), detail("h3", "sourceLabel", "H3", ["h2"], "FS-01"),
+    detail("j", "jurisdiction", "other", [], "Idaho project (test)"),
+  ] } });
+  const done = await run(t, d.id);
+  const result = done.outputs.results[0];
+  expect(result.materials).toHaveLength(1);
+  expect(result.materials[0].description).toMatch(/^Pipe, product not selected; nominal 2" \(as printed\); source requires: Schedule 40 black steel/);
+  expect(result.materials[0].quantity).toMatchObject({ value: null, basis: "unknown" });
+  expect(result.cuts[0].length.value).toBeNull();
+  for (const reason of ["Endpoint datum", "Pipe product not selected", "Projected plan length from the drawing"]) expect(result.cuts[0].length.reason).toContain(reason);
+  const text = result.assembly.map(a => a.instruction).join(" ");
+  expect(text).not.toMatch(/plastic|bevel|cement|FS-5|quarter/i);
+  expect(result.assembly[0].instruction).toBe("Detail cutting and end preparation for piece 1 once its product and connection are selected.");
+  // No San Francisco rules for another jurisdiction, and no product checks for retained context heads.
+  expect(result.evaluations.some(e => /NFPA 13-2025|head product/i.test(e.reason))).toBe(false);
+  expect(result.evaluations.find(e => /No executable rule pack/.test(e.reason))?.status).toBe("unknown");
+  // No CPVC cure question and no CPVC procedure cited for a product that is not selected.
+  expect(done.outputs.requests.some(r => /cure/i.test(r.question))).toBe(false);
+  expect(result.evaluations.find(e => /^Assembly has unresolved/.test(e.reason))?.sourceRefs).toEqual([]);
+
+  const snap = exportSnapshot(t.packages.get(d.id), t.detailStore.get(d.id)!)!;
+  expect(snap.cuts[0].centerline! * 1000).toBeCloseTo(3047.6613, 3);
+  expect(snap.retainedContext).toEqual([{ id: "h1", kind: "head", label: "H1" }, { id: "h2", kind: "head", label: "H3" }, { id: "c1", kind: "pipe", label: null }]);
+  expect(snap.materials[0]).toMatchObject({ quantity: null, status: "unresolved" });
+  const { bom, cuts } = csvFiles(snap);
+  expect(bom.toString()).toContain('"retained_context","h1","head H1: retained context, not part of this work","","","not_purchased"');
+  expect(cuts.toString()).toMatch(/"centerline_length"\r\n.*"3\.04766/);
   expect((await renderPdf(snap)).subarray(0, 5).toString()).toBe("%PDF-");
 });

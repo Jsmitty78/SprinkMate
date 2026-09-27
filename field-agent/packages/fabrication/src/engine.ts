@@ -7,6 +7,9 @@ import type {
 
 const FACTORS = { m: 1, mm: 0.001, ft: 0.3048, in: 0.0254 } as const;
 const unique = <T>(items: T[]) => [...new Set(items)];
+/** The product id adapters give a piece or fitting whose product has not been selected yet. */
+export const UNSELECTED_PRODUCT = "unsupported";
+const pipeReason = (productId: string) => productId === UNSELECTED_PRODUCT ? "Pipe product not selected" : `Unsupported pipe: ${productId}`;
 export function toMeters(length: Length): number {
   const result = length.value * FACTORS[length.unit];
   if (!Number.isFinite(result) || length.value < 0) throw new Error("Length must be finite, nonnegative, and have a supported unit");
@@ -191,7 +194,7 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
     if (cut !== null && cut <= 0) throw new Error(`Takeouts leave no positive cut: ${piece.id}`);
     return { pieceId: piece.id, callout: i + 1, sourceSegmentIds: [...piece.sourceSegmentIds], productId: piece.productId,
       subassemblyId: piece.subassemblyId, disposition: piece.disposition, start: structuredClone(start.position), end: structuredClone(end.position),
-      centerline, cutLength: metric(cut, combined.basis, [...combined.reasons, ...(!supported ? [`Unsupported pipe: ${piece.productId}`] : [])], combined.evidenceIds),
+      centerline, cutLength: metric(cut, combined.basis, [...combined.reasons, ...(!supported ? [pipeReason(piece.productId)] : [])], combined.evidenceIds),
       takeouts: ends, formula: "centerline - start.netTakeout - end.netTakeout" };
   });
   const joints: Joint[] = [];
@@ -223,8 +226,11 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
   for (const productId of unique(input.pieces.map(p => p.productId))) {
     const rows = cuts.filter(p => p.productId === productId);
     const supported = products.get(productId)?.kind === "pipe";
+    // Modeled pieces are not purchased lengths; without a selected product there is nothing to count.
     materials.push({ id: `pipe:${productId}`, kind: "pipe", productId, entityIds: rows.map(r => r.pieceId),
-      quantity: metric(rows.length, "confirmed_inputs", [], [], "each"), centerlineLength: total(rows.map(r => r.centerline)),
+      quantity: productId !== UNSELECTED_PRODUCT ? metric(rows.length, supported ? "confirmed_inputs" : "unknown", supported ? [] : [pipeReason(productId)], [], "each")
+        : metric(null, "unknown", [`${pipeReason(productId)}; purchase quantity is not established`], [], "each"),
+      centerlineLength: total(rows.map(r => r.centerline)),
       cutLength: total(rows.map(r => r.cutLength)), status: !supported ? "unsupported" : rows.some(r => r.cutLength.value === null) ? "unresolved" : "supported",
       reasons: unique(rows.flatMap(r => r.cutLength.reasons)) });
   }
@@ -233,7 +239,7 @@ export function deriveWorkPackage(input: FabricationInput, catalog: Catalog): Fa
     const supported = products.get(productId)?.kind === "elbow_90";
     materials.push({ id: `fitting:${productId}`, kind: "fitting", productId, entityIds: rows.map(r => r.id),
       quantity: metric(rows.length, "confirmed_inputs", [], [], "each"), centerlineLength: null, cutLength: null,
-      status: supported ? "supported" : "unsupported", reasons: supported ? [] : [`Unsupported fitting ${productId}`] });
+      status: supported ? "supported" : "unsupported", reasons: supported ? [] : [productId === UNSELECTED_PRODUCT ? "Fitting product not selected" : `Unsupported fitting ${productId}`] });
   }
   for (const accessory of input.accessories) {
     const value = read(input, accessory.quantity, accessory.id);
@@ -294,8 +300,9 @@ function buildOperations(input: FabricationInput, cuts: CutRow[], joints: Joint[
       ...(cut.cutLength.basis === "proposed_inputs" ? ["Confirm proposed geometry before fabrication"] : []),
       ...(cut.disposition === "proposed_reuse" ? ["Reuse feasibility and condition require separate confirmation"] : [])];
     if (!supported) {
-      add("resolve_preparation", [cut.pieceId], [], "Confirm end preparation, threading method, tools and physical cut dimensions for the selected pipe.",
-        [...reasons, "Pipe preparation needs a reviewed product-specific plan"], false);
+      add("resolve_preparation", [cut.pieceId], [], product ? "Confirm end preparation, threading method, tools and physical cut dimensions for the selected pipe."
+        : `Detail cutting and end preparation for piece ${cut.callout} once its product and connection are selected.`,
+        [...reasons, product ? "Pipe preparation needs a reviewed product-specific plan" : pipeReason(cut.productId)], false);
       continue;
     }
     add("cut_square", [cut.pieceId], [], `Cut piece ${cut.callout} square to the cut-list length with a suitable plastic-pipe tool.`, reasons, supported);

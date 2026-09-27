@@ -49,6 +49,7 @@ import {
   value,
 } from "./model.js";
 import { evaluateProfile, type ProfileOutput } from "./profiles.js";
+import { materialDescription } from "./describe.js";
 import { exportSnapshot } from "./snapshot.js";
 
 export const INTEGRATION_VERSION = "scenario-integration-3-steel-interval";
@@ -90,7 +91,12 @@ export class IntegrationStore {
   }
 }
 const geometry = createLocalGeometryPort(evaluateLocalPlanGeometry);
-function summary(d: Detail, api: PackagePlan): PackageResult {
+/** Cure questions belong to the solvent-cement catalog; a run without it is not asked for one. */
+function summary(
+  s: WorkPackageSnapshot,
+  d: Detail,
+  api: PackagePlan,
+): PackageResult {
   const f = d.fabrication,
     entities = new Set(api.entities.map((e) => e.id));
   const subjects = (ids: string[]) => ids.filter((id) => entities.has(id));
@@ -132,7 +138,7 @@ function summary(d: Detail, api: PackagePlan): PackageResult {
     materials: f.materials.map((m) => ({
       id: safe(m.id),
       entityIds: subjects(m.entityIds),
-      description: m.kind === "pipe" ? `${m.productId ?? "Unselected pipe"} (modeled spans; not purchasing stock)` : m.productId ?? m.kind,
+      description: materialDescription(s, m),
       quantity: q(m.quantity),
     })),
     cuts: f.cuts.map((c) => ({
@@ -216,6 +222,14 @@ function derive(
       }
     }
   }
+  // A run traced on a sheet is a plan projection: its length is useful, not a verified physical length.
+  // Generated candidates are planner geometry, not the trace, so they are not labelled this way.
+  if (s.sourceDrawing?.view && plan.id === s.baselinePlan?.id)
+    for (const c of fabrication.cuts)
+      if (c.cutLength.value === null)
+        c.cutLength.reasons.push(
+          "Projected plan length from the drawing, so physical length and elevation are not verified",
+        );
   for (const m of fabrication.materials.filter((m) => m.kind === "pipe")) {
     const rows = fabrication.cuts.filter((c) => c.productId === m.productId);
     if (rows.some((c) => c.cutLength.value === null)) {
@@ -377,7 +391,7 @@ export function createIntegratedServices(
               1,
             ],
           ] as const) {
-            if (key === "curePlan" && !base?.entities.some(e => fabricationCatalog(s.configVersion).products.some(p => p.id === e.productId && p.connection === "cpvc_socket_solvent"))) continue;
+            if (key === "curePlan" && !base?.entities.some(e => (s.intent === "adapt_to_site" ? !!s.changeRequest?.affectedEntityIds.includes(e.id) : !s.scope?.excludedEntityIds.includes(e.id)) && fabricationCatalog(s.configVersion).products.some(p => p.id === e.productId && p.connection === "cpvc_socket_solvent"))) continue;
             if (
               value(s, key).status === "unknown" &&
               !state.acknowledgedQuestions?.includes(key) &&
@@ -567,6 +581,7 @@ export function createIntegratedServices(
             state.details = result.payload as Detail[];
             const results = state.details.map((d) =>
               summary(
+                s,
                 d,
                 s.baselinePlan!.id === d.plan.id
                   ? s.baselinePlan!

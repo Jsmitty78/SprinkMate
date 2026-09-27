@@ -8,6 +8,7 @@ import {
   type ChangeRow,
 } from "../exports/types.js";
 import type { Detail, IntegratedState } from "./runtime.js";
+import { materialDescription, retainedContext } from "./describe.js";
 
 const isAssumption = (description: string) =>
   description.startsWith("ASSUMPTION:");
@@ -164,7 +165,7 @@ export function exportSnapshot(
     ...(s.intent === "adapt_to_site" ? { baselinePlan: view(baseline, s) } : {}),
     materials: f.materials.map((m) => ({
       id: m.id,
-      description: m.kind === "pipe" ? `${m.productId ?? "Unselected pipe"} (modeled spans; not purchasing stock)` : m.productId ?? m.id,
+      description: materialDescription(s, m),
       quantity: m.quantity.value,
       unit: m.quantity.unit,
       status: m.quantity.value === null ? "unresolved" : "known",
@@ -184,6 +185,7 @@ export function exportSnapshot(
         .map((j) => j.id),
       length: c.cutLength.value,
       unit: "m",
+      centerline: c.centerline.value,
       status: c.cutLength.value === null ? "unresolved" : "known",
       sourceIds: [...new Set([...c.centerline.evidenceIds, ...c.takeouts.flatMap(t => [...t.sourceIds, ...t.netTakeout.evidenceIds])])],
       unresolvedReason:
@@ -233,6 +235,7 @@ export function exportSnapshot(
         : []),
     ],
     sources: [...sources.values()],
+    retainedContext: retainedContext(s),
     inputs: [...s.siteFacts, ...s.detailing].map((x) => ({
       id: x.id,
       field: x.field,

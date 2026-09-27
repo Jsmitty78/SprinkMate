@@ -315,7 +315,7 @@ function topologySignature(plan: Plan): string {
 export interface Requirement { id: string; group: "Drawing" | "Run" | "Dimensions" | "Assembly" | "Project" | "Site"; label: string; done: boolean; hint?: string }
 
 export const PROJECT_BASIS: Array<{ field: string; label: string; options: Array<[string, string]> }> = [
-  { field: "jurisdiction", label: "Jurisdiction", options: [["san_francisco", "San Francisco (SFFD)"]] },
+  { field: "jurisdiction", label: "Jurisdiction", options: [["san_francisco", "San Francisco (SFFD)"], ["other", "Another jurisdiction (no rule pack in Sprink)"]] },
   { field: "standard", label: "Standard", options: [["nfpa13", "NFPA 13"]] },
   { field: "permitKind", label: "Permit kind", options: [["revision", "Revision"], ["new", "New"]] },
   { field: "originalNfpa13Edition", label: "NFPA 13 edition of the original permit", options: [["2025", "2025"], ["2022", "2022"], ["2019", "2019"]] },
@@ -325,6 +325,17 @@ export const PROJECT_BASIS: Array<{ field: string; label: string; options: Array
   { field: "storage", label: "Occupancy storage", options: [["non_storage", "Non-storage"], ["storage", "Storage"]] },
 ];
 
+/** The basis questions still asked: after "another jurisdiction", the San Francisco questions do not apply. */
+export function projectBasis(s: WorkPackageSnapshot) {
+  if (!showSfInputs(s)) return [];
+  const j = findFact(s, "jurisdiction");
+  return isConfirmed(j) && j!.value !== "san_francisco" ? PROJECT_BASIS.slice(0, 1) : PROJECT_BASIS;
+}
+/** Sheet label (P27, H1) when the intake saved one. */
+export function sourceLabel(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">, id: string): string | null {
+  const v = findFact(s, "sourceLabel", id)?.value;
+  return typeof v === "string" && v ? v : null;
+}
 /** Entities outside the scope are retained context: shown, never part of the work. */
 export const contextIds = (s: Pick<WorkPackageSnapshot, "scope">): Set<string> => new Set(s.scope?.excludedEntityIds ?? []);
 export const inScope = (s: Pick<WorkPackageSnapshot, "scope">) => { const c = contextIds(s); return (id: string) => !c.has(id); };
@@ -357,13 +368,13 @@ export function requirements(s: WorkPackageSnapshot): Requirement[] {
         add({ id: `datum.${end}.${pipe.id}`, group: "Dimensions", label: `How the ${end} of ${pipe.id} is dimensioned`, done: isConfirmed(findFact(s, `datum.${end}`, pipe.id)) });
     for (const tie of plan.entities.filter(e => e.kind === "tie_in" && work(e.id)))
       add({ id: `netCutOffset.${tie.id}`, group: "Dimensions", label: `Net cut offset at tie-in ${tie.id}`, done: isConfirmed(findFact(s, "netCutOffset", tie.id)) });
-    for (const fit of plan.entities.filter(e => e.kind === "fitting" && work(e.id)))
+    for (const fit of plan.entities.filter(e => e.kind === "fitting" && work(e.id) && e.productId === ELBOW))
       for (const port of fit.ports)
         add({ id: `movement.${port.id}.${fit.id}`, group: "Assembly", label: `Joint movement at ${fit.id}/${port.id} can be made`, done: isConfirmed(findFact(s, `movement.${port.id}`, fit.id)) });
   }
   add({ id: "workAreaAccess", group: "Assembly", label: "Work-area access confirmed", done: isConfirmed(findFact(s, "workAreaAccess")) });
   if (showCpvcInputs(s)) add({ id: "curePlan", group: "Assembly", label: "Cement set and cure plan", done: isConfirmed(findFact(s, "curePlan")) });
-  for (const b of showSfInputs(s) ? PROJECT_BASIS : []) add({ id: b.field, group: "Project", label: b.label, done: isConfirmed(findFact(s, b.field)) });
+  for (const b of projectBasis(s)) add({ id: b.field, group: "Project", label: b.label, done: isConfirmed(findFact(s, b.field)) });
   if (s.intent === "adapt_to_site") {
     add({ id: "change", group: "Site", label: "Affected pipe chosen", done: !!s.changeRequest?.affectedEntityIds.length });
     const site = siteFrameOf(s);

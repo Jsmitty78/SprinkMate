@@ -92,6 +92,19 @@ The Site evidence tab records a discrepancy as reviewed geometry, never as a rer
 
 The export PDF now lists every saved input with its basis and status (`inputs` in the export snapshot). Generating routes around the box stays with #12: the planner still refuses a baseline with head entities, including retained context heads.
 
+## Preparation results (issue #11)
+
+What a drawing-only package (R2 in #1) now shows, in the browser and in the export:
+
+- **No product, no purchase.** A pipe with no selected product is described by what the source asks for (nominal size as printed, the material requirement and where it is stated) and the pieces it models. Its purchase quantity is unknown, not "1 each".
+- **No invented procedure.** Such a piece gets one step, "Detail cutting and end preparation once its product and connection are selected", instead of CPVC cutting, bevelling and cement steps. The cure-plan question and the joint-movement and cure inputs are asked only when the run uses the solvent-cement catalog.
+- **Projected length.** The cut list shows the projected centerline (3047.6613 mm for FS-01 P27) with the cut left unknown and each reason on its own line: tie-in offset, product, endpoint datum, and that a traced length is a plan projection.
+- **Retained context.** Heads and adjacent pipe outside the scope are listed with their sheet labels (H1, H3, P30, P28). They are not detailed, connected or purchased. The export PDF has a Retained context table and the BOM CSV has `retained_context` rows with status `not_purchased`.
+- **Cut CSV.** A `centerline_length` column is appended (same unit as `cut_length`).
+- **Rules that apply.** A jurisdiction other than San Francisco can be chosen; the San Francisco rule packs are then not run and the checks say no rule pack covers the project. Retained context heads get no head-product check, and the assembly check cites the CPVC procedure only when a step uses it.
+
+![Materials for FS-01 P27 with no product selected](ui/prep-materials.png) ![Retained context](ui/prep-context.png) ![Assembly without invented steps](ui/prep-assembly.png)
+
 ## Checks
 
 ```
