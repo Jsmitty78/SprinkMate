@@ -14,14 +14,20 @@ export interface Source {
   id: string; url: string; document: string; revision: string; pages: string;
   sha256: string;
 }
+export type ConnectionMethod = "cpvc_socket_solvent" | "steel_threaded" | "unsupported";
+export type ProcedureId = "spears-fg3-socket-1in" | "anvil-351-threaded";
 export interface PipeProduct {
   id: string; kind: "pipe"; label: string; nominalSize: string;
-  outsideDiameter: Length; connection: "cpvc_socket_solvent";
+  outsideDiameter: Length; connection: ConnectionMethod;
+  preparation?: "spears-fg3" | "steel_threaded";
+  limitations?: string[];
   sourceIds: string[];
 }
 export interface ElbowProduct {
   id: string; kind: "elbow_90"; label: string; nominalSize: string;
-  connection: "cpvc_socket_solvent"; compatiblePipeIds: string[];
+  connection: ConnectionMethod; compatiblePipeIds: string[];
+  procedureId?: ProcedureId;
+  limitations?: string[];
   centerToFace: Length | null;
   /** G: centerline intersection to socket bottom. No field tolerance is added. */
   centerToSocketBottom: Length | null;
@@ -51,12 +57,19 @@ export interface Piece {
   subassemblyId: string;
   disposition: "new" | "proposed_reuse";
 }
+/** Bound to the selected pair; changing products invalidates this input. */
+export interface ThreadMakeup {
+  pipeProductId: string; fittingProductId: string;
+  axialEngagement: Value<Length>;
+}
 export interface Port {
   id: string;
   pieceId: string;
   end: "start" | "end";
   /** Shop vs field is planning intent, not an observation. */
   location: "shop" | "field";
+  /** Face to final pipe end, scoped to fittingId/portId. Never inferred from turns. */
+  threadMakeup?: ThreadMakeup;
 }
 export interface Fitting {
   id: string; sourceEntityIds: string[]; productId: string; nodeId: string;
@@ -88,6 +101,8 @@ export interface FabricationInput {
     jointMovement: Record<string, Value<boolean>>;
     /** Reviewed, project-specific set/cure plan with manufacturer section and conditions. */
     curePlan: Value<string>;
+    /** Preparation/sealant/tool plan scoped to each threaded joint and product pair. */
+    threadedJointPlan?: Record<string, Value<string>>;
   };
 }
 export interface Metric {
@@ -126,7 +141,7 @@ export interface Joint {
   nodeId: string; fittingId: string | null; portId: string | null;
   subassemblyId: string; location: "shop" | "field";
   orientation: string | null;
-  procedureId: "spears-fg3-socket-1in" | null;
+  procedureId: ProcedureId | null;
   reasons: string[];
 }
 export interface Operation {
