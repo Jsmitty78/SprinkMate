@@ -3,7 +3,7 @@ import type { PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "./api.js";
 import { lengthInput, lengthText, parseLength, toMetres } from "./format.js";
 import {
-  BOX_KEYS, buildRun, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
+  activeDetailingPlan, BOX_KEYS, buildRun, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
   syncRunDraft, type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
 } from "./model.js";
 import { Badge, Button, Callout, Field, Icon, Section } from "./ui.js";
@@ -247,7 +247,7 @@ export function FactRow({ s, act, busy, unit, setNotice, spec }: Common & { spec
 
 export function DetailingInputs(props: Common & { callouts: Callouts }) {
   const { s, callouts } = props;
-  const plan = s.baselinePlan;
+  const plan = activeDetailingPlan(s);
   const pipes = plan?.entities.filter(e => e.kind === "pipe") ?? [];
   const ties = plan?.entities.filter(e => e.kind === "tie_in") ?? [];
   const fits = plan?.entities.filter(e => e.kind === "fitting") ?? [];
@@ -306,8 +306,9 @@ export function ChangeInputs({ s, act, busy, setNotice, callouts }: Common & { c
   if (!pipes.length) return <p className="fa-muted">Enter the existing run first, then choose the piece the obstacle blocks.</p>;
   return <div className="fa-stack">
     <Field label="What did you find on site?"><textarea rows={2} value={desc} onChange={e => setDesc(e.target.value)} placeholder="e.g. Duct installed where the branch should run" /></Field>
-    <div className="fa-chips" role="group" aria-label="Affected pieces">{pipes.map(p => <label key={p.id} className={`fa-chip ${ids.includes(p.id) ? "is-on" : ""}`}>
-      <input type="checkbox" checked={ids.includes(p.id)} onChange={e => setIds(e.target.checked ? [...ids, p.id] : ids.filter(x => x !== p.id))} />Piece {callouts.piece.get(p.id)}
+    <p className="fa-muted small">Choose one straight interval. Remaining pipes, heads and connections are retained as protected context and excluded from this interval’s purchase quantities.</p>
+    <div className="fa-chips" role="radiogroup" aria-label="Active straight interval">{pipes.map(p => <label key={p.id} className={`fa-chip ${ids.includes(p.id) ? "is-on" : ""}`}>
+      <input type="radio" name="active-interval" checked={ids.includes(p.id)} onChange={() => setIds([p.id])} />Piece {callouts.piece.get(p.id)}
     </label>)}</div>
     <div className="fa-actions"><Button variant="primary" busy={busy === "change"} disabled={!!busy || !desc.trim() || !ids.length} onClick={() => void save()}>Save site condition</Button></div>
   </div>;

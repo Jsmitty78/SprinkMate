@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   evaluateLocalPlanGeometry,
+  adaptationInterval,
   type WorkPackageSnapshot,
   type PackageResult,
   type PackagePlan,
@@ -43,14 +44,14 @@ import {
   planningPlan,
   generationInput,
   apiCandidate,
-  packagePlan,
+  candidatePackage,
   safe,
   value,
 } from "./model.js";
 import { evaluateProfile, type ProfileOutput } from "./profiles.js";
 import { exportSnapshot } from "./snapshot.js";
 
-export const INTEGRATION_VERSION = "scenario-integration-2-steel";
+export const INTEGRATION_VERSION = "scenario-integration-3-steel-interval";
 export interface Detail {
   id: string;
   input: FabricationInput;
@@ -156,11 +157,11 @@ function summary(d: Detail, api: PackagePlan): PackageResult {
       reason: c.reason,
       sourceRefs: c.sourceRefs,
     })),
-    gaps: f.gaps.map((g, i) => ({
+    gaps: [...(f.intent === "adapt_to_site" ? [{ id: "protected-context", subjectIds: [], reason: "Quantities cover only the active interval. Remaining source geometry is retained context, not purchase material. Context clearance, support adequacy, fixed-end closure, physical dimensions and hydraulics remain unresolved." }] : []), ...f.gaps.map((g, i) => ({
       id: `gap-${i}`,
       subjectIds: subjects([g.subjectId]),
       reason: g.reason,
-    })),
+    }))],
   };
 }
 function derive(
@@ -339,6 +340,11 @@ export function createIntegratedServices(
                 "Supply the source drawing, structured run and work area",
               blocks: ["prepare_drawing_model"],
             });
+          if (s.intent === "adapt_to_site" && base && s.scope) {
+            try { adaptationInterval(s); } catch (error) {
+              gaps.push({ id: "unsupported-interval", description: error instanceof Error ? error.message : String(error), blocks: ["prepare_drawing_model", "generate_change_candidates"] });
+            }
+          }
           const addQuestion = (key: string, text: string, order: number) => {
             const answered = s.outputs.requests.find(
               (r) => r.id === requestId(key),
@@ -517,7 +523,7 @@ export function createIntegratedServices(
               baselinePlanId: s.baselinePlan!.id,
               searchDescription: state.candidates.searchCoverage,
               candidates: state.candidates.candidates.map((c) => ({
-                plan: packagePlan(c.plan, s.baselinePlan!),
+                plan: candidatePackage(c.plan, s),
                 metrics: [
                   {
                     name: "centerline_delta",
@@ -561,7 +567,7 @@ export function createIntegratedServices(
                   ? s.baselinePlan!
                   : s.selectedPlan?.id === d.plan.id
                     ? s.selectedPlan
-                    : packagePlan(d.plan, s.baselinePlan!),
+                    : candidatePackage(d.plan, s),
               ),
             );
             context.publish({ results });

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { PackagePlan, WorkPackageSnapshot } from "@field-agent/core";
+import { adaptationInterval, adaptationMillimetres, restoreAdaptation, type PackagePlan, type WorkPackageSnapshot } from "@field-agent/core";
 import {
   fabricationCatalog,
   toLocalPlanGeometry,
@@ -97,6 +97,9 @@ export function fabricationInput(
   s: WorkPackageSnapshot,
   plan: PackagePlan,
 ): FabricationInput {
+  if (s.intent === "adapt_to_site" && plan.id === s.baselinePlan?.id) {
+    plan = adaptationInterval(s).plan;
+  }
   if (!s.sourceDrawing || !s.scope || !s.baselinePlan)
     throw new Error("Drawing, scope and baseline are required");
   const pipes = plan.entities.filter((e) => e.kind === "pipe");
@@ -162,7 +165,7 @@ export function fabricationInput(
           `Unconnected endpoint ${p.id}/${end}; explicitly detail an open end or connection`,
         );
       if (!nodes.some((n) => n.id === nodeId)) {
-        const offset = other
+        const offset = other && (s.intent !== "adapt_to_site" || s.baselinePlan!.entities.find(e => e.id === other.id)?.kind === "tie_in")
           ? lengthValue(s, "netCutOffset", other.id)
           : {
               value: null,
@@ -353,16 +356,16 @@ function boxFact(s: WorkPackageSnapshot, prefix: string): Fact<Box> {
         !f ||
         f.confirmation !== "confirmed" ||
         typeof f.value !== "number" ||
-        f.unit !== "mm",
+        !["mm", "m", "in", "ft"].includes(f.unit ?? ""),
     )
   )
     return unknown();
   const point = (offset: number) => ({
-    x: fs[offset]!.value as number,
-    y: fs[offset + 1]!.value as number,
-    z: fs[offset + 2]!.value as number,
+    x: adaptationMillimetres(fs[offset]!.value as number, fs[offset]!.unit),
+    y: adaptationMillimetres(fs[offset + 1]!.value as number, fs[offset + 1]!.unit),
+    z: adaptationMillimetres(fs[offset + 2]!.value as number, fs[offset + 2]!.unit),
     unit: "mm" as const,
-    frameId: s.baselinePlan!.coordinateFrame.id,
+    frameId: adaptationInterval(s).plan.coordinateFrame.id,
   });
   return known(
     { kind: "axis_aligned_box", min: point(0), max: point(3) },
@@ -370,14 +373,6 @@ function boxFact(s: WorkPackageSnapshot, prefix: string): Fact<Box> {
   );
 }
 export function generationInput(s: WorkPackageSnapshot): GenerateInput {
-  if (
-    s.baselinePlan?.entities.some((e) =>
-      ["head", "support", "unsupported"].includes(e.kind),
-    )
-  )
-    throw new Error(
-      "Candidate generation is limited to an isolated span; protected heads/supports require an explicit impact adapter",
-    );
   const input = fabricationInput(s, s.baselinePlan!),
     baseline = planningPlan(s, input);
   baseline.ducts = [
@@ -401,8 +396,8 @@ export function generationInput(s: WorkPackageSnapshot): GenerateInput {
     requiredPipeClearance:
       clearance?.confirmation === "confirmed" &&
       typeof clearance.value === "number" &&
-      clearance.unit === "mm"
-        ? known({ value: clearance.value, unit: "mm" }, [clearance.id])
+      ["mm", "m", "in", "ft"].includes(clearance.unit ?? "")
+        ? known({ value: adaptationMillimetres(clearance.value, clearance.unit), unit: "mm" }, [clearance.id])
         : unknown(),
     product: toPlanningProduct(fabricationCatalog(s.configVersion),
       input.pieces.find(p => p.id === s.changeRequest?.affectedEntityIds[0])?.productId ?? null),
@@ -488,4 +483,9 @@ export function packagePlan(plan: Plan, baseline: PackagePlan): PackagePlan {
     entities,
     connections,
   };
+}
+
+/** Public plans preserve source context; internal planning/quantities cover the active interval. */
+export function candidatePackage(plan: Plan, s: WorkPackageSnapshot): PackagePlan {
+  return restoreAdaptation(packagePlan(plan, adaptationInterval(s).plan), s);
 }

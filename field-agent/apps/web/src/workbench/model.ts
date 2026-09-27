@@ -1,3 +1,4 @@
+import { adaptationInterval } from "@field-agent/core";
 import type { PackageInputs, PackagePlan, PackageResult, WorkPackageSnapshot } from "@field-agent/core";
 import { lengthInput, parseLength } from "./format.js";
 
@@ -282,6 +283,14 @@ export const PROJECT_BASIS: Array<{ field: string; label: string; options: Array
   { field: "storage", label: "Occupancy storage", options: [["non_storage", "Non-storage"], ["storage", "Storage"]] },
 ];
 
+/** Only request detailing for the active interval; retained context is not a new-work item. */
+export function activeDetailingPlan(s: WorkPackageSnapshot): Plan | null {
+  if (s.intent !== "adapt_to_site" || !s.baselinePlan) return s.baselinePlan;
+  const ids = s.changeRequest?.affectedEntityIds ?? [];
+  const adjacent = s.baselinePlan.connections.flatMap(c => ids.includes(c.from.entityId) ? [c.to.entityId] : ids.includes(c.to.entityId) ? [c.from.entityId] : []);
+  return { ...s.baselinePlan, entities: s.baselinePlan.entities.filter(e => ids.includes(e.id) || (e.kind === "tie_in" && adjacent.includes(e.id))) };
+}
+
 /** Presence checks only; the server decides whether the inputs are sufficient. */
 export function requirements(s: WorkPackageSnapshot): Requirement[] {
   const out: Requirement[] = [];
@@ -289,7 +298,7 @@ export function requirements(s: WorkPackageSnapshot): Requirement[] {
   const d = s.sourceDrawing;
   add({ id: "drawing", group: "Drawing", label: "Source drawing uploaded", done: !!d?.assetId });
   add({ id: "scale", group: "Drawing", label: "Drawing scale confirmed", done: d?.scale.basis === "confirmed_inputs", hint: d?.scale.reason ?? undefined });
-  const plan = s.baselinePlan;
+  const plan = activeDetailingPlan(s);
   add({ id: "run", group: "Run", label: "Run entered (points, elbows, ends)", done: !!plan?.entities.length && !!s.scope });
   add({ id: "run-confirmed", group: "Run", label: "Run dimensions confirmed against the drawing", done: plan?.confirmation === "confirmed" });
   if (plan) {
@@ -399,6 +408,10 @@ export function runBlockers(s: WorkPackageSnapshot): string[] {
   if (!s.sourceDrawing) out.push("Upload the source drawing.");
   if (!s.baselinePlan || !s.scope) out.push("Enter and save the run.");
   const plan = s.baselinePlan;
+  if (plan && s.intent === "adapt_to_site" && s.scope) {
+    try { adaptationInterval(s); } catch (e) { out.push(e instanceof Error ? e.message : String(e)); }
+    return out;
+  }
   if (plan) {
     const connected = new Set(plan.connections.flatMap(c => [`${c.from.entityId}/${c.from.portId}`, `${c.to.entityId}/${c.to.portId}`]));
     for (const pipe of plan.entities.filter(e => e.kind === "pipe"))
