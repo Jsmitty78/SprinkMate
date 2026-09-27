@@ -20,6 +20,7 @@ const PATHS: Record<string, ReactNode> = {
   upload: <><path d="M12 16V4M7 9l5-5 5 5" /><path d="M5 20h14" /></>,
   x: <path d="M6 6l12 12M18 6L6 18" />,
   external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v6H4V6h6" /></>,
+  ask: <><circle cx="11" cy="11" r="7" /><path d="M20.5 20.5l-4.5-4.5" /><path d="M9.2 9.2a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.4" /><path d="M11 14.6v.2" /></>,
   camera: <><path d="M4 8h3l2-3h6l2 3h3v12H4z" /><circle cx="12" cy="13" r="3.5" /></>,
 };
 

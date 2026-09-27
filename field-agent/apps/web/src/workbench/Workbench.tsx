@@ -8,6 +8,7 @@ import { PlanCanvas } from "./PlanCanvas.js";
 import { hasSampleData, sampleDrawing, sampleInputs } from "./sample.js";
 import { Badge, Button, Callout, Icon, Section, Spinner } from "./ui.js";
 import { usePackage } from "./usePackage.js";
+import { AskPanel } from "./ask/AskPanel.js";
 
 type Tab = "inputs" | "materials" | "assembly" | "checks" | "site" | "routes" | "package";
 const TABS: Record<"prepare" | "adapt", Array<[Tab, string]>> = {
@@ -27,6 +28,7 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
   const [unit, setUnit] = useState<Unit>(() => { try { return localStorage.getItem("field-agent.unit") === "mm" ? "mm" : "in"; } catch { return "in"; } });
   const [exportOpen, setExportOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
   useEffect(() => { try { localStorage.setItem("field-agent.unit", unit); } catch { /* ignore */ } }, [unit]);
 
   const mode = s?.intent === "adapt_to_site" ? "adapt" : "prepare";
@@ -97,6 +99,7 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
   const d = s.sourceDrawing;
   const crumbs = <><button type="button" className="fa-crumb" onClick={onHome}>{s.projectId}</button><span>/</span><span className="fa-crumb-current">{s.title}</span></>;
   const right = <><label className="fa-unit"><span className="sr-only">Units</span><select value={unit} onChange={e => setUnit(e.target.value as Unit)}><option value="in">ft-in</option><option value="mm">mm</option></select></label>
+    <Button onClick={() => setAskOpen(true)} aria-expanded={askOpen}><Icon name="ask" size={16} /><span className="fa-hide-sm">Ask Sprink</span></Button>
     <Button onClick={() => setExportOpen(true)}><Icon name="download" size={16} />Export</Button></>;
 
   const common = { s, act: pkg.act, busy: pkg.busy, unit, setNotice: pkg.setNotice };
@@ -158,6 +161,7 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
         <button type="button" className={tool === "select" && view === "plan" ? "is-on" : ""} onClick={() => { setTool("select"); setView("plan"); }} title="Select" aria-label="Select"><Icon name="select" /></button>
         <button type="button" className={tool === "pan" && view === "plan" ? "is-on" : ""} onClick={() => { setTool("pan"); setView("plan"); }} title="Pan" aria-label="Pan"><Icon name="pan" /></button>
         <button type="button" className={view === "drawing" ? "is-on" : ""} onClick={() => setView(view === "drawing" ? "plan" : "drawing")} title="Source drawing" aria-label="Source drawing" disabled={!d}><Icon name="drawing" /></button>
+        <button type="button" className={askOpen ? "is-on" : ""} onClick={() => setAskOpen(!askOpen)} title="Ask Sprink" aria-label="Ask Sprink"><Icon name="ask" /></button>
         <span className="fa-rail-gap" />
         <button type="button" onClick={() => void pkg.reload()} title="Reload" aria-label="Reload"><Icon name="refresh" /></button>
       </nav>
@@ -211,6 +215,7 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
         </div>
       </aside>
     </div>
+    {askOpen && <AskPanel s={s} selectedPiece={piece} onClose={() => setAskOpen(false)} />}
     {exportOpen && <ExportDialog s={s} artifacts={artifactsCurrent} ready={mode === "prepare" ? !!base.result && base.current : !!selectedId && selectedResult.current} busy={pkg.busy} running={running}
       onCreate={() => void start("export_selected_package", "export")} onClose={() => setExportOpen(false)} />}
   </>;

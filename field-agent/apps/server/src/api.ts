@@ -13,6 +13,8 @@ import { AppError, type Observation } from './models.js';
 import { FieldService, safeId } from './service.js';
 import { defaultWorkPackages, workPackageRouter } from './work-packages/router.js';
 import type { WorkPackageService } from './work-packages/service.js';
+import { SourceStore } from './sources/store.js';
+import { sourceRouter } from './sources/router.js';
 
 /** Serialize asynchronous upload/replay operations for each task, including retry races. */
 class TaskCommands {
@@ -23,7 +25,7 @@ class TaskCommands {
     try {return await next;} finally {if(this.tails.get(id)===next)this.tails.delete(id);}
   }
 }
-export function createApp(service:FieldService,options:{token:string;webDir?:string;workPackages?:WorkPackageService;workPackageExports?:WorkPackageExports;workPackageDetails?:(id:string)=>unknown}) {
+export function createApp(service:FieldService,options:{token:string;webDir?:string;workPackages?:WorkPackageService;workPackageExports?:WorkPackageExports;workPackageDetails?:(id:string)=>unknown;sources?:SourceStore}) {
   if(options.token.length<16) throw new Error('Application token must contain at least 16 characters');
   const app=new Hono(), commands=new TaskCommands();
   app.use('*',async(c,next)=>{await next();c.header('X-Content-Type-Options','nosniff');c.header('Referrer-Policy','no-referrer');});
@@ -121,7 +123,10 @@ export function createApp(service:FieldService,options:{token:string;webDir?:str
       }
     });
   });
-  app.route('/api/work-packages',workPackageRouter(options.workPackages??defaultWorkPackages(service.store),options.workPackageDetails));
+  const workPackages=options.workPackages??defaultWorkPackages(service.store);
+  app.route('/api/work-packages',workPackageRouter(workPackages,options.workPackageDetails));
+  // Ask Sprink: source library and questions, in the same database and behind the same token.
+  app.route('/api',sourceRouter(options.sources??new SourceStore(service.store.db),id=>workPackages.get(id)));
   if(options.workPackageExports) app.route('/api/work-packages',exportRoutes(options.workPackageExports));
   app.all('/api/*',c=>c.json({error:'APIが見つかりません'},404));
   app.onError((error,c)=>{
