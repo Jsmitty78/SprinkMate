@@ -302,11 +302,14 @@ export function sourceRequirementsPatch(cur: Snapshot, values: {
   };
   // The shared size input starts with the first span. Saving another field must
   // preserve differing sizes and evidence on every other span.
-  if (size.trim() !== (nominal?.value ?? "") || (!mixedNominal && values.nominalProvenance !== undefined && values.nominalProvenance !== factProvenance(nominal))) {
+  const sizeChanged = size.trim() !== (nominal?.value ?? "");
+  if (sizeChanged || (!mixedNominal && values.nominalProvenance !== undefined && values.nominalProvenance !== factProvenance(nominal))) {
     for (const id of pipes) {
       const previous = findFact(cur, "nominalSize", id);
+      const nextSize = sizeChanged ? size.trim() : previous?.value;
+      if (typeof nextSize !== "string") continue;
       const selected = (!mixedNominal ? values.nominalProvenance : undefined) ?? (previous ? factProvenance(previous) : provenance);
-      update("nominalSize", size.trim(), previous, selected, [id],
+      update("nominalSize", nextSize, previous, selected, [id],
         previous?.source.description ?? `Read by you from ${cur.sourceDrawing?.drawingId ?? "the drawing"} p${cur.sourceDrawing?.page ?? 1}`, previous?.source.page ?? cur.sourceDrawing?.page);
     }
   }

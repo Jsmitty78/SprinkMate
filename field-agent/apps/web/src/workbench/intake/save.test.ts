@@ -137,6 +137,27 @@ it.each([false, true])("preserves mixed per-span nominal evidence across unrelat
   expect(html).toContain('Sizes vary by span.');
 });
 
+it.each([false, true])("preserves different span sizes when only provenance changes (reversed=%s)", reversed => {
+  const s = independentRequirements(false);
+  const first = s.detailing.find(f => f.field === "nominalSize")!;
+  first.provenance = "user_entered";
+  first.confirmation = "proposed";
+  const second = { ...structuredClone(first), id: "nominal-second", subjectIds: ["p2"], value: "3 inch", source: { ...first.source, assetId: "supplement", page: 1 } };
+  s.detailing.push(second);
+  s.baselinePlan!.entities.push({ ...structuredClone(s.baselinePlan!.entities.find(e => e.id === "p1")!), id: "p2" });
+  s.scope!.includedEntityIds = reversed ? ["p2", "p1"] : ["p1", "p2"];
+  const values = { size: String((reversed ? second : first).value), text: "Schedule 40 steel", mat: "steel", provenance: "synthetic_assumption" as const, source: "Notes", page: 2 };
+  for (const provenance of ["confirmed_evidence", "user_entered"] as const) {
+    Object.assign(s, sourceRequirementsPatch(s, { ...values, nominalProvenance: provenance }));
+    for (const original of [first, second]) {
+      expect(s.detailing.find(f => f.field === "nominalSize" && f.subjectIds.includes(original.subjectIds[0]))).toMatchObject({
+        value: original.value, source: original.source, provenance,
+        confirmation: provenance === "confirmed_evidence" ? "confirmed" : "proposed",
+      });
+    }
+  }
+});
+
 it("retains nominal evidence for subjects outside the edited scope", () => {
   const s = independentRequirements(true);
   const nominal = s.detailing.find(f => f.field === "nominalSize")!;
