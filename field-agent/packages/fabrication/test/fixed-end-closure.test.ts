@@ -112,3 +112,26 @@ describe("fixed-end draft accounting", () => {
     expect(result.materials.find(m => m.id === "support")?.quantity.value).toBe(1);
   });
 });
+
+ it.each([false, true])("preserves run order for reversed pieces (preceding neighbor: %s)", preceding => {
+   const f = fixture(); f.input.nodes[1].datum = "fitting_center";
+   f.input.nodes.push({ id: "n2", datum: "tie_in", position: proposed({ x: 3000, y: 800, z: 0, unit: "mm", frameId: "local" }) });
+   f.input.pieces[0].startNodeId = "n1"; f.input.pieces[0].endNodeId = "n0";
+   const leg = { ...f.input.pieces[0], id: "leg", startNodeId: "n1", endNodeId: "n2" };
+   if (preceding) { f.input.pieces[0].startNodeId = "n0"; f.input.pieces[0].endNodeId = "n1"; f.input.pieces.unshift(leg); }
+   else f.input.pieces.push(leg);
+   f.input.fittings.push({ id: "corner", nodeId: "n1", productId: "unresolved-elbow", sourceEntityIds: ["corner"], ports: [
+     { id: "in", pieceId: "span", end: preceding ? "end" : "start", location: "shop" }, { id: "out", pieceId: "leg", end: "start", location: "shop" }] });
+   expect(() => deriveWorkPackage(f.input, f.catalog)).not.toThrow();
+   const out = derive(f);
+   expect(out.cuts.map(c => c.pieceId)).toEqual(preceding ? ["leg", "span/after-closure", "span/before-closure"] : ["span/after-closure", "span/before-closure", "leg"]);
+   expect(out.cuts.reduce((sum, c) => sum + c.centerline.value!, 0)).toBeCloseTo(3.8);
+ });
+ it("keeps proposed reuse on both closure halves", () => {
+   const f = fixture(); f.input.pieces[0].disposition = "proposed_reuse";
+   expect(derive(f).cuts.map(c => c.disposition)).toEqual(["proposed_reuse", "proposed_reuse"]);
+ });
+ it("rejects a collision with generated proposal evidence", () => {
+   const f = fixture(); f.input.evidence.push({ id: "closure/proposal", subjectIds: ["closure"], description: "Existing evidence" });
+   expect(() => derive(f)).toThrow("Closure evidence ID collides");
+ });

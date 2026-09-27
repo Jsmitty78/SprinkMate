@@ -75,12 +75,20 @@ export function deriveFixedEndClosure(input: FabricationInput, catalog: Catalog,
   const generated = [nodeId, fittingId, leftId, rightId, gasketId, boltsId];
   const existing = [...input.nodes, ...input.pieces, ...input.fittings, ...input.accessories].map(e => e.id);
   if (generated.some(id => existing.includes(id))) throw new Error("Closure IDs collide with existing entities");
+  const proposalEvidenceId = `${proposal.id}/proposal`;
+  if (input.evidence.some(e => e.id === proposalEvidenceId)) throw new Error("Closure evidence ID collides with existing evidence");
   const detailed = structuredClone(input);
   detailed.nodes.push({ id: nodeId, datum: "fitting_center",
     position: { ...structuredClone(proposal.station), status: "proposed", reason: "Proposed union reference, not a surveyed joint" } });
-  detailed.pieces.splice(index, 1,
-    { ...original, id: leftId, endNodeId: nodeId, disposition: "new" },
-    { ...original, id: rightId, startNodeId: nodeId, disposition: "new" });
+  const halves = [
+    { ...original, id: leftId, endNodeId: nodeId },
+    { ...original, id: rightId, startNodeId: nodeId },
+  ];
+  const previous = input.pieces[index - 1], next = input.pieces[index + 1];
+  const touches = (piece: typeof original, node: string) => piece.startNodeId === node || piece.endNodeId === node;
+  // Run order is independent of each piece's stored start/end orientation.
+  if (previous ? touches(previous, original.endNodeId) : next && touches(next, original.startNodeId)) halves.reverse();
+  detailed.pieces.splice(index, 1, ...halves);
   // Preserve the orientation of every existing fitting port and accessory link.
   for (const fitting of detailed.fittings) for (const port of fitting.ports) {
     if (port.pieceId === original.id) port.pieceId = port.end === "start" ? leftId : rightId;
@@ -131,7 +139,7 @@ export function deriveFixedEndClosure(input: FabricationInput, catalog: Catalog,
   }
   result.gaps.push(...reasons.map(reason => ({ subjectId: fittingId, reason })));
   if (!result.sources.some(s => s.id === FLANGED_UNION_SOURCE.id)) result.sources.push(structuredClone(FLANGED_UNION_SOURCE));
-  result.evidence.push({ id: `${proposal.id}/proposal`, subjectIds: [fittingId, nodeId, leftId, rightId, gasketId, boltsId],
+  result.evidence.push({ id: proposalEvidenceId, subjectIds: [fittingId, nodeId, leftId, rightId, gasketId, boltsId],
     description: "Developer-authored closure proposal, not performed work or practitioner approval. Gasket and bolt rows are included-component requirements, not extra purchases." });
   return result;
 }
