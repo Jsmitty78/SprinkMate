@@ -1,6 +1,6 @@
 # Sprink
 
-**Less time searching. More time on the job.**
+**Turn drawings and site changes into actionable work packages.**
 
 Sprink helps fire sprinkler fitters move from a field question or drawing to a reviewable next step: find the original reference, prepare materials and assembly information, or compare options when site conditions change.
 
