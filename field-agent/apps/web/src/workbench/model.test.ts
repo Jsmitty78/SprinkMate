@@ -157,11 +157,22 @@ describe("run edits", () => {
     expect(after.detailing.every(f => f.subjectIds.every(id => ids.has(id)))).toBe(true);
   });
 
-  it("treats a moved point as an unsaved change but ignores ft-in display rounding", () => {
-    expect(runChanged(three, three)).toBe(false);
-    expect(runChanged(three.map(n => ({ ...n, x: n.x === null ? null : n.x + 0.7 })), three)).toBe(false);
-    expect(runChanged(three.map((n, i) => i === 2 ? { ...n, y: 500 } : n), three)).toBe(true);
-    expect(runChanged(two, three)).toBe(true);
-    expect(runChanged(three, null)).toBe(true);
+  it("detects sub-millimetre edits before confirming dimensions", () => {
+    const saved: RunNode[] = [{ kind: "open_end", x: 0, y: 0 }, { kind: "open_end", x: 1000, y: 0 }];
+    expect(runChanged(saved, saved, "mm")).toBe(false);
+    for (const x of [1000.1, 1000.5, 999.9]) {
+      expect(runChanged([saved[0], { ...saved[1], x }], saved, "mm")).toBe(true);
+    }
+    expect(runChanged(two, three, "mm")).toBe(true);
+    expect(runChanged(three, null, "mm")).toBe(true);
+  });
+
+  it.each(["mm", "in"] as const)("allows untouched %s display rounding but detects edits to it", unit => {
+    const saved: RunNode[] = [{ kind: "open_end", x: 0, y: 0 }, { kind: "open_end", x: 1000.04, y: null }];
+    const displayed = saved.map(n => ({ ...n, x: parseLength(lengthInput(n.x, unit), unit), y: parseLength(lengthInput(n.y, unit), unit) }));
+    expect(runChanged(displayed, saved, unit)).toBe(false);
+    expect(runChanged([displayed[0], { ...displayed[1], x: displayed[1].x! + 0.1 }], saved, unit)).toBe(true);
+    expect(runChanged([displayed[0], { ...displayed[1], kind: "tie_in" }], saved, unit)).toBe(true);
+    expect(runChanged([displayed[0], { ...displayed[1], y: 0 }], saved, unit)).toBe(true);
   });
 });

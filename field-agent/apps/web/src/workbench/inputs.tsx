@@ -123,7 +123,7 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
   const nodes: RunNode[] = rows.map(r => ({ kind: r.kind, x: parseLength(r.x, unit), y: parseLength(r.y, unit) }));
   const built = buildRun(nodes, s.baselinePlan?.id ?? "baseline");
   const problems = "problems" in built ? built.problems : [];
-  const dirty = runChanged(nodes, saved);
+  const dirty = runChanged(nodes, saved, unit);
 
   const save = () => act("run", async cur => {
     if ("problems" in built) return;

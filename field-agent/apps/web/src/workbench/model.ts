@@ -1,4 +1,5 @@
 import type { PackageInputs, PackagePlan, PackageResult, WorkPackageSnapshot } from "@field-agent/core";
+import { lengthInput, parseLength } from "./format.js";
 
 /**
  * Pure helpers between the work-package contract and the screen. Nothing here calculates cuts,
@@ -67,10 +68,10 @@ export function dropOrphanFacts<T extends Pick<PackageInputs, "detailing" | "sit
   return { ...facts, detailing: facts.detailing.filter(live), siteFacts: facts.siteFacts.filter(live) };
 }
 
-/** True when two runs differ by more than display rounding (ft-in shows the nearest 1/16 in, under 1 mm off). */
-export function runChanged(a: RunNode[], b: RunNode[] | null): boolean {
+/** Compare edits with the saved run as displayed in the editor, without tolerating small user changes. */
+export function runChanged(a: RunNode[], b: RunNode[] | null, unit: "mm" | "in"): boolean {
   if (!b || a.length !== b.length) return true;
-  const off = (p: number | null, q: number | null) => p === null || q === null ? p !== q : Math.abs(p - q) >= 1;
+  const off = (p: number | null, q: number | null) => p !== parseLength(lengthInput(q, unit), unit);
   return a.some((n, i) => n.kind !== b[i].kind || off(n.x, b[i].x) || off(n.y, b[i].y));
 }
 
