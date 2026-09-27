@@ -172,12 +172,13 @@ export function evaluateProfile(
   const project = evaluateProject(request);
   // Intake requirements can be package-wide or scoped. Never borrow another entity's facts.
   const requirement = (field: string, subject: string) => {
-    const scoped = fact<string>(s, field, subject);
-    return scoped.evidenceIds.length ? scoped : fact<string>(s, field);
+    const scoped = fact<string | number | boolean>(s, field, subject);
+    return scoped.evidenceIds.length ? scoped : fact<string | number | boolean>(s, field);
   };
   const sourceFields = ["requiredConnectionMethod", "requiredPipeSpecification", "materialRequirement", "materialRequirement.material", "nominalSize"];
-  const nominal = (value: string | null) => {
-    const text = value?.trim().toLowerCase().replace(/^nps\s*/, "").replace(/\s*(?:inch(?:es)?|in|["″])$/, "").trim();
+  const nominal = (value: string | number | boolean | null) => {
+    if (typeof value !== "string") return null;
+    const text = value.trim().toLowerCase().replace(/^nps\s*/, "").replace(/\s*(?:inch(?:es)?|in|["″])$/, "").trim();
     if (!text) return null;
     if (/^\d+(?:\.\d+)?$/.test(text)) return Number(text);
     const fraction = text.match(/^(?:(\d+)[ -]+)?(\d+)\/(\d+)$/);
@@ -208,9 +209,12 @@ export function evaluateProfile(
     })),
     ...input.pieces.flatMap(p => sourceFields.flatMap(field => {
       const req = requirement(field, p.id);
-      return req.value ? [{
+      return req.value !== null ? [{
         id: `SOURCE-REQUIREMENT-${p.id}-${field}`, subjectIds: [p.id], status: "unknown" as const,
-        state: "review_required", reason: `Source ${field}: ${req.value} (${req.confirmed ? "confirmed source input" : "unconfirmed source input"}). Selection and project suitability require independent review.`,
+        state: typeof req.value === "string" ? "review_required" : "invalid_input",
+        reason: typeof req.value === "string"
+          ? `Source ${field}: ${req.value} (${req.confirmed ? "confirmed source input" : "unconfirmed source input"}). Selection and project suitability require independent review.`
+          : `Source ${field}: ${String(req.value)} is not text. Correct the source requirement before checking product compatibility.`,
         sourceRefs: req.evidenceIds,
       }] : [];
     })),
@@ -222,8 +226,8 @@ export function evaluateProfile(
       if (!product) return [];
       const productMaterial = product.connection === "steel_threaded" ? "steel" : product.connection === "cpvc_socket_solvent" ? "cpvc" : null;
       const conflictRefs = [
-        ...(connection.confirmed && connection.value && connection.value !== product.connection ? connection.evidenceIds : []),
-        ...(material.confirmed && ["steel", "cpvc", "copper"].includes(material.value?.toLowerCase() ?? "") && productMaterial && material.value?.toLowerCase() !== productMaterial ? material.evidenceIds : []),
+        ...(connection.confirmed && typeof connection.value === "string" && connection.value && connection.value !== product.connection ? connection.evidenceIds : []),
+        ...(material.confirmed && typeof material.value === "string" && ["steel", "cpvc", "copper"].includes(material.value.toLowerCase()) && productMaterial && material.value.toLowerCase() !== productMaterial ? material.evidenceIds : []),
       ];
       const requiredSize = nominal(size.value), selectedSize = nominal(product.nominalSize);
       return [

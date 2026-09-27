@@ -238,12 +238,24 @@ export function fabricationInput(
   }
   if (remaining.length)
     throw new Error("Disconnected or closed route is unsupported");
+  const catalog = fabricationCatalog(s.configVersion);
   for (const f of plan.entities.filter((e) => e.kind === "fitting" && !context.has(e.id))) {
+    const product = catalog.products.find(p => p.id === f.productId);
+    const face = product?.kind === "elbow_90" && product.connection === "steel_threaded" ? product.centerToFace : null;
+    const mm = (length: Length) => length.value * { mm: 1, m: 1000, ft: 304.8, in: 25.4 }[length.unit];
     const ports = f.ports.map((port) => {
       const c = connected.get(`${f.id}/${port.id}`),
         piece = pieces.find((p) => p.id === c?.entityId);
       const pipe = pipes.find((p) => p.id === piece?.id);
       if (!piece || !pipe) throw new Error("Unconnected fitting port");
+      let axialEngagement = lengthValue(s, `threadMakeup.${port.id}`, f.id);
+      if (face && axialEngagement.value) {
+        const amount = mm(axialEngagement.value), limit = mm(face);
+        if (!Number.isFinite(amount) || amount <= 0 || amount >= limit) axialEngagement = {
+          ...axialEngagement, value: null, status: "unknown",
+          reason: `${f.id}/${port.id}: final axial engagement must be finite, greater than 0 and less than ${limit} mm (fitting center-to-face). Correct threadMakeup.${port.id} under Steel threaded joints with scoped dimensional evidence.`,
+        };
+      }
       return {
         id: port.id,
         pieceId: piece.id,
@@ -255,7 +267,7 @@ export function fabricationInput(
         threadMakeup: {
           pipeProductId: confirmedProductBinding(s, `threadMakeup.${port.id}.pipeProductId`, f.id),
           fittingProductId: confirmedProductBinding(s, `threadMakeup.${port.id}.fittingProductId`, f.id),
-          axialEngagement: lengthValue(s, `threadMakeup.${port.id}`, f.id),
+          axialEngagement,
         },
       };
     });

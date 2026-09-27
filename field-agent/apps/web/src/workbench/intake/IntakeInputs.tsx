@@ -279,39 +279,67 @@ export function IntakeInputs(props: Props) {
 /** Build the same provenance-aware facts used by the requirements save action. */
 export function sourceRequirementsPatch(cur: Snapshot, values: {
   size: string; text: string; mat: string; provenance: Provenance; source: string; page: number;
+  nominalProvenance?: Provenance; materialProvenance?: Provenance; updateSource?: boolean;
 }): Pick<PackageInputs, "detailing" | "siteFacts"> {
   const { size, text, mat, provenance, source, page } = values;
   const pipes = cur.scope?.includedEntityIds.filter(id => cur.baselinePlan?.entities.find(e => e.id === id)?.kind === "pipe") ?? [];
-  const owned = (f: typeof cur.detailing[number]) => f.field === "nominalSize"
-    ? f.subjectIds.some(id => pipes.includes(id))
-    : (f.field === "materialRequirement" || f.field === "materialRequirement.material") && f.subjectIds.length === 0;
-  const syntheticLocked = [...cur.detailing, ...cur.siteFacts].some(f => owned(f) && factProvenance(f) === "synthetic_assumption");
-  const selectedProvenance = syntheticLocked ? "synthetic_assumption" : provenance;
-  const specs: FactSpec[] = [];
-  const evidence = { assetId: cur.sourceDrawing?.assetId, page: cur.sourceDrawing?.page };
-  if (size.trim() && pipes.length) specs.push({
-    ...evidence, field: "nominalSize", value: size.trim(), subjectIds: pipes, context: "detailing",
-    ...evidenceSpec(findFact(cur, "nominalSize", pipes[0]), selectedProvenance, `Read by you from ${cur.sourceDrawing?.drawingId ?? "the drawing"} p${cur.sourceDrawing?.page ?? 1}`),
-  });
-  if (text.trim()) specs.push({ ...evidence, page, field: "materialRequirement", value: text.trim(), ...evidenceSpec(findFact(cur, "materialRequirement"), selectedProvenance, source), context: "detailing" });
-  if (mat) specs.push({ ...evidence, page, field: "materialRequirement.material", value: mat, ...evidenceSpec(findFact(cur, "materialRequirement.material"), selectedProvenance, source), context: "detailing" });
-  const kept = { detailing: cur.detailing.filter(f => !owned(f)), siteFacts: cur.siteFacts.filter(f => !owned(f)) };
-  return upsertFacts(kept, specs);
+  const nominal = findFact(cur, "nominalSize", pipes[0]);
+  const mixedNominal = new Set(pipes.map(id => factProvenance(findFact(cur, "nominalSize", id)))).size > 1;
+  const requirement = findFact(cur, "materialRequirement"), material = findFact(cur, "materialRequirement.material");
+  let result = { detailing: cur.detailing, siteFacts: cur.siteFacts };
+  const update = (field: string, value: string, previous: ReturnType<typeof findFact>, selected: Provenance, subjects: string[], description: string, sourcePage: number | undefined, updateSource = false) => {
+    const evidence = evidenceSpec(previous, selected, description);
+    // An unrelated edit must not rewrite saved evidence, its source, or its provenance.
+    if (previous && previous.value === value && factProvenance(previous) === evidence.provenance && !updateSource) return;
+    const owned = (f: typeof cur.detailing[number]) => f.field === field && (subjects.length ? f.subjectIds.some(id => subjects.includes(id)) : !f.subjectIds.length);
+    const retain = (facts: typeof cur.detailing) => facts.flatMap(f => {
+      if (!owned(f)) return [f];
+      const remaining = f.subjectIds.filter(id => !subjects.includes(id));
+      return remaining.length ? [{ ...f, subjectIds: remaining }] : [];
+    });
+    result = { detailing: retain(result.detailing), siteFacts: retain(result.siteFacts) };
+    if (value) result = upsertFacts(result, [{ field, value, subjectIds: subjects, context: "detailing", ...evidence, assetId: previous && !updateSource ? previous.source.assetId : cur.sourceDrawing?.assetId, page: sourcePage }]);
+  };
+  // The shared size input starts with the first span. Saving another field must
+  // preserve differing sizes and evidence on every other span.
+  const sizeChanged = size.trim() !== (nominal?.value ?? "");
+  if (sizeChanged || (!mixedNominal && values.nominalProvenance !== undefined && values.nominalProvenance !== factProvenance(nominal))) {
+    for (const id of pipes) {
+      const previous = findFact(cur, "nominalSize", id);
+      const nextSize = sizeChanged ? size.trim() : previous?.value;
+      if (typeof nextSize !== "string") continue;
+      const selected = (!mixedNominal ? values.nominalProvenance : undefined) ?? (previous ? factProvenance(previous) : provenance);
+      update("nominalSize", nextSize, previous, selected, [id],
+        previous?.source.description ?? `Read by you from ${cur.sourceDrawing?.drawingId ?? "the drawing"} p${cur.sourceDrawing?.page ?? 1}`, previous?.source.page ?? cur.sourceDrawing?.page);
+    }
+  }
+  update("materialRequirement", text.trim(), requirement, provenance, [], source, page, values.updateSource);
+  update("materialRequirement.material", mat, material, values.materialProvenance ?? (material ? factProvenance(material) : provenance), [], source, page, values.updateSource);
+  return result;
 }
 
 /** What the source states about size and material, kept apart from any product selection. */
-function SourceRequirements({ s, act, busy, setNotice, intake, nominal, requirement, material }: Props & { nominal: ReturnType<typeof findFact>; requirement: ReturnType<typeof findFact>; material: ReturnType<typeof findFact> }) {
+export function SourceRequirements({ s, act, busy, setNotice, intake, nominal, requirement, material }: Props & { nominal: ReturnType<typeof findFact>; requirement: ReturnType<typeof findFact>; material: ReturnType<typeof findFact> }) {
   const pipes = s.scope?.includedEntityIds.filter(id => s.baselinePlan?.entities.find(e => e.id === id)?.kind === "pipe") ?? [];
+  const mixedNominal = new Set(pipes.map(id => factProvenance(findFact(s, "nominalSize", id)))).size > 1;
+  const mixedSize = new Set(pipes.map(id => findFact(s, "nominalSize", id)?.value ?? "")).size > 1;
   const [size, setSize] = useState(typeof nominal?.value === "string" ? nominal.value : "");
   const [text, setText] = useState(typeof requirement?.value === "string" ? requirement.value : "");
   const [mat, setMat] = useState(typeof material?.value === "string" ? material.value : "");
   const [ref, setRef] = useState(requirement?.source.description.replace(/^Read by you from /, "") ?? "");
   useEffect(() => { setSize(typeof nominal?.value === "string" ? nominal.value : ""); }, [nominal?.id, nominal?.value]);
   useEffect(() => { setText(typeof requirement?.value === "string" ? requirement.value : ""); setMat(typeof material?.value === "string" ? material.value : ""); setRef(requirement?.source.description.replace(/^Read by you from /, "") ?? ""); }, [requirement?.id, requirement?.value, material?.value]);
-  const previousRequirement = requirement ?? material ?? nominal;
-  const [provenance, setProvenance] = useState<Provenance>(() => factProvenance(previousRequirement));
-  const syntheticLocked = [nominal, requirement, material].some(f => !!f && factProvenance(f) === "synthetic_assumption");
-  useEffect(() => setProvenance(factProvenance(previousRequirement)), [requirement?.id, requirement?.provenance, material?.id, material?.provenance, nominal?.id, nominal?.provenance]);
+  const [provenance, setProvenance] = useState<Provenance>(() => factProvenance(requirement));
+  const [nominalProvenance, setNominalProvenance] = useState<Provenance>(() => factProvenance(nominal));
+  const [materialProvenance, setMaterialProvenance] = useState<Provenance>(() => factProvenance(material));
+  useEffect(() => {
+    setProvenance(factProvenance(requirement)); setNominalProvenance(factProvenance(nominal)); setMaterialProvenance(factProvenance(material));
+  }, [s.inputRevision]);
+  const provenanceControl = (label: string, previous: ReturnType<typeof findFact>, value: Provenance, change: (p: Provenance) => void) => {
+    const locked = !!previous && factProvenance(previous) === "synthetic_assumption";
+    return <Field label={label}><select value={locked ? "synthetic_assumption" : value} disabled={locked} onChange={e => change(e.target.value as Provenance)}>{Object.entries(PROVENANCE_LABELS).map(([key, text]) => <option key={key} value={key}>{text}</option>)}</select>
+      {locked && <small className="fa-warn">This value remains a synthetic test assumption.</small>}</Field>;
+  };
   const savedPage = requirement?.source.page ?? material?.source.page ?? s.sourceDrawing?.page ?? 1;
   const [sourcePage, setSourcePage] = useState(String(savedPage));
   useEffect(() => setSourcePage(String(savedPage)), [savedPage, s.sourceDrawing?.assetId]);
@@ -321,16 +349,20 @@ function SourceRequirements({ s, act, busy, setNotice, intake, nominal, requirem
   const source = `Read by you from ${ref.trim() || "the drawing"}`;
   const save = () => act("requirements", cur => {
     if (!validPage) throw new Error("Choose a valid requirement source page.");
-    return patchClearing(cur, sourceRequirementsPatch(cur, { size, text, mat, provenance, source, page }), setNotice);
+    return patchClearing(cur, sourceRequirementsPatch(cur, { size, text, mat, provenance, nominalProvenance, materialProvenance, source, page, updateSource: ref !== (requirement?.source.description.replace(/^Read by you from /, "") ?? "") || page !== savedPage }), setNotice);
   });
   return <Section title="Source requirements" count={requirement ? "entered" : undefined} defaultOpen={!requirement}>
     <p className="fa-muted">What the drawing or its notes require. This is kept as stated and is not a product selection or an approval.</p>
     <div className="fa-row2">
-      <Field label="Nominal size as printed" hint={pipes.length ? undefined : "Save a trace first."}><div className="fa-fact-head"><input value={size} onChange={e => setSize(e.target.value)} placeholder='e.g. 2"' maxLength={40} disabled={!pipes.length} />{nominal && factStatus(nominal)}</div></Field>
+      <Field label="Nominal size as printed" hint={pipes.length ? undefined : "Save a trace first."}><div className="fa-fact-head"><input value={size} onChange={e => setSize(e.target.value)} placeholder='e.g. 2"' maxLength={40} disabled={!pipes.length} />{mixedNominal ? <Badge tone="amber">Varies by span</Badge> : nominal && factStatus(nominal)}</div></Field>
       <Field label="Material"><select value={mat} onChange={e => setMat(e.target.value)}><option value="">Not stated</option>{MATERIALS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
     </div>
-    <Field label="Requirement provenance"><select value={syntheticLocked ? "synthetic_assumption" : provenance} disabled={syntheticLocked} onChange={e => setProvenance(e.target.value as Provenance)}>{Object.entries(PROVENANCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
-    {syntheticLocked && <small className="fa-warn">This requirement remains a synthetic test assumption; saving it cannot turn it into confirmed source evidence.</small>}
+    <div className="fa-row2">
+      {mixedNominal ? <Field label="Nominal size provenance"><select value="mixed" disabled><option value="mixed">Varies by span</option></select><small className="fa-muted">Existing provenance is preserved for each span.</small></Field> : provenanceControl("Nominal size provenance", nominal, nominalProvenance, setNominalProvenance)}
+      {provenanceControl("Material provenance", material, materialProvenance, setMaterialProvenance)}
+    </div>
+    {mixedSize && <p className="fa-muted small">Sizes vary by span. The first span is shown; editing this value applies it to every included span.</p>}
+    {provenanceControl("Requirement text provenance", requirement, provenance, setProvenance)}
     <Field label="Requirement text"><textarea rows={2} value={text} onChange={e => setText(e.target.value)} placeholder="e.g. Schedule 40 black steel pipe with threaded cast-iron fittings" maxLength={1000} /></Field>
     <Field label="Where it is stated"><input value={ref} onChange={e => setRef(e.target.value)} placeholder="e.g. FS-02 general notes" maxLength={300} /></Field>
     <Field label="Requirement source page" hint="Page containing the material requirement or notes. The nominal-size label remains linked to the traced drawing page."><input type="number" min={1} max={maxPage} step={1} value={sourcePage} onChange={e => setSourcePage(e.target.value)} /></Field>
