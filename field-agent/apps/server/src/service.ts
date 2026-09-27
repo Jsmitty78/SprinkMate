@@ -2,7 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { RULE, emptyFacts, validateHead, comparePlan, validateMeasurement as checkMeasurement, MeasurementSchema, checkSchema, type HeadFacts, type Measurement, type Orientation } from '@field-agent/core';
+import { referenceDrawing, exampleDrawing, validateDrawing, pipeLength, RULE, emptyFacts, validateHead, comparePlan, validateMeasurement as checkMeasurement, MeasurementSchema, checkSchema, type HeadFacts, type Measurement, type Orientation } from '@field-agent/core';
 import { Store, digest } from './store.js';
 import { AppError, type TaskSnapshot, type Observation, type EvidenceRequest, type Candidate, type Artifact, type Finding } from './models.js';
 import { planSvg, sceneSvg } from './drawing.js';
@@ -40,7 +40,13 @@ export class FieldService {
       }
     })();
   }
-  getTask(id:string) { return this.store.get(safeId(id)); }
+  getTask(id:string) {
+    const task=this.store.get(safeId(id));
+    // Legacy records acquire an editable sample in memory; evidence stays untouched.
+    if(!task.plan.drawing)task.plan.drawing=exampleDrawing(task.plan.orientation);
+    task.plan.svg=planSvg(task.plan);
+    return task;
+  }
   listTasks() { return this.store.list().map(({id,title,state,revision,updatedAt})=>({id,title,state,revision,updatedAt})); }
   private active(id:string) { const task=this.getTask(id); if(task.state==='cancelled') throw new AppError(409,'この仕事はキャンセル済みです'); return task; }
   private changed(task:TaskSnapshot,type:string) {
@@ -49,12 +55,14 @@ export class FieldService {
     task.validation=this.evaluate(task);
     this.store.save(task); this.store.event(task.id,type,{revision:task.revision});
   }
-  createTask(input:{id?:string;title?:string;planOrientation?:string}={}) {
+  createTask(input:{id?:string;title?:string;planOrientation?:string;reference?:boolean}={}) {
     const id=safeId(input.id??randomUUID());
     const orientation=input.planOrientation??'pendent';
     if(!['pendent','upright','sideways'].includes(orientation)) throw new AppError(400,'図面方向が不正です');
     return this.store.operation(id,'create',input,()=>{
-      const plan={revision:1,targetId:'H1',model:'TY3231',orientation,lengthMeters:2};
+      const drawing=input.reference?referenceDrawing():exampleDrawing(orientation);
+      const target=drawing.heads.find(h=>h.id==='H1')!;
+      const plan={revision:1,targetId:'H1',model:target.model,orientation:target.orientation,lengthMeters:pipeLength(drawing,drawing.pipes.find(p=>p.id==='P1')!)/1000,drawing};
       const task:TaskSnapshot={id,title:requireText(input.title??'配管1区間の現場確認','title'),targetId:'H1',revision:1,createdAt:now(),updatedAt:now(),state:'active',plan:{...plan,svg:planSvg(plan)},facts:emptyFacts(),candidates:[],findings:[],observations:[],measurements:[],requests:[],validation:null,artifact:null};
       this.store.save(task); this.store.event(id,'created',{revision:1}); return task;
     });
@@ -63,9 +71,25 @@ export class FieldService {
     if(!['pendent','upright','sideways'].includes(orientation)) throw new AppError(400,'図面方向が不正です');
     return this.store.operation(id,opId,{orientation,baseRevision},()=>{
       const t=this.active(id); if(t.revision!==baseRevision) throw new AppError(409,'仕事が更新されています');
-      t.plan={...t.plan,orientation,revision:t.plan.revision+1}; t.plan.svg=planSvg(t.plan);
+      const drawing=t.plan.drawing!;
+      drawing.heads.find(h=>h.id===t.targetId)!.orientation=orientation as 'pendent'|'upright'|'sideways';
+      t.plan={...t.plan,orientation,drawing,revision:t.plan.revision+1}; t.plan.svg=planSvg(t.plan);
       t.requests.filter(r=>r.status==='open').forEach(r=>r.status='superseded');
       this.changed(t,'plan_updated'); return t;
+    });
+  }
+  updateDrawing(id:string,input:unknown,baseRevision:number,opId:string=randomUUID()) {
+    let drawing: ReturnType<typeof validateDrawing>;
+    try {drawing=validateDrawing(input);} catch(error) {throw new AppError(400,error instanceof Error?error.message:'図面が不正です');}
+    return this.store.operation(id,opId,{drawing,baseRevision},()=>{
+      const t=this.active(id);if(t.revision!==baseRevision)throw new AppError(409,'仕事が更新されています。下書きを書き出してから最新の図面を読み直してください。');
+      const head=drawing.heads.find(h=>h.id===t.targetId)!;
+      // Current comparison concerns the fixed TY3231 target; other heads are drawing context.
+      if(head.model!==t.plan.model)throw new AppError(400,'確認対象H1の型式は変更できません');
+      t.plan={...t.plan,drawing,orientation:head.orientation,lengthMeters:pipeLength(drawing,drawing.pipes.find(p=>p.id==='P1')!)/1000,revision:t.plan.revision+1};
+      t.plan.svg=planSvg(t.plan);
+      t.requests.filter(r=>r.status==='open').forEach(r=>r.status='superseded');
+      this.changed(t,'drawing_updated');return t;
     });
   }
   async addObservation(id:string,metadata:Omit<Observation,'assetId'|'originalAssetId'|'digest'|'width'|'height'>,bytes:Buffer) {

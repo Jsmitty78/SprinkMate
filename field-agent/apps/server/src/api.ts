@@ -36,13 +36,18 @@ export function createApp(service:FieldService,options:{token:string;webDir?:str
   app.post('/api/tasks',async c=>{
     const body=await c.req.json();
     if(!body||typeof body!=='object'||Array.isArray(body))throw new AppError(400,'仕事の形式が不正です');
-    const input={id:body.id??op(c.req.header('Idempotency-Key')),title:body.title,planOrientation:body.planOrientation};
+    const input={id:body.id??op(c.req.header('Idempotency-Key')),title:body.title,planOrientation:body.planOrientation,reference:body.reference===true};
     return c.json(service.createTask(input),201);
   });
   app.get('/api/tasks/:id',c=>c.json(service.getTask(c.req.param('id'))));
   app.post('/api/tasks/:id/plan',async c=>{
     const input=await c.req.json(),id=c.req.param('id');
     return c.json(await commands.run(id,()=>service.updatePlan(id,input.orientation,input.baseRevision,op(c.req.header('Idempotency-Key')))));
+  });
+  app.post('/api/tasks/:id/drawing',async c=>{
+    const input=await c.req.json(),id=c.req.param('id');
+    if(!input||typeof input!=='object')throw new AppError(400,'図面の形式が不正です');
+    return c.json(await commands.run(id,()=>service.updateDrawing(id,input.drawing,input.baseRevision,op(c.req.header('Idempotency-Key')))));
   });
   app.post('/api/tasks/:id/observations',async c=>{
     const body=await c.req.parseBody(),id=c.req.param('id');

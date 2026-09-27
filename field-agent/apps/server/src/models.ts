@@ -6,6 +6,7 @@ export interface PlanModel {
   model: string;
   orientation: string;
   lengthMeters: number;
+  drawing?: import("@field-agent/core").DrawingModel;
 }
 export interface Observation {
   id: string;
