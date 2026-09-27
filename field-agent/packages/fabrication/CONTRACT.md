@@ -2,6 +2,8 @@
 
 The JSON DTO is `src/types.ts` (`FabricationInput`, `FabricationOutput`). Import pure functions from `@field-agent/fabrication` after adding a workspace dependency in the consuming lane. No shared core/API types are changed in this branch.
 
+Generate the JSON examples locally with `pnpm --filter @field-agent/fabrication examples` from `field-agent`; the generated files are not checked in.
+
 | Handoff | Repository-relative path |
 | --- | --- |
 | Input/output DTO | `field-agent/packages/fabrication/src/types.ts` |
