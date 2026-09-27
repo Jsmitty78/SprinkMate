@@ -47,8 +47,9 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
   const [rev, setRev] = useState(d?.revision ?? "A");
   const [page, setPage] = useState(String(d?.page ?? 1));
   const [scale, setScale] = useState(d?.scale.value !== null && d?.scale.value !== undefined ? String(d.scale.value) : "");
-  const [scaleUnit, setScaleUnit] = useState(d?.scale.unit ?? "mm/pixel");
-  useEffect(() => { setRev(d?.revision ?? "A"); setPage(String(d?.page ?? 1)); setScale(d?.scale.value != null ? String(d.scale.value) : ""); setScaleUnit(d?.scale.unit ?? "mm/pixel"); }, [d?.assetId, d?.revision, d?.page, d?.scale.value, d?.scale.unit]);
+  // The server accepts only mm/pixel (apps/server/src/work-packages/validation.ts).
+  const scaleUnit = "mm/pixel";
+  useEffect(() => { setRev(d?.revision ?? "A"); setPage(String(d?.page ?? 1)); setScale(d?.scale.value != null ? String(d.scale.value) : ""); }, [d?.assetId, d?.revision, d?.page, d?.scale.value]);
 
   const upload = (file: File) => act("upload", async cur => {
     const asset = await api.upload(cur.id, file);
@@ -94,9 +95,8 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
       <div className="fa-row3">
         <Field label="Revision"><input value={rev} onChange={e => setRev(e.target.value)} maxLength={40} /></Field>
         <Field label="Page"><input value={page} inputMode="numeric" onChange={e => setPage(e.target.value)} /></Field>
-        <Field label="Scale"><input value={scale} inputMode="decimal" placeholder="e.g. 1" onChange={e => setScale(e.target.value)} /></Field>
+        <Field label="Scale, mm per pixel"><input value={scale} inputMode="decimal" placeholder="e.g. 1" onChange={e => setScale(e.target.value)} /></Field>
       </div>
-      <Field label="Scale unit"><select value={scaleUnit} onChange={e => setScaleUnit(e.target.value)}><option value="mm/pixel">mm per pixel (scanned image)</option><option value="mm/mm">mm per drawing mm (PDF)</option></select></Field>
       <div className="fa-actions">
         <Button variant="primary" busy={busy === "scale"} disabled={!!busy || !(Number(scale) > 0)} onClick={() => void saveScale(true)}>Confirm scale</Button>
         <Button busy={busy === "scale-save"} disabled={!!busy} onClick={() => void saveScale(false)}>Save without confirming</Button>
