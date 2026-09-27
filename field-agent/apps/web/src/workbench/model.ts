@@ -1,3 +1,4 @@
+import { adaptationInterval } from "@field-agent/core";
 import type { PackageInputs, PackagePlan, PackageResult, WorkPackageSnapshot } from "@field-agent/core";
 import { lengthInput, parseLength } from "./format.js";
 
@@ -289,6 +290,16 @@ export const PROJECT_BASIS: Array<{ field: string; label: string; options: Array
 /** Entities outside the scope are retained context: shown, never part of the work. */
 export const contextIds = (s: Pick<WorkPackageSnapshot, "scope">): Set<string> => new Set(s.scope?.excludedEntityIds ?? []);
 export const inScope = (s: Pick<WorkPackageSnapshot, "scope">) => { const c = contextIds(s); return (id: string) => !c.has(id); };
+/** Only request detailing for the active interval; retained context is not a new-work item. */
+export function activeDetailingPlan(s: WorkPackageSnapshot): Plan | null {
+  if (s.intent !== "adapt_to_site" || !s.baselinePlan) return s.baselinePlan;
+  const ids = s.changeRequest?.affectedEntityIds ?? [];
+  const adjacent = s.baselinePlan.connections.flatMap(c => ids.includes(c.from.entityId) ? [c.to.entityId] : ids.includes(c.to.entityId) ? [c.from.entityId] : []);
+  return { ...s.baselinePlan, entities: s.baselinePlan.entities.filter(e => ids.includes(e.id) || (e.kind === "tie_in" && adjacent.includes(e.id))) };
+}
+
+export const showCpvcInputs = (s: WorkPackageSnapshot) => activeDetailingPlan(s)?.entities.some(e => e.kind === "pipe" && e.productId === PIPE) ?? false;
+export const showSfInputs = (s: WorkPackageSnapshot) => s.intent !== "adapt_to_site" || findFact(s, "jurisdiction")?.value === "san_francisco";
 
 /** Presence checks only; the server decides whether the inputs are sufficient. */
 export function requirements(s: WorkPackageSnapshot): Requirement[] {
@@ -298,7 +309,7 @@ export function requirements(s: WorkPackageSnapshot): Requirement[] {
   add({ id: "drawing", group: "Drawing", label: "Source drawing uploaded", done: !!d?.assetId });
   if (d?.view) add({ id: "workArea", group: "Drawing", label: "Work area selected on the sheet", done: !!d.view.workArea });
   add({ id: "scale", group: "Drawing", label: "Drawing scale confirmed", done: d?.scale.basis === "confirmed_inputs", hint: d?.scale.reason ?? undefined });
-  const plan = s.baselinePlan;
+  const plan = activeDetailingPlan(s);
   const work = inScope(s);
   add({ id: "run", group: "Run", label: "Run traced or entered (points, turns, ends)", done: !!plan?.entities.length && !!s.scope });
   add({ id: "run-confirmed", group: "Run", label: "Run confirmed against the drawing", done: plan?.confirmation === "confirmed" });
@@ -313,8 +324,8 @@ export function requirements(s: WorkPackageSnapshot): Requirement[] {
         add({ id: `movement.${port.id}.${fit.id}`, group: "Assembly", label: `Joint movement at ${fit.id}/${port.id} can be made`, done: isConfirmed(findFact(s, `movement.${port.id}`, fit.id)) });
   }
   add({ id: "workAreaAccess", group: "Assembly", label: "Work-area access confirmed", done: isConfirmed(findFact(s, "workAreaAccess")) });
-  add({ id: "curePlan", group: "Assembly", label: "Cement set and cure plan", done: isConfirmed(findFact(s, "curePlan")) });
-  for (const b of PROJECT_BASIS) add({ id: b.field, group: "Project", label: b.label, done: isConfirmed(findFact(s, b.field)) });
+  if (showCpvcInputs(s)) add({ id: "curePlan", group: "Assembly", label: "Cement set and cure plan", done: isConfirmed(findFact(s, "curePlan")) });
+  for (const b of showSfInputs(s) ? PROJECT_BASIS : []) add({ id: b.field, group: "Project", label: b.label, done: isConfirmed(findFact(s, b.field)) });
   if (s.intent === "adapt_to_site") {
     add({ id: "change", group: "Site", label: "Affected pipe chosen", done: !!s.changeRequest?.affectedEntityIds.length });
     add({ id: "duct", group: "Site", label: "Obstacle measured (all six faces)", done: readBox(s, "duct").confirmed });
@@ -409,6 +420,10 @@ export function runBlockers(s: WorkPackageSnapshot): string[] {
   if (!s.sourceDrawing) out.push("Upload the source drawing.");
   if (!s.baselinePlan || !s.scope) out.push("Enter and save the run.");
   const plan = s.baselinePlan;
+  if (plan && s.intent === "adapt_to_site" && s.scope) {
+    try { adaptationInterval(s); } catch (e) { out.push(e instanceof Error ? e.message : String(e)); }
+    return out;
+  }
   if (plan) {
     const connected = new Set(plan.connections.flatMap(c => [`${c.from.entityId}/${c.from.portId}`, `${c.to.entityId}/${c.to.portId}`]));
     for (const pipe of plan.entities.filter(e => e.kind === "pipe" && inScope(s)(e.id)))

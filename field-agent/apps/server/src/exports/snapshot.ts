@@ -66,6 +66,8 @@ export function validateSnapshot(s: ExportSnapshot): void {
     for (const seg of view.segments) {
       if (!point(seg.from) || !point(seg.to) || !Array.isArray(seg.pieceIds)) fail('Plan coordinates must be finite 3D points.');
     }
+    unique((view.context ?? []).map(r => r.id), 'context');
+    for (const item of view.context ?? []) if (!item.kind || !item.positions.every(point)) fail('Invalid protected context coordinates.');
     for (const joint of view.joints) if (!point(joint.position)) fail('Invalid joint coordinates.');
   }
   const segments = new Set(plan.segments.map(r => r.id));

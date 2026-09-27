@@ -14,6 +14,7 @@ export interface CanvasProps {
   selectedRouteId: string | null;
   duct: Box | null;
   envelope: Box | null;
+  boxToDrawing?: (p: { x: number; y: number; z: number }) => { x: number; y: number; z: number };
   affectedIds: string[];
   cuts: Map<string, Quantity>;
   calloutsFor: (plan: Plan) => Callouts;
@@ -49,13 +50,17 @@ export function PlanCanvas(props: CanvasProps) {
   const baseShape = useMemo(() => planShape(baseline, context), [baseline, context]);
   const routeShapes = useMemo(() => routes.map(r => ({ route: r, shape: planShape(r.plan, context) })), [routes, context]);
 
+  const protectedIds = new Set(mode === "adapt" ? baseline?.entities.filter(e => !props.affectedIds.includes(e.id)).map(e => e.id) : []);
+  const boxPoints = (b: Box) => [b.min, { ...b.min, x: b.max.x }, b.max, { ...b.max, x: b.min.x }].map(p => props.boxToDrawing?.(p) ?? p);
+  const polygon = (b: Box) => boxPoints(b).map(p => `${p.x},${-p.y}`).join(" ");
+  const boxLabel = (b: Box) => boxPoints(b)[2];
   const fit = useMemo(() => {
     const pts: Point[] = [];
     for (const s of [baseShape, ...routeShapes.map(r => r.shape)]) {
-      s.segments.forEach(g => pts.push(g.a, g.b));
-      s.markers.forEach(m => pts.push(m.at));
+      s.segments.filter(g => !protectedIds.has(g.id)).forEach(g => pts.push(g.a, g.b));
+      s.markers.filter(m => !protectedIds.has(m.id)).forEach(m => pts.push(m.at));
     }
-    for (const b of [duct, envelope]) if (b) pts.push(b.min, b.max);
+    for (const b of [duct, envelope]) if (b) pts.push(...boxPoints(b));
     if (!pts.length) return null;
     const xs = pts.map(p => p.x), ys = pts.map(p => -p.y);
     const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
@@ -64,7 +69,7 @@ export function PlanCanvas(props: CanvasProps) {
     let vw = w * (1 + PAD * 2), vh = h * (1 + PAD * 2);
     if (vw / vh < aspect) vw = vh * aspect; else vh = vw / aspect;
     return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, vw, vh };
-  }, [baseShape, routeShapes, duct, envelope, size]);
+  }, [baseShape, routeShapes, duct, envelope, size, props.boxToDrawing, props.affectedIds]);
 
   const v = view ?? (fit ? { cx: fit.cx, cy: fit.cy, zoom: 1 } : null);
   if (!fit || !v) return <div className="fa-canvas fa-canvas-empty" ref={host}>{props.empty}</div>;
@@ -106,16 +111,16 @@ export function PlanCanvas(props: CanvasProps) {
       {shape.segments.filter(s => s.context).map(s => <line key={s.id} className="fa-context-pipe" x1={s.a.x} y1={Y(s.a)} x2={s.b.x} y2={Y(s.b)} />)}
       {shape.segments.filter(s => !s.context).map(s => {
         const on = interactive && s.id === selectedPiece;
-        return <g key={s.id} data-piece={interactive ? s.id : undefined} className={on ? "is-on" : ""}>
+        return <g key={s.id} data-piece={interactive ? s.id : undefined} className={`${on ? "is-on" : ""} ${protectedIds.has(s.id) ? "fa-protected" : ""}`}>
           {on && <line className="fa-halo" x1={s.a.x} y1={Y(s.a)} x2={s.b.x} y2={Y(s.b)} />}
           <line className="fa-hit" x1={s.a.x} y1={Y(s.a)} x2={s.b.x} y2={Y(s.b)} />
           <line className="fa-pipe" x1={s.a.x} y1={Y(s.a)} x2={s.b.x} y2={Y(s.b)} />
         </g>;
       })}
-      {shape.markers.map(m => m.kind === "tie_in"
+      {shape.markers.map(m => <g key={m.id} data-piece={interactive ? m.id : undefined} className={`${protectedIds.has(m.id) ? "fa-protected" : ""} ${m.id === selectedPiece ? "is-on" : ""}`}>{m.kind === "tie_in"
         ? <rect key={m.id} className="fa-tie" x={m.at.x - px(6)} y={Y(m.at) - px(6)} width={px(12)} height={px(12)} />
-        : m.kind === "fitting" ? <circle key={m.id} className="fa-fit" cx={m.at.x} cy={Y(m.at)} r={px(5)} /> : <circle key={m.id} className={`fa-head ${m.context ? "is-context" : ""}`} cx={m.at.x} cy={Y(m.at)} r={px(m.context ? 9 : 6)} />)}
-      {interactive && shape.segments.filter(s => !s.context).map(s => {
+        : m.kind === "fitting" ? <circle key={m.id} className="fa-fit" cx={m.at.x} cy={Y(m.at)} r={px(5)} /> : <circle key={m.id} className={`fa-head ${m.context ? "is-context" : ""}`} cx={m.at.x} cy={Y(m.at)} r={px(m.context ? 9 : 6)} />}</g>)}
+      {interactive && shape.segments.filter(s => !s.context && !protectedIds.has(s.id)).map(s => {
         const mx = (s.a.x + s.b.x) / 2, my = (Y(s.a) + Y(s.b)) / 2;
         const label = c.piece.get(s.id) ?? "?";
         const on = s.id === selectedPiece;
@@ -127,7 +132,7 @@ export function PlanCanvas(props: CanvasProps) {
           <text y={px(4)} fontSize={px(11)}>{label}</text>
         </g>;
       })}
-      {interactive && size.w >= 560 && shape.markers.map(m => {
+      {interactive && size.w >= 560 && shape.markers.filter(m => !protectedIds.has(m.id)).map(m => {
         const label = c.fitting.get(m.id) ?? c.tieIn.get(m.id);
         return label ? <text key={`l-${m.id}`} className="fa-mlabel" x={m.at.x + px(9)} y={Y(m.at) + px(16)} fontSize={px(10.5)}>{label}</text> : null;
       })}
@@ -150,23 +155,23 @@ export function PlanCanvas(props: CanvasProps) {
         </defs>
         <rect x={v.cx - vw} y={v.cy - vh} width={vw * 2} height={vh * 2} fill="url(#fa-grid)" />
         {envelope && <g className="fa-envelope">
-          <rect x={envelope.min.x} y={-envelope.max.y} width={envelope.max.x - envelope.min.x} height={envelope.max.y - envelope.min.y} />
-          <text x={envelope.min.x + px(8)} y={-envelope.max.y + px(16)} fontSize={px(11)}>Work boundary</text>
+          <polygon points={polygon(envelope)} />
+          <text x={boxLabel(envelope).x + px(8)} y={-boxLabel(envelope).y + px(16)} fontSize={px(11)}>Work boundary</text>
         </g>}
         {duct && <g className="fa-duct">
-          <rect x={duct.min.x} y={-duct.max.y} width={duct.max.x - duct.min.x} height={duct.max.y - duct.min.y} />
-          <text x={(duct.min.x + duct.max.x) / 2} y={-duct.max.y - px(8)} fontSize={px(11.5)}>Duct</text>
+          <polygon points={polygon(duct)} />
+          <text x={boxLabel(duct).x} y={-boxLabel(duct).y - px(8)} fontSize={px(11.5)}>Duct</text>
         </g>}
         {baseline && (baselineIsWork ? drawPieces(baseShape, baseCallouts, "fa-work", true) : drawPieces(baseShape, baseCallouts, "fa-existing", false))}
         {others.map(({ route, shape }) => <g key={route.plan.id} data-route={route.plan.id} className={`fa-alt ${props.staleRoutes ? "is-stale" : ""}`}>
           {drawPieces(shape, props.calloutsFor(route.plan), "", false)}
-          <RouteBadge shape={shape} letter={route.letter} px={px} Y={Y} />
+          <RouteBadge shape={{ ...shape, segments: shape.segments.filter(s => !protectedIds.has(s.id)) }} letter={route.letter} px={px} Y={Y} />
         </g>)}
         {focus && <g className={`fa-focus ${focus.route.plan.id === selectedRouteId ? "is-selected" : ""}`}>
           {drawPieces(focus.shape, props.calloutsFor(focus.route.plan), "fa-work", true)}
-          <RouteBadge shape={focus.shape} letter={focus.route.letter} px={px} Y={Y} filled />
+          <RouteBadge shape={{ ...focus.shape, segments: focus.shape.segments.filter(s => !protectedIds.has(s.id)) }} letter={focus.route.letter} px={px} Y={Y} filled />
         </g>}
-        {duct && mode === "adapt" && <g className="fa-obstruction" transform={`translate(${duct.max.x} ${-duct.min.y})`}>
+        {duct && mode === "adapt" && <g className="fa-obstruction" transform={`translate(${boxLabel(duct).x} ${-boxLabel(duct).y})`}>
           <circle r={px(9)} /><text y={px(4)} fontSize={px(12)}>!</text>
           <text className="fa-obstruction-label" x={px(14)} y={px(4)} fontSize={px(11)}>Obstruction</text>
         </g>}
@@ -185,7 +190,8 @@ export function PlanCanvas(props: CanvasProps) {
           <span><i className="lg-existing" />Existing route</span>
         </> : <span><i className="lg-route" />Run</span>}
         {baseShape.markers.some(m => m.context) || baseShape.segments.some(s => s.context) ? <span><i className="lg-context" />Retained context</span> : null}
-        {duct && <span><i className="lg-duct" />Duct (measured)</span>}
+        {mode === "adapt" && <span><i className="lg-existing" />Protected context</span>}
+        {duct && <span><i className="lg-duct" />Duct (saved input)</span>}
         {envelope && <span><i className="lg-env" />Work boundary</span>}
       </div>
       <div className="fa-zoom" role="toolbar" aria-label="Zoom">
