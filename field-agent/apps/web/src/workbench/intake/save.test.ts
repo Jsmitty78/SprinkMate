@@ -5,7 +5,7 @@ import type { Snapshot } from "../api.js";
 import { FactRow } from "../inputs.js";
 import { upsertFacts } from "../model.js";
 import { PRODUCT_SETS, applyRunProducts } from "../products.js";
-import { intakeTracePatch } from "./IntakeInputs.js";
+import { intakeTracePatch, sourceRequirementsPatch } from "./IntakeInputs.js";
 import { buildTracePlan } from "./sheet.js";
 
 function fixture() {
@@ -44,4 +44,28 @@ it.each([['yd', 'Unknown'], ['mm', '3 mm']] as const)("renders confirmed numeric
   const html = renderToStaticMarkup(createElement(FactRow, { s, act: async () => true, busy: "", unit: "mm", setNotice: () => {}, spec: { field: "length", label: "Length", kind: { type: "length" } } }));
   expect(html).toContain(expected);
   if (unit === "yd") expect(html).not.toContain('0 mm');
+});
+
+
+it.each(["synthetic_assumption", "legacy_synthetic"])("requirements saving cannot promote an existing %s nominal size", kind => {
+  const { s } = fixture();
+  const nominal = s.detailing.find(f => f.field === "nominalSize")!;
+  nominal.provenance = kind === "legacy_synthetic" ? undefined : "synthetic_assumption";
+  nominal.confirmation = "proposed";
+  nominal.source.description = "SYNTHETIC test size";
+  const values = { size: "1-1/2 inch", text: "Updated notes", mat: "steel", provenance: "confirmed_evidence" as const, source: "Drawing notes", page: 2 };
+  const first = sourceRequirementsPatch(s, values);
+  const reloaded = JSON.parse(JSON.stringify({ ...s, ...first })) as Snapshot;
+  const second = sourceRequirementsPatch(reloaded, values);
+  for (const patch of [first, second]) {
+    expect(patch.detailing.find(f => f.field === "nominalSize")).toMatchObject({ value: values.size, provenance: "synthetic_assumption", confirmation: "proposed", source: { assetId: "source", page: 1 } });
+  }
+});
+it.each(["synthetic_assumption", "user_entered", "machine_proposal", "confirmed_evidence"] as const)("requirements saving applies selected %s provenance to a new nominal size", provenance => {
+  const { s } = fixture();
+  s.detailing = s.detailing.filter(f => f.field !== "nominalSize");
+  const patch = sourceRequirementsPatch(s, { size: "2 inch", text: "Notes", mat: "steel", provenance, source: "Drawing notes", page: 2 });
+  expect(patch.detailing.find(f => f.field === "nominalSize")).toMatchObject({ provenance, confirmation: provenance === "confirmed_evidence" ? "confirmed" : "proposed", source: { page: 1 } });
+  expect(patch.detailing.find(f => f.field === "materialRequirement")).toMatchObject({ provenance, source: { page: 2 } });
+  expect(patch.detailing).toContainEqual(s.detailing.find(f => f.field === "requiredPipeSpecification"));
 });

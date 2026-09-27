@@ -276,6 +276,29 @@ export function IntakeInputs(props: Props) {
   </div>;
 }
 
+/** Build the same provenance-aware facts used by the requirements save action. */
+export function sourceRequirementsPatch(cur: Snapshot, values: {
+  size: string; text: string; mat: string; provenance: Provenance; source: string; page: number;
+}): Pick<PackageInputs, "detailing" | "siteFacts"> {
+  const { size, text, mat, provenance, source, page } = values;
+  const pipes = cur.scope?.includedEntityIds.filter(id => cur.baselinePlan?.entities.find(e => e.id === id)?.kind === "pipe") ?? [];
+  const owned = (f: typeof cur.detailing[number]) => f.field === "nominalSize"
+    ? f.subjectIds.some(id => pipes.includes(id))
+    : (f.field === "materialRequirement" || f.field === "materialRequirement.material") && f.subjectIds.length === 0;
+  const syntheticLocked = [...cur.detailing, ...cur.siteFacts].some(f => owned(f) && factProvenance(f) === "synthetic_assumption");
+  const selectedProvenance = syntheticLocked ? "synthetic_assumption" : provenance;
+  const specs: FactSpec[] = [];
+  const evidence = { assetId: cur.sourceDrawing?.assetId, page: cur.sourceDrawing?.page };
+  if (size.trim() && pipes.length) specs.push({
+    ...evidence, field: "nominalSize", value: size.trim(), subjectIds: pipes, context: "detailing",
+    ...evidenceSpec(findFact(cur, "nominalSize", pipes[0]), selectedProvenance, `Read by you from ${cur.sourceDrawing?.drawingId ?? "the drawing"} p${cur.sourceDrawing?.page ?? 1}`),
+  });
+  if (text.trim()) specs.push({ ...evidence, page, field: "materialRequirement", value: text.trim(), ...evidenceSpec(findFact(cur, "materialRequirement"), selectedProvenance, source), context: "detailing" });
+  if (mat) specs.push({ ...evidence, page, field: "materialRequirement.material", value: mat, ...evidenceSpec(findFact(cur, "materialRequirement.material"), selectedProvenance, source), context: "detailing" });
+  const kept = { detailing: cur.detailing.filter(f => !owned(f)), siteFacts: cur.siteFacts.filter(f => !owned(f)) };
+  return upsertFacts(kept, specs);
+}
+
 /** What the source states about size and material, kept apart from any product selection. */
 function SourceRequirements({ s, act, busy, setNotice, intake, nominal, requirement, material }: Props & { nominal: ReturnType<typeof findFact>; requirement: ReturnType<typeof findFact>; material: ReturnType<typeof findFact> }) {
   const pipes = s.scope?.includedEntityIds.filter(id => s.baselinePlan?.entities.find(e => e.id === id)?.kind === "pipe") ?? [];
@@ -285,10 +308,10 @@ function SourceRequirements({ s, act, busy, setNotice, intake, nominal, requirem
   const [ref, setRef] = useState(requirement?.source.description.replace(/^Read by you from /, "") ?? "");
   useEffect(() => { setSize(typeof nominal?.value === "string" ? nominal.value : ""); }, [nominal?.id, nominal?.value]);
   useEffect(() => { setText(typeof requirement?.value === "string" ? requirement.value : ""); setMat(typeof material?.value === "string" ? material.value : ""); setRef(requirement?.source.description.replace(/^Read by you from /, "") ?? ""); }, [requirement?.id, requirement?.value, material?.value]);
-  const previousRequirement = requirement ?? material;
+  const previousRequirement = requirement ?? material ?? nominal;
   const [provenance, setProvenance] = useState<Provenance>(() => factProvenance(previousRequirement));
-  const syntheticLocked = [requirement, material].some(f => !!f && factProvenance(f) === "synthetic_assumption");
-  useEffect(() => setProvenance(factProvenance(previousRequirement)), [requirement?.id, requirement?.provenance, material?.id, material?.provenance]);
+  const syntheticLocked = [nominal, requirement, material].some(f => !!f && factProvenance(f) === "synthetic_assumption");
+  useEffect(() => setProvenance(factProvenance(previousRequirement)), [requirement?.id, requirement?.provenance, material?.id, material?.provenance, nominal?.id, nominal?.provenance]);
   const savedPage = requirement?.source.page ?? material?.source.page ?? s.sourceDrawing?.page ?? 1;
   const [sourcePage, setSourcePage] = useState(String(savedPage));
   useEffect(() => setSourcePage(String(savedPage)), [savedPage, s.sourceDrawing?.assetId]);
@@ -298,17 +321,7 @@ function SourceRequirements({ s, act, busy, setNotice, intake, nominal, requirem
   const source = `Read by you from ${ref.trim() || "the drawing"}`;
   const save = () => act("requirements", cur => {
     if (!validPage) throw new Error("Choose a valid requirement source page.");
-    const specs: FactSpec[] = [];
-    const evidence = { assetId: cur.sourceDrawing?.assetId, page: cur.sourceDrawing?.page };
-    const requirementEvidence = (field: string) => evidenceSpec(findFact(cur, field), syntheticLocked ? "synthetic_assumption" : provenance, source);
-    if (size.trim() && pipes.length) specs.push({ ...evidence, field: "nominalSize", value: size.trim(), subjectIds: pipes, confirmation: "confirmed", provenance: "confirmed_evidence", context: "detailing", source: `Read by you from ${cur.sourceDrawing?.drawingId ?? "the drawing"} p${cur.sourceDrawing?.page ?? 1}` });
-    if (text.trim()) specs.push({ ...evidence, page, field: "materialRequirement", value: text.trim(), ...requirementEvidence("materialRequirement"), context: "detailing" });
-    if (mat) specs.push({ ...evidence, page, field: "materialRequirement.material", value: mat, ...requirementEvidence("materialRequirement.material"), context: "detailing" });
-    const owned = (f: typeof cur.detailing[number]) => f.field === "nominalSize"
-      ? f.subjectIds.some(id => pipes.includes(id))
-      : (f.field === "materialRequirement" || f.field === "materialRequirement.material") && f.subjectIds.length === 0;
-    const kept = { detailing: cur.detailing.filter(f => !owned(f)), siteFacts: cur.siteFacts.filter(f => !owned(f)) };
-    return patchClearing(cur, upsertFacts(kept, specs), setNotice);
+    return patchClearing(cur, sourceRequirementsPatch(cur, { size, text, mat, provenance, source, page }), setNotice);
   });
   return <Section title="Source requirements" count={requirement ? "entered" : undefined} defaultOpen={!requirement}>
     <p className="fa-muted">What the drawing or its notes require. This is kept as stated and is not a product selection or an approval.</p>

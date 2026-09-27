@@ -88,3 +88,13 @@ The five review findings have dedicated regression coverage:
 The follow-up suite passed 41 files / 823 tests, including authenticated export
 and stale-artifact integration checks. The four manual browser workflows above
 were not repeated for this follow-up.
+
+A second review found that the separate Source requirements save action could
+still promote a synthetic nominal size. That action now derives confirmation
+from the selected provenance and locks existing synthetic requirements before
+replacing facts, including legacy synthetic descriptions. Six regression cases
+cover saved/reloaded assumptions and each provenance choice. The suite now
+passes 41 files / 829 tests; typecheck and build also pass. A direct run from the
+actual requirements patch through profile evaluation and export confirmed no
+nominal-size conflict and preserved `synthetic_assumption` / `proposed` in the
+exported fact. Browser E2E was not repeated for this correction.
