@@ -9,18 +9,16 @@ import { DropArea, FileButtons, MAX_MB, StatusBadge, isBusy, localPreview, sizeT
 /**
  * Ask Sprink: a question panel beside the drawing workspace.
  * Everything shown comes from the server: retrieved passages, notes, script results. The panel
- * keeps source wording, Sprink's notes and calculations visually separate.
+ * keeps source wording and Sprink's notes visually separate.
  */
 const SUGGESTED = [
   "A duct is blocking this branch. What rules do I need to check before changing the route?",
-  "Will the pipe clear the duct if I drop it 600 mm?",
-  "What cut length do I need for 2400 mm center to center?",
+  "What clearance does the source require around a duct?",
+  "What does the manual say about cutting this pipe?",
 ];
 const MEASURE_FIELDS: Array<{ name: string; label: string; unit: string }> = [
   { name: "obstructionWidth", label: "Duct width along the pipe", unit: "mm" },
   { name: "addedFittings", label: "Fittings the new route adds", unit: "count" },
-  { name: "verticalOffset", label: "Vertical move (− is down)", unit: "mm" },
-  { name: "centerToCenter", label: "Center to center", unit: "mm" },
 ];
 const ORIGIN_LABEL: Record<Origin, string> = { project: "Project", sample: "Sample", you: "You", derived: "Derived", catalog: "Catalog", document: "Document", photo: "Photo" };
 const ROLE_LABEL: Record<string, string> = {
@@ -231,8 +229,8 @@ function Answer({ a, viewing, onView, onFollowUp, busy, stale, onAskAgain }: { a
     <p className="fa-answer-q">{a.question}</p>
     {stale && <p className="fa-warn small">This answer was for piece {a.context.selectedElementId}. The selection has changed. <button type="button" className="fa-link" onClick={onAskAgain}>Ask again</button></p>}
     <div className="fa-answer-status">
-      <Badge tone={a.status === "no_source" ? "amber" : a.status === "needs_input" ? "amber" : "neutral"}>{{ answered: "From the library", needs_input: "Needs your input", no_source: "No source found", calculation_only: "Calculation" }[a.status]}</Badge>
-      <small className="fa-muted">{a.classification.kind === "both" ? "Source lookup and calculation" : a.classification.kind === "calculation" ? "Calculation" : "Source lookup"} · answered in {a.timings.totalMs} ms</small>
+      <Badge tone={a.status === "no_source" ? "amber" : a.status === "needs_input" ? "amber" : "neutral"}>{{ answered: "From the library", needs_input: "Needs your input", no_source: "No source found" }[a.status]}</Badge>
+      <small className="fa-muted">Source lookup · answered in {a.timings.totalMs} ms</small>
     </div>
     <p className="fa-answer-summary">{a.summary}</p>
     {demo && <p className="fa-demo-note"><Icon name="alert" size={14} />Answered from demonstration documents. Their text is invented for testing and is not code text.</p>}
@@ -276,7 +274,6 @@ function Answer({ a, viewing, onView, onFollowUp, busy, stale, onAskAgain }: { a
       {a.attachments.map(x => <AttachmentFacts key={x.id} x={x} />)}
     </Block>}
 
-    {a.calculation && <CalculationBlock c={a.calculation} />}
 
     {a.sources.length > 0 && <Block title="Source references" aside={`${a.sources.length}`}>
       <ul className="fa-refs">{a.sources.map(s => <SourceRow key={s.key} c={s} on={viewing?.key === s.key} onOpen={() => onView(s)} />)}</ul>
@@ -316,20 +313,6 @@ function FollowUpRow({ f, busy, onAnswer }: { f: FollowUp; busy: boolean; onAnsw
         <Button disabled={busy || !v.trim() || !Number.isFinite(Number(v))} onClick={() => onAnswer(v.trim())}>Use</Button>
       </form>}
   </div>;
-}
-
-function CalculationBlock({ c }: { c: NonNullable<AskAnswer["calculation"]> }) {
-  return <Block title={`Calculation: ${c.title}`}>
-    <div className="fa-calc">
-      {c.status === "ok"
-        ? <dl className="fa-calc-out">{c.outputs.map(o => <div key={o.name}><dt>{o.label}</dt><dd className={typeof o.value === "number" ? "mono" : ""}>{o.value}{o.unit ? ` ${o.unit}` : ""}</dd></div>)}</dl>
-        : <Callout tone="amber" title={c.status === "missing_inputs" ? "Missing inputs" : c.status === "out_of_scope" ? "Outside what the script supports" : "Input rejected"}>{c.message}{c.missing.length ? ` ${c.missing.join("; ")}.` : ""}</Callout>}
-      {c.inputs.length > 0 && <table className="fa-mini"><thead><tr><th>Input</th><th>Value</th><th>From</th></tr></thead>
-        <tbody>{c.inputs.map(i => <tr key={i.name}><td>{i.label}</td><td className="mono">{String(i.value)}{i.unit ? ` ${i.unit}` : ""}</td><td><Origin o={i.origin} detail={i.detail} /></td></tr>)}</tbody></table>}
-      <small className="fa-muted">Script <span className="mono">{c.script.fn}</span> ({c.script.module}) <span className="mono">{c.script.version}</span></small>
-      {c.limits && <small>{c.limits}</small>}
-    </div>
-  </Block>;
 }
 
 function SourceRow({ c, on, onOpen }: { c: Citation; on: boolean; onOpen: () => void }) {

@@ -193,8 +193,6 @@ check('question and attachments survive a reload', (await page.inputValue('#ask-
 // ---------------------------------------------------------------- existing checks through the UI
 await askQuestion('What is the maximum spacing between sidewall sprinklers in a light hazard occupancy?');
 check('unsupported question gets the no-source answer', (await page.locator('.fa-answer-summary').innerText()).startsWith("I couldn't find a supporting source in the project library."));
-await askQuestion('Will the pipe clear the duct if I drop it 600 mm?');
-check('calculation shows script, version and inputs', await page.locator('.fa-calc-out').count() > 0 && (await page.locator('.fa-calc').innerText()).includes('evaluateLocalPlanGeometry'));
 
 // ---------------------------------------------------------------- phone
 await page.setViewportSize({ width: 390, height: 844 });

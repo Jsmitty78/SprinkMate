@@ -1,7 +1,8 @@
+import { type SourceSearch } from './semantic.js';
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { WorkPackageSnapshot } from '@field-agent/core';
-import { ask, AskInputError, notesComposer, type AskRequest, type AttachmentInput } from './ask.js';
+import { ask, AskInputError, type AskRequest, type AttachmentInput } from './ask.js';
 import type { UploadService } from '../uploads/service.js';
 import { UploadError } from '../uploads/formats.js';
 import { loadDemoSources } from './demo.js';
@@ -11,7 +12,7 @@ import type { ExplanationFile, SourceDocumentInput } from './types.js';
 const TEXT_FILE = /\.(md|markdown|txt)$/i;
 
 /** Mount only under the authenticated /api middleware. */
-export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => WorkPackageSnapshot, uploads?: UploadService) {
+export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => WorkPackageSnapshot, uploads?: UploadService, search?: SourceSearch) {
   const app = new Hono();
   app.onError((error, c) => {
     if (error instanceof SourceError) return c.json({ error: error.message, code: error.code }, error.status as ContentfulStatusCode);
@@ -76,7 +77,7 @@ export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => W
       const { upload, observations } = await uploads.observations(id);
       attachments.push({ upload, observations });
     }
-    return c.json(ask(store, body, snapshot, notesComposer, attachments));
+    return c.json(await ask(store, body, snapshot, attachments, search));
   });
   return app;
 }

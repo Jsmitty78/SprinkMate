@@ -53,8 +53,8 @@ import { evaluateProfile, type ProfileOutput } from "./profiles.js";
 import { materialDescription } from "./describe.js";
 import { exportSnapshot } from "./snapshot.js";
 import { SourceStore } from "../sources/store.js";
-import { planQuery } from "../sources/retrieve.js";
 import { PackageError } from "../work-packages/validation.js";
+import { JevSourceSearch, type SourceSearch } from "../sources/semantic.js";
 
 export const INTEGRATION_VERSION = "scenario-integration-8-agent-selected-rules";
 function generationRecovery(path: string, message: string): string {
@@ -285,6 +285,7 @@ export function createIntegratedServices(
   options: {
     pdfFontPath?: string;
     choice?: ChoiceClient;
+    sourceSearch?: SourceSearch;
     llm?: ConstructorParameters<typeof WorkflowRunner>[0]["llm"];
     testStream?: ConstructorParameters<typeof WorkflowRunner>[0]["testStream"];
     onEvent?: ConstructorParameters<typeof WorkflowRunner>[0]["onEvent"];
@@ -294,6 +295,7 @@ export function createIntegratedServices(
   const configVersion = options.configVersion ?? INTEGRATION_VERSION,
     detailStore = new IntegrationStore(store);
   const sources = new SourceStore(store.db);
+  const sourceSearch = options.sourceSearch ?? new JevSourceSearch(process.env.TYPESAFE_API_KEY);
   const choice =
     options.choice ??
     (process.env.TYPESAFE_API_KEY
@@ -375,7 +377,7 @@ export function createIntegratedServices(
         safe(`${initial.id}/${initial.inputRevision}/${key}`);
       const domain: DomainPort = {
         ruleCatalog() { return getProjectRuleCatalog(); },
-        inspect(_packageId, query) {
+        async inspect(_packageId, query) {
           const s = current();
           if (query.kind === "snapshot") return structuredClone({ ...s, workflow: domain.read(s.id) });
           if (query.kind === "drawing") return { sourceDrawing: s.sourceDrawing, baselinePlan: s.baselinePlan, scope: s.scope, detailing: s.detailing, siteFacts: s.siteFacts };
@@ -385,8 +387,7 @@ export function createIntegratedServices(
           const allowed = new Set(documents.map(d => d.id));
           if (query.id && !allowed.has(query.id)) throw new Error("source_not_available_in_project");
           const selected = query.id ? documents.filter(d => d.id === query.id) : documents;
-          const search = query.query ? planQuery(query.query) : undefined;
-          const hits = search?.match ? new Set(sources.search(search.match, 30, selected.map(d => d.id)).map(h => h.key)) : undefined;
+          const hits = query.query ? new Set(await sourceSearch.select(query.query, selected.flatMap(doc => sources.sections(doc.id).map(section => ({ doc, section }))))) : undefined;
           return { documents: selected, passages: selected.flatMap(d => sources.sections(d.id)
             .filter(section => hits ? hits.has(section.key) : !!query.id)
             .map(section => ({ documentId: d.id, section, notes: sources.notes(section.key), source: d.url ?? d.filename }))),

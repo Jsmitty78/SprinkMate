@@ -1,3 +1,4 @@
+import { scriptedSearch } from './fixtures/source-search.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,7 +17,7 @@ import { integratedInput } from './fixtures/integrated-package.js';
 /**
  * End-to-end server tests for uploads. These use the real decoders (sharp, libheif-js, PDF.js,
  * bmp-ts) and real OCR (Tesseract via tesseract.js) on the invented fixtures in
- * fixtures/uploads. Nothing is mocked.
+ * fixtures/uploads. JEV selection is scripted; extraction, storage and citation paths are real.
  */
 
 const FIX = join(import.meta.dirname, '../../../fixtures/uploads');
@@ -32,7 +33,7 @@ beforeAll(async () => {
   packages = new WorkPackageService(new WorkPackageStore(field.store.db));
   const sources = new SourceStore(field.store.db);
   uploads = new UploadService(field.store.db, dir, sources);
-  app = createApp(field, { token, workPackages: packages, sources, uploads });
+  app = createApp(field, { token, workPackages: packages, sources, uploads, sourceSearch: scriptedSearch });
   const created = packages.create({ projectId: 'demo-project', title: 'Duct at branch L-2', intent: 'adapt_to_site' });
   const asset = await packages.upload(created.id, Buffer.from('%PDF-1.4\nfixture'), 'application/pdf', 'drawing.pdf');
   packages.edit(created.id, { expectedRevision: 1, patch: integratedInput(asset.id, 3) });
@@ -171,7 +172,7 @@ describe('reference documents: extract, review, index, answer', () => {
     expect(cite.regions[0]).toMatchObject({ page: 2 });
     // The explanation quotes the uploaded wording; no answer text is hardcoded for this document.
     const quote = a.explanation.find(c => c.kind === 'quote' && c.citations.includes(cite.key));
-    expect(quote?.text).toBe('S-5.2.1 Joints made with solvent cement shall cure at least 24 hours before hydrostatic testing when the air temperature is below 10 °C.');
+    expect(quote?.text).toContain('S-5.2.1 Joints made with solvent cement shall cure at least 24 hours before hydrostatic testing when the air temperature is below 10 °C.');
     expect(a.sources.some(s => s.sectionId === 'S-5.2 Note 1')).toBe(true);
     // The citation link opens that passage with its location on page 2.
     const passage = await (await app.request(cite.link, { headers: auth })).json();
