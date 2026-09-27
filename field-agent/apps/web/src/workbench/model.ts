@@ -384,3 +384,38 @@ export function runBlockers(s: WorkPackageSnapshot): string[] {
   }
   return out;
 }
+
+
+interface RunDraft {
+  geometry: string;
+  unit: "mm" | "in";
+  rows: Array<{ kind: RunNodeKind; x: string; y: string }>;
+}
+
+/** Refresh only changed geometry; unit switches preserve exact draft values, including incomplete text. */
+export function syncRunDraft(draft: RunDraft | null, saved: RunNode[], unit: "mm" | "in"): RunDraft {
+  const geometry = JSON.stringify(saved);
+  if (!draft || draft.geometry !== geometry) return {
+    geometry, unit, rows: saved.map(n => ({ kind: n.kind, x: lengthInput(n.x, unit), y: lengthInput(n.y, unit) })),
+  };
+  if (draft.unit === unit) return draft;
+  const nodes = draft.rows.map(r => ({ kind: r.kind, x: parseLength(r.x, draft.unit), y: parseLength(r.y, draft.unit) }));
+  if (!runChanged(nodes, saved, draft.unit)) return syncRunDraft(null, saved, unit);
+  const convert = (text: string) => {
+    const mm = parseLength(text, draft.unit);
+    return mm === null ? text : `${mm} mm`;
+  };
+  return { geometry, unit, rows: draft.rows.map(r => ({ kind: r.kind, x: convert(r.x), y: convert(r.y) })) };
+}
+
+
+export function runEditPatch(cur: WorkPackageSnapshot, nodes: RunNode[], built: Extract<ReturnType<typeof buildRun>, { plan: Plan }>): Partial<PackageInputs> {
+  const reshaped = topologyChanged(nodes, runNodes(cur.baselinePlan));
+  const base = reshaped ? dropSubjectFacts(cur) : cur;
+  const keep = built.datums.filter(d => findFact(base, d.field, d.subjectIds![0])?.value !== d.value);
+  return {
+    baselinePlan: built.plan, scope: built.scope,
+    ...(reshaped ? { changeRequest: null } : {}),
+    ...dropOrphanFacts(upsertFacts(base, keep), built.plan),
+  };
+}
