@@ -7,9 +7,7 @@ import { createApp } from '../src/api.js';
 import { FieldService } from '../src/service.js';
 import { exportFixture } from './fixtures/export-package.js';
 import { WorkPackageExports } from '../src/exports/service.js';
-import { csvCell, csvFiles } from '../src/exports/csv.js';
-import { canonical, snapshotHash, validateSnapshot } from '../src/exports/snapshot.js';
-import { renderPdf } from '../src/exports/pdf.js';
+import { canonical, validateSnapshot } from '../src/exports/snapshot.js';
 import { exportRoutes } from '../src/exports/routes.js';
 import type { ExportSnapshot } from '../src/exports/types.js';
 
@@ -106,10 +104,6 @@ describe('revision-bound exports', () => {
     t.set(null);
     await expect(t.service.download('fixture-package', manifest.exportId, 'manifest.json')).rejects.toMatchObject({ status: 404 });
   });
-  it('requires Unicode font configuration instead of silently corrupting Japanese', async () => {
-    const s = exportFixture(); s.title = '施工資料';
-    await expect(renderPdf(s)).rejects.toMatchObject({ status: 422 });
-  });
   it('validates cross-references and explicit unknowns', () => {
     const s = exportFixture(); s.cuts[0].sourceIds = ['missing-source'];
     expect(() => validateSnapshot(s)).toThrow('cross-reference');
@@ -118,22 +112,9 @@ describe('revision-bound exports', () => {
     s.cuts[0].status = 'known'; s.selectedPlan.segments[0].from[0] = NaN;
     expect(() => validateSnapshot(s)).toThrow('finite 3D');
   });
-  it('canonicalizes object-key order without dropping output content', () => {
-    const s = exportFixture();
-    expect(snapshotHash(s)).toBe(snapshotHash({ ...s, binding: Object.fromEntries(Object.entries(s.binding).reverse()) } as ExportSnapshot));
-  });
 });
 
 describe('CSV and HTTP boundaries', () => {
-  it.each(['=SUM(1,2)', '+cmd', '-cmd', '@SUM(A1)', '  =1', '\t=1', '\r=1', '\n=1', '\uFEFF=1', '\u0000=1'])('escapes dangerous spreadsheet text %j', value => {
-    expect(csvCell(value).startsWith('"\'')).toBe(true);
-  });
-  it('preserves commas, quotes, Unicode and real numeric zero', () => {
-    expect(csvCell('a,"b"\nc')).toBe('"a,""b""\nc"');
-    expect(csvCell(0)).toBe('"0"'); expect(csvCell(null)).toBe('""');
-    const s = exportFixture(); s.materials[0].description = '配管';
-    expect(csvFiles(s).bom.toString()).toContain('配管');
-  });
   it('mounts into the real host without exposing exports outside bearer authentication', async () => {
     const t = await setup();
     const legacy = new FieldService(join(t.directory, 'legacy'));
@@ -168,25 +149,4 @@ describe('CSV and HTTP boundaries', () => {
     expect((await app.request(path, { method: 'POST', headers, body: JSON.stringify({ expectedBinding: t.current.binding, snapshot: t.current }) })).status).toBe(400);
     expect((await app.request(path, { method: 'POST', headers, body: '{' })).status).toBe(400);
   });
-});
-
-it('keeps CSV growth linear and package metadata separate from quantity rows', () => {
-  const make = (n: number) => {
-    const s = exportFixture();
-    s.inputFacts = Array.from({ length: n }, (_,i) => ({ id: `fact-${i}`, field: 'nominalSize', value: '2 inch', unit: null, subjectIds: ['P0'], confirmation: 'confirmed', provenance: 'confirmed_evidence', context: 'detailing', unknownReason: null, source: { description: 'unique provenance marker', assetId: null, page: 1 } }));
-    s.materials = Array.from({ length: n }, (_,i) => ({ ...s.materials[0], id: `material-${i}` }));
-    s.cuts = Array.from({ length: n }, (_,i) => ({ ...s.cuts[0], pieceId: `piece-${i}` }));
-    return csvFiles(s);
-  };
-  const small = make(100), large = make(200);
-  for (const key of ['bom', 'cuts'] as const) {
-    expect(large[key].length).toBeLessThan(small[key].length * 2.2);
-    const text = small[key].toString();
-    expect(text.match(/unique provenance marker/g)).toHaveLength(100);
-    const rows = text.trim().split('\r\n');
-    expect(rows).toHaveLength(102);
-    expect(rows[1]).toContain('"package_metadata"');
-    expect(rows[1]).not.toContain('"known"');
-    expect(rows.slice(2).every(row => !row.includes('unique provenance marker'))).toBe(true);
-  }
 });

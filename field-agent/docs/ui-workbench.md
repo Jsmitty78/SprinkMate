@@ -114,7 +114,7 @@ What a drawing-only package (R2 in #1) now shows, in the browser and in the expo
 ## Checks
 
 ```
-pnpm test        # includes apps/web/src/workbench/model.test.ts
+pnpm test        # API / integration tests and internal fault-injection tests
 pnpm typecheck
 pnpm build
 ```
