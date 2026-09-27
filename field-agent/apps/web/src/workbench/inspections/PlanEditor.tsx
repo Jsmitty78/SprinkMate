@@ -1,3 +1,4 @@
+import "./drawing-editor.css";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { newDrawingId, closestPipe, connectAt, defaultDrawingLayers, referenceChanges, referenceProvenance, drawingBody, drawingReference, drawingTransform, exampleDrawing, pipeLength, renderDrawingSvg, SHEET, validateDrawing, type DrawingModel, type PlanPoint } from '@field-agent/core';
 import type { Action, TaskSnapshot } from './types.js';
