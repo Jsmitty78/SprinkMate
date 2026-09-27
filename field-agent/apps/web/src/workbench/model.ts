@@ -197,7 +197,8 @@ export function planShape(plan: Plan | null | undefined, context: ReadonlySet<st
   for (const e of plan.entities) {
     const known = e.ports.filter(p => p.position);
     if (e.kind === "pipe") {
-      const a = e.ports.find(p => p.id === "start")?.position, b = e.ports.find(p => p.id === "end")?.position;
+      const a = e.ports.find(p => p.id === "start")?.position ?? (e.ports.length === 2 ? e.ports[0].position : null);
+      const b = e.ports.find(p => p.id === "end")?.position ?? (e.ports.length === 2 ? e.ports[1].position : null);
       if (a && b) shape.segments.push({ id: e.id, a, b, productId: e.productId, ...(context.has(e.id) ? { context: true } : {}) });
       else shape.undrawable.push({ id: e.id, reason: e.ports.find(p => !p.position)?.unknownReason ?? "Pipe end position unknown" });
     } else if (known.length) {

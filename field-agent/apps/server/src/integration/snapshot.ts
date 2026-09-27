@@ -1,4 +1,4 @@
-import { isSyntheticPackageFact, adaptationFrame, type WorkPackageSnapshot } from "@field-agent/core";
+import { isSyntheticPackageFact, adaptationFrame, getProjectRuleCatalog, type WorkPackageSnapshot } from "@field-agent/core";
 import type { FabricationOutput } from "@field-agent/fabrication";
 import {
   ExportError,
@@ -9,6 +9,8 @@ import {
 } from "../exports/types.js";
 import type { Detail, IntegratedState } from "./runtime.js";
 import { materialDescription, retainedContext } from "./describe.js";
+import { reviewFingerprint } from "../work-packages/site-work.js";
+import { siteEnvelopeChecks } from "./site-envelope.js";
 
 const isAssumption = (description: string) =>
   description.startsWith("ASSUMPTION:");
@@ -59,7 +61,13 @@ export function exportSnapshot(
     baseline = state.details.find(
       (d) => d.fabrication.planId === s.baselinePlan?.id,
     );
-  if (!d?.profile || !baseline || !s.sourceDrawing) return null;
+  if (!d || !baseline || !s.sourceDrawing) return null;
+  // A calculated draft can be exported before verification, but every catalog rule
+  // remains explicitly unexecuted/unknown. This never evaluates a rule for JEV.
+  const checks = d.profile?.checks ?? getProjectRuleCatalog().map(rule=>({
+    id:`UNEXECUTED-${rule.id}`,subjectIds:[],status:'unknown' as const,state:'not_executed',
+    reason:`No verification execution is recorded. ${rule.title}: applicability and required evidence remain unconfirmed.`,sourceRefs:[] as string[],
+  }));
   const f = d.fabrication;
   const binding = (
     revision: number,
@@ -90,7 +98,7 @@ export function exportSnapshot(
   for (const e of f.evidence) sources.set(e.id, { id: e.id, title: e.id, reference: e.description });
   const inputFacts = [...s.detailing, ...s.siteFacts].map(f => ({ ...f, provenance: f.provenance ?? "unspecified_legacy" }));
   for (const fact of inputFacts) sources.set(fact.id, { id: fact.id, title: `${fact.field}: ${fact.value ?? "unknown"} ${fact.unit ?? ""}`, reference: `${fact.confirmation}; ${fact.provenance}; ${fact.source.description}; asset ${fact.source.assetId ?? "none"}; page ${fact.source.page ?? "unknown"}` });
-  for (const c of d.profile.checks)
+  for (const c of checks)
     for (const ref of c.sourceRefs)
       if (!sources.has(ref))
         sources.set(ref, { id: ref, title: ref, reference: ref });
@@ -218,7 +226,14 @@ export function exportSnapshot(
           : reason(o.reasons, "Unsupported procedure"),
     })),
     changes,
-    findings: d.profile.checks.map((c) => ({
+    ...(s.siteWork ? { siteReview: { alternatives:(s.outputs.candidates?.candidates??[]).map((c,index)=>{
+      const result=s.outputs.results.filter(r=>r.planId===c.plan.id).at(-1);
+      return {label:`Route ${String.fromCharCode(65+index)}${s.selectedPlan?.id===c.plan.id?' (selected)':''} / ${c.plan.id}`,
+        metrics:[...c.metrics.map(m=>`${m.name}: ${m.quantity.value??'unknown'} ${m.quantity.unit??''}`),`Fittings: ${c.plan.entities.filter(e=>e.kind==='fitting').length}`].join('\n'),
+        cuts:result?result.cuts.map(cut=>`${cut.pieceId}: ${cut.length.value??'UNKNOWN'} ${cut.length.unit??''}`).join('\n'):'Not calculated',
+        binding:`Candidate revision ${s.outputs.candidates!.inputRevision}; calculation revision ${result?.inputRevision??'none'}; ${result?.inputRevision===s.inputRevision&&result.configVersion===s.configVersion?'current calculation':'historical calculation — revalidation required'}`};
+    }), reason:s.changeRequest?.description ?? '', evidence:s.siteWork.evidence.map(e=>({label:e.label,page:e.page,synthetic:e.synthetic})), readings:s.siteWork.readings.map(r=>`${r.reviewedAt?'Reviewed':'Unconfirmed'} reading ${r.id}: ${r.notes}`), reviews:s.siteWork.reviews.map(r=>({...r,current:r.fingerprint===reviewFingerprint(s)})) } } : {}),
+    findings: [...checks, ...siteEnvelopeChecks(s,s.selectedPlan ?? s.baselinePlan!)].map((c) => ({
       id: c.id,
       status: c.status,
       description: `${c.state}: ${c.reason}`,

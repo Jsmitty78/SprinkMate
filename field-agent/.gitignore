@@ -6,3 +6,6 @@ dist/
 .DS_Store
 packages/fabrication/examples/*.json
 evaluation/private/
+
+# Local browser evidence, isolated databases and provider traces
+e2e-out/

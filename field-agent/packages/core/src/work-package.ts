@@ -84,7 +84,7 @@ export const AnswerPackageRequestSchema = object({
 });
 export const StartPackageRunSchema = object({
   expectedRevision: revision,
-  goal: choices('prepare_from_drawing', 'adapt_to_site', 'export_selected_package'),
+  goal: choices('prepare_from_drawing', 'adapt_to_site', 'export_selected_package', 'read_site_evidence'),
 });
 const binding = { id, inputRevision: revision, configVersion: text };
 const gap = object({ id, subjectIds: ids, reason: text });
@@ -128,6 +128,7 @@ export interface PackageRun {
   status: PackageRunStatus; progress: string; stopReason: string | null; startedAt: string; updatedAt: string;
 }
 export interface WorkPackageSnapshot extends PackageInputs {
+  siteWork?: import('./site-work.js').SiteWork;
   id: string; projectId: string; intent: PackageIntent; inputRevision: number; configVersion: string;
   selectedPlan: PackagePlan | null;
   outputs: { candidates: CandidateSet | null; results: PackageResult[]; requests: PackageRequest[]; artifacts: PackageArtifact[] };

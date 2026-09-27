@@ -5,6 +5,7 @@ import type { Store } from '../store.js';
 import { WorkPackageStore } from './store.js';
 import { WorkPackageService } from './service.js';
 import { PackageError } from './validation.js';
+import { SiteWorkService, reviewFingerprint } from './site-work.js';
 
 const defaults = new WeakMap<Database.Database, WorkPackageService>();
 export function defaultWorkPackages(store: Store) {
@@ -19,6 +20,16 @@ export function defaultWorkPackages(store: Store) {
 /** Mount only under the existing authenticated /api middleware. */
 export function workPackageRouter(service: WorkPackageService, loadDetails?: (id: string) => unknown) {
   const app = new Hono();
+  const site = new SiteWorkService(service);
+  app.post('/:id/site-evidence', async c => c.json(await site.evidence(c.req.param('id'), await c.req.json())));
+  app.post('/:id/reading-request', async c => c.json(site.request(c.req.param('id'), await c.req.json())));
+  app.post('/:id/reading-confirmation', async c => c.json(site.confirm(c.req.param('id'), await c.req.json())));
+  app.post('/:id/measurements', async c => c.json(site.measure(c.req.param('id'), await c.req.json())));
+  app.post('/:id/designer-reviews', async c => c.json(site.review(c.req.param('id'), await c.req.json())));
+  app.get('/:id/site-work', c => {
+    const s = service.get(c.req.param('id'));
+    return c.json({ work: s.siteWork ?? null, fingerprint: reviewFingerprint(s) });
+  });
   app.onError((error, c) => {
     if (error instanceof PackageError) return c.json({ error: error.message, code: error.code }, error.status as ContentfulStatusCode);
     if (error instanceof SyntaxError) return c.json({ error: 'Invalid JSON', code: 'invalid_json' }, 400);

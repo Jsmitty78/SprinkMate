@@ -93,7 +93,7 @@ export function SiteShapeEditor({ s, act, busy, setNotice, enabled, drawingBlock
         const v = state.draft[id], points = [{ x: v[0]!, y: v[1]! }, { x: v[3]!, y: v[1]! }, { x: v[3]!, y: v[4]! }, { x: v[0]!, y: v[4]! }].map(toScreen);
         const on = active && selected === id;
         return <g key={id} data-shape={id} style={{ cursor: active ? "move" : undefined }}>
-          <polygon points={points.map(p => `${p.x},${p.y}`).join(" ")} fill={id === "duct" ? "#ec99432b" : "var(--fa-blue-soft)"} stroke={on ? "var(--fa-blue)" : id === "duct" ? "#b86d1d" : "var(--fa-blue)"} strokeWidth={surface.px(on ? 2.5 : 1.5)} strokeDasharray={id === "workEnvelope" ? `${surface.px(6)} ${surface.px(4)}` : undefined} />
+          <polygon points={points.map(p => `${p.x},${p.y}`).join(" ")} fill={id === "duct" ? "#ec99432b" : "var(--fa-blue-soft)"} fillOpacity={id === "workEnvelope" ? 0.2 : 1} stroke={on ? "var(--fa-blue)" : id === "duct" ? "#b86d1d" : "var(--fa-blue)"} strokeWidth={surface.px(on ? 2.5 : 1.5)} strokeDasharray={id === "workEnvelope" ? `${surface.px(6)} ${surface.px(4)}` : undefined} />
           <text x={points[0].x} y={points[0].y - surface.px(12)} fontSize={surface.px(12)} fill="#20354b" paintOrder="stroke" stroke="white" strokeWidth={surface.px(3)} pointerEvents="none">{tr(labels[id])} · {Math.round(v[3]! - v[0]!)} × {Math.round(v[4]! - v[1]!)} mm{v[2] === null || v[5] === null ? ` · ${tr("height unknown")}` : ""}</text>
           {on && points.map((p, i) => <rect key={i} data-shape={id} data-corner={i} x={p.x - surface.px(5)} y={p.y - surface.px(5)} width={surface.px(10)} height={surface.px(10)} fill="white" stroke="var(--fa-blue)" strokeWidth={surface.px(2)} style={{ cursor: "crosshair" }} />)}
         </g>;
