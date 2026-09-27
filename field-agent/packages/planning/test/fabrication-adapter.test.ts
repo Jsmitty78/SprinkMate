@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { tsImport } from "tsx/esm/api";
+import { evaluateLocalPlanGeometry } from "../../core/src/local-change-geometry.js";
 import { createLocalGeometryPort, deriveCandidatePackages, generateCandidates, pointToMillimetres,
   selectCandidate, socketDatumsToPlanning, toFabricationInput } from "../src/index.js";
 import type { FabricationDetailing, FabricationValue } from "../src/index.js";
 import { ductFixture, fact, p } from "../fixtures/duct.js";
-import { fixturePort } from "./fixture-port.js";
 
+import { spearsCatalog, deriveWorkPackage, type FabricationOutput } from "../../fabrication/src/index.js";
+
+const engine = createLocalGeometryPort(evaluateLocalPlanGeometry);
 const unknown = <T>(): FabricationValue<T> => ({ value: null, status: "unknown", evidenceIds: [], reason: "Not confirmed for this example." });
 function detailing(): FabricationDetailing {
   return { baselinePlanId: "approved-plan", sourceDrawing: { id: "synthetic-drawing", revision: "A", approval: "approved" },
@@ -26,7 +28,7 @@ describe("socket datum and mm boundary adapters", () => {
 
   it("converts signed coordinates and tie-in datums to mm while retaining proposal status and lineage", () => {
     expect(pointToMillimetres(p(-1.4, 2, 0))).toEqual({ x: -1400, y: 2000, z: 0, unit: "mm", frameId: "room-frame" });
-    const input = ductFixture(), set = generateCandidates(input, fixturePort);
+    const input = ductFixture(), set = generateCandidates(input, engine);
     const packages = deriveCandidatePackages(input, set, request => toFabricationInput(request, detailing()));
     const dto = packages.candidates[0]!.workPackage;
     expect(dto.frame.lengthUnit).toBe("mm");
@@ -41,14 +43,11 @@ describe("socket datum and mm boundary adapters", () => {
   });
 });
 
-const geometryPath = process.env.PLANNING_GEOMETRY_MODULE, fabricationPath = process.env.PLANNING_FABRICATION_MODULE;
-describe.skipIf(!geometryPath || !fabricationPath)("read-only CPVC fabrication-lane integration", () => {
-  it("generates from a drawing plus duct, derives all plans through one port, then derives explicit selection at the next revision", async () => {
-    const core = await tsImport(geometryPath!, import.meta.url);
-    const fabrication = await tsImport(fabricationPath!, import.meta.url);
-    const input = ductFixture(), catalog = fabrication.spearsCatalog(input.configVersion);
-    const pipe = catalog.products.find((p: { kind: string }) => p.kind === "pipe");
-    const elbow = catalog.products.find((p: { kind: string }) => p.kind === "elbow_90");
+describe("CPVC fabrication integration", () => {
+  it("generates from a drawing plus duct, derives all plans through one port, then derives explicit selection at the next revision", () => {
+    const input = ductFixture(), catalog = spearsCatalog(input.configVersion);
+    const pipe = catalog.products.find(p => p.kind === "pipe")!;
+    const elbow = catalog.products.find(p => p.kind === "elbow_90")!;
     input.baseline.segments[0]!.productId = pipe.id;
     input.baseline.segments[0]!.outsideDiameter = { ...fact(pipe.outsideDiameter), evidenceIds: pipe.sourceIds };
     input.product = {
@@ -57,11 +56,11 @@ describe.skipIf(!geometryPath || !fabricationPath)("read-only CPVC fabrication-l
         { ...fact(elbow.centerToSocketBottom), evidenceIds: elbow.sourceIds }),
     };
     const before = structuredClone(input);
-    const set = generateCandidates(input, createLocalGeometryPort(core.evaluateLocalPlanGeometry));
+    const set = generateCandidates(input, engine);
     expect(set.candidates).toHaveLength(2);
-    const derive = (request: Parameters<typeof toFabricationInput>[0]) => fabrication.deriveWorkPackage(toFabricationInput(request, detailing()), catalog);
+    const derive = (request: Parameters<typeof toFabricationInput>[0]) => deriveWorkPackage(toFabricationInput(request, detailing()), catalog);
     const packages = deriveCandidatePackages(input, set, derive);
-    const totals = (output: { cuts: { cutLength: { value: number } }[] }) => output.cuts.reduce((n, cut) => n + cut.cutLength.value, 0);
+    const totals = (output: FabricationOutput) => output.cuts.reduce((n, cut) => n + cut.cutLength.value!, 0);
     // Hand arithmetic: H=0.060325; G=0.0333375; insertion=0.0269875.
     // Eight elbow ports + two 0.05 tie-in datums -> total takeout 0.3667 m.
     expect(totals(packages.baseline)).toBeCloseTo(9.9);
@@ -71,8 +70,8 @@ describe.skipIf(!geometryPath || !fabricationPath)("read-only CPVC fabrication-l
       const output = packages.candidates[i]!.workPackage;
       expect(totals(output)).toBeCloseTo(set.candidates[i]!.geometry.totalCutLengthM!);
       expect(output.operations.length).toBeGreaterThan(0);
-      expect(output.operations.some((operation: { status: string }) => operation.status === "needs_confirmation")).toBe(true);
-      expect(output.cuts.some((cut: { centerline: { basis: string } }) => cut.centerline.basis === "proposed_inputs")).toBe(true);
+      expect(output.operations.some(operation => operation.status === "needs_confirmation")).toBe(true);
+      expect(output.cuts.some(cut => cut.centerline.basis === "proposed_inputs")).toBe(true);
       expect(output.constructionApproval).toBe("not_assessed");
     }
     const selected = selectCandidate(set, set.candidates[0]!.id, input);
@@ -80,7 +79,7 @@ describe.skipIf(!geometryPath || !fabricationPath)("read-only CPVC fabrication-l
     if (!selected.ok) throw new Error("Fixture selection failed");
     const selectedInput = toFabricationInput({ ...input, inputRevision: 8, plan: selected.candidate.plan, status: "proposed" },
       { ...detailing(), selectedPlanId: selected.candidate.id });
-    const selectedOutput = fabrication.deriveWorkPackage(selectedInput, catalog);
+    const selectedOutput = deriveWorkPackage(selectedInput, catalog);
     expect(selectedOutput.inputRevision).toBe(8);
     expect(selectedOutput.selectedPlanId).toBe(selected.candidate.id);
     expect(totals(selectedOutput)).toBeCloseTo(12.4333);

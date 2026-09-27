@@ -1,5 +1,5 @@
 import data from './reference/itd-mezzanine.json' with { type: 'json' };
-import type { DrawingModel, DrawingLayers, PlanPoint, PlanPipe } from './plan.js';
+import type { DrawingModel, DrawingLayers, PlanPoint } from './plan.js';
 
 export const referenceSource = data.source;
 export const referenceCounts = data.counts;

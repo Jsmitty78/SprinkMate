@@ -250,5 +250,3 @@ export const ProjectEvaluationInputSchema = Type.Object({
   evidence: Type.Optional(Type.Array(ProjectEvidenceSchema)),
   localChange: Type.Optional(localChangeInput),
 }, { additionalProperties: false });
-
-export const PROJECT_QUANTITY_SCHEMA = quantitySchema(["m", "ft", "in", "Pa", "kPa", "bar", "psi", "N_m", "ft_lb"] as const);

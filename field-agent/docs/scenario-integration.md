@@ -38,8 +38,7 @@ From `field-agent`:
 
 ```sh
 pnpm install --frozen-lockfile
-PLANNING_GEOMETRY_MODULE="$PWD/packages/core/src/local-change-geometry.ts" \
-PLANNING_FABRICATION_MODULE="$PWD/packages/fabrication/src/index.ts" pnpm test
+pnpm test
 pnpm typecheck
 pnpm build
 pnpm exec tsx scripts/integration-demo.ts /tmp/innovation-integration-evidence

@@ -4,7 +4,6 @@ import { resolveSfNfpa13Edition, type SfProjectFacts } from "./sf-project-basis.
 import {
   isProjectPackId,
   normalizeProjectQuantity,
-  PROJECT_RULE_PACK_IDS,
   ProjectInputError,
   toProjectSourceReference,
   type CoverageEntry,
@@ -16,7 +15,6 @@ import {
   type ProjectHeadFacts,
   type ProjectQuantity,
   type ProjectQuantityComparison,
-  type ProjectQuantityDimension,
   type ProjectQuantityTrace,
   type ProjectRulePackId,
   type ProjectRuleResult,

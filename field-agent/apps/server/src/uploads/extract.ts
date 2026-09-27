@@ -1,5 +1,5 @@
 import { decodeImage, preview } from './decode.js';
-import { UploadError, type UploadKind } from './formats.js';
+import type { UploadKind } from './formats.js';
 import type { Box, OcrEngine, OcrLine } from './ocr.js';
 import { openPdf } from './pdf.js';
 
@@ -40,7 +40,7 @@ export async function extract(bytes: Buffer, kind: UploadKind, ocr: OcrEngine): 
   let lineNo = 0;
   const nextId = (page: number) => `p${page}l${++lineNo}`;
 
-  const ocrPage = async (n: number, image: Buffer) => {
+  const ocrPage = async (image: Buffer) => {
     const r = await ocr.recognize(image);
     timings.ocrMs += r.ms; timings.ocrPages += 1;
     return r;
@@ -63,7 +63,7 @@ export async function extract(bytes: Buffer, kind: UploadKind, ocr: OcrEngine): 
         let lines = native;
         if (chars < MIN_NATIVE_CHARS || page.paintsImages) {
           // Scanned page, or a page with pictures that may hold text (a pasted table, a stamp).
-          const r = await ocrPage(n, rendered.image);
+          const r = await ocrPage(rendered.image);
           const extra = r.lines.filter(o => !native.some(t => overlap(t.bbox, o.bbox) > 0.5));
           const ocrLines = extra.map(o => ocrLine(nextId(n), n, o));
           if (ocrLines.length) {
@@ -82,7 +82,7 @@ export async function extract(bytes: Buffer, kind: UploadKind, ocr: OcrEngine): 
     notes.push(...decoded.notes);
     for (const p of decoded.pages) {
       images.push({ n: p.n, image: p.image });
-      const r = await ocrPage(p.n, p.image);
+      const r = await ocrPage(p.image);
       const lines = r.lines.map(o => ocrLine(nextId(p.n), p.n, o));
       pages.push({ n: p.n, width: p.width, height: p.height, method: 'ocr', confidence: lines.length ? r.confidence : null, lines });
     }

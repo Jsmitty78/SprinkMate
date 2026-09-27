@@ -150,10 +150,6 @@ function normalizedPoint(point: LocalPoint3, frameId: string, path: string): [nu
   return converted;
 }
 
-function equalPoint(a: readonly number[], b: readonly number[]): boolean {
-  return a.length === 3 && b.length === 3 && a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
-}
-
 function axisForSegment(start: readonly number[], end: readonly number[], path: string): 0 | 1 | 2 | null {
   const changed = [0, 1, 2].filter(axis => start[axis] !== end[axis]);
   if (changed.length === 0) throw new LocalGeometryInputError("Pipe segment must have non-zero length.", path);
