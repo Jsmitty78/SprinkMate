@@ -1,3 +1,4 @@
+import { deriveFixedEndClosure, spearsCatalog } from "@field-agent/fabrication";
 import { exportSnapshot } from "../src/integration/snapshot.js";
 import { validateSnapshot } from "../src/exports/snapshot.js";
 import { afterEach, expect, it } from "vitest";
@@ -390,4 +391,31 @@ it("blocks an empty search and exposes required checks plus raw source-bound det
     ),
   );
   expect(data.exportBinding.outputVersion).toBe(data.state.details[0].id);
+});
+
+// Synthetic export contract check only; no steel material/field acceptance claimed.
+it("exports closure component identities and unresolved specifications even when counts are known", async () => {
+  const t = setup(), s = await create(t, 2, true);
+  await run(t, s.id);
+  const state = t.detailStore.get(s.id)!;
+  const d = state.details[0], input = structuredClone(d.input);
+  input.pieces.forEach(p => { p.productId = "unresolved-steel"; });
+  input.fittings.forEach(f => { f.productId = "unresolved-steel-elbow"; });
+  const piece = input.pieces[0], start = input.nodes.find(n => n.id === piece.startNodeId)!.position.value!;
+  const end = input.nodes.find(n => n.id === piece.endNodeId)!.position.value!;
+  const condition = { value: null, status: "unknown" as const, evidenceIds: [], reason: "Synthetic fixture; no review" };
+  d.fabrication = deriveFixedEndClosure(input, spearsCatalog(input.configVersion), {
+    id: "closure", binding: input, pipeProductId: "unresolved-steel", unionCandidateId: "anvil/487-black-nps2", splitPieceId: piece.id,
+    station: { value: { ...start, x: (start.x + end.x) / 2, y: (start.y + end.y) / 2, z: (start.z + end.z) / 2 },
+      status: "proposed", evidenceIds: [], reason: "Synthetic midpoint; not a measured union datum" },
+    conditions: { physicalInterfaces: condition, productCompatibility: condition, rotationAndMovement: condition, toolAndBoltAccess: condition },
+  });
+  const snapshot = exportSnapshot(t.packages.get(s.id), state)!;
+  validateSnapshot(snapshot);
+  expect(snapshot.materials.find(m => m.id === "closure/gasket")).toMatchObject({
+    description: "closure/gasket", quantity: 1, status: "known", unresolvedReason: expect.stringContaining("supply scope unresolved"),
+  });
+  expect(snapshot.materials.find(m => m.id === "closure/bolts")).toMatchObject({ quantity: 4, status: "known" });
+  expect(snapshot.cuts.filter(c => c.pieceId.includes("closure")).every(c => c.length === null)).toBe(true);
+  expect(snapshot.assembly.filter(o => o.instruction.startsWith("Review")).every(o => o.status === "unresolved")).toBe(true);
 });
