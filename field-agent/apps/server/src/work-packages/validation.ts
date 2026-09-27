@@ -43,6 +43,16 @@ export function validateInputs(inputs: PackageInputs, checkAsset: (id: string) =
     ensure(inputs.sourceDrawing.scale.unit === 'mm/pixel', 'invalid_scale_unit');
     const value = inputs.sourceDrawing.scale.value;
     ensure(value === null || (Number.isFinite(value) && value > 0), 'invalid_scale');
+    // With a view, the scale is millimetres per sheet unit (PDF point or image pixel).
+    const calibration = inputs.sourceDrawing.view?.calibration;
+    if (calibration?.method === 'two_point') {
+      ensure(calibration.a && calibration.b && calibration.realDistance, 'incomplete_calibration');
+      const sheet = Math.hypot(calibration.b.x - calibration.a.x, calibration.b.y - calibration.a.y);
+      ensure(sheet > 0, 'calibration_points_coincide');
+      const mm = calibration.realDistance.value * { mm: 1, m: 1000, in: 25.4, ft: 304.8 }[calibration.realDistance.unit];
+      ensure(value === null || Math.abs(value - mm / sheet) <= 1e-9 * (mm / sheet), 'scale_calibration_mismatch');
+    }
+    if (calibration?.method === 'printed_scale') ensure(calibration.printedScale, 'printed_scale_required');
   }
   if (inputs.scope) {
     ensure(plan && inputs.scope.coordinateFrame.id === plan.coordinateFrame.id, 'scope_frame_mismatch');

@@ -3,7 +3,7 @@ import type { PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "./api.js";
 import { lengthInput, lengthText, parseLength, toMetres } from "./format.js";
 import {
-  BOX_KEYS, buildRun, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
+  BOX_KEYS, buildRun, ELBOW, inScope, PIPE, runEditPatch, findFact, isConfirmed, PROJECT_BASIS, readBox, runChanged, runNodes, upsertFacts,
   syncRunDraft, type Callouts, type Fact, type FactSpec, type RunNode, type RunNodeKind,
 } from "./model.js";
 import { Badge, Button, Callout, Field, Icon, Section } from "./ui.js";
@@ -19,7 +19,7 @@ export const MEASURED = "Measured on site by you";
  * Edit inputs. When a route is selected, the server keeps the selection even if site facts change,
  * so the UI clears it first (select the baseline) and says so.
  */
-async function patchClearing(s: Snapshot, patch: Partial<PackageInputs>, setNotice: (t: string) => void): Promise<void> {
+export async function patchClearing(s: Snapshot, patch: Partial<PackageInputs>, setNotice: (t: string) => void): Promise<void> {
   let revision = s.inputRevision;
   const baselineId = s.baselinePlan?.id;
   if (s.selectedPlan && baselineId && s.selectedPlan.id !== baselineId) {
@@ -30,7 +30,7 @@ async function patchClearing(s: Snapshot, patch: Partial<PackageInputs>, setNoti
   await api.edit(s.id, revision, patch);
 }
 
-function factStatus(f: Fact | undefined) {
+export function factStatus(f: Fact | undefined) {
   if (!f || f.value === null) return <Badge tone="amber">Missing</Badge>;
   if (f.source.description.startsWith("SAMPLE")) return <Badge tone="sample">Sample</Badge>;
   if (f.confirmation === "confirmed") return <Badge tone="green">{f.context === "observed" ? "Measured by you" : "Confirmed"}</Badge>;
@@ -130,9 +130,12 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
   const setRows = (rows: typeof draft.rows) => setDraft({ ...currentDraft, rows });
 
   const nodes: RunNode[] = rows.map(r => ({ kind: r.kind, x: parseLength(r.x, unit), y: parseLength(r.y, unit) }));
-  const built = buildRun(nodes, s.baselinePlan?.id ?? "baseline");
+  // No product is assumed: a typed run is only sized with a product the user chose.
+  const [product, setProduct] = useState(() => s.baselinePlan?.entities.find(e => e.kind === "pipe")?.productId === PIPE ? "cpvc" : "none");
+  const built = buildRun(nodes, s.baselinePlan?.id ?? "baseline", undefined, product === "cpvc" ? { pipe: PIPE, elbow: ELBOW } : { pipe: null, elbow: null });
+  const productChanged = !!s.baselinePlan && (s.baselinePlan.entities.find(e => e.kind === "pipe")?.productId ?? null) !== (product === "cpvc" ? PIPE : null);
   const problems = "problems" in built ? built.problems : [];
-  const dirty = runChanged(nodes, saved, unit);
+  const dirty = runChanged(nodes, saved, unit) || productChanged;
   const drawingReady = s.sourceDrawing?.scale.basis === "confirmed_inputs";
 
   const save = () => act("run", async cur => {
@@ -193,6 +196,8 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
         next.push({ kind: last.kind === "elbow" ? "open_end" : last.kind, x: "", y: "" });
         setRows(next);
       }}>+ Add a point (the current end becomes an elbow)</button>
+      <Field label="Pipe and fittings"><select value={product} onChange={e => setProduct(e.target.value)}>
+        <option value="none">Not selected yet</option><option value="cpvc">Spears FlameGuard CPVC NPS 1 (supported catalog)</option></select></Field>
       {problems.length > 0 && <ul className="fa-problems">{problems.map(p => <li key={p}>{p}</li>)}</ul>}
       <div className="fa-actions">
         <Button busy={busy === "run"} disabled={!!busy || problems.length > 0} onClick={() => void save()}>Save run</Button>
@@ -248,9 +253,10 @@ export function FactRow({ s, act, busy, unit, setNotice, spec }: Common & { spec
 export function DetailingInputs(props: Common & { callouts: Callouts }) {
   const { s, callouts } = props;
   const plan = s.baselinePlan;
-  const pipes = plan?.entities.filter(e => e.kind === "pipe") ?? [];
-  const ties = plan?.entities.filter(e => e.kind === "tie_in") ?? [];
-  const fits = plan?.entities.filter(e => e.kind === "fitting") ?? [];
+  const work = inScope(s);
+  const pipes = plan?.entities.filter(e => e.kind === "pipe" && work(e.id)) ?? [];
+  const ties = plan?.entities.filter(e => e.kind === "tie_in" && work(e.id)) ?? [];
+  const fits = plan?.entities.filter(e => e.kind === "fitting" && work(e.id)) ?? [];
   const datum: Kind = { type: "choice", options: [["center_to_center", "Center to center (fitting or tie-in)"], ["physical_pipe_end", "Physical pipe end"]] };
   const done = (rows: RowSpec[]) => rows.every(r => isConfirmed(findFact(s, r.field, r.subject)));
   const dims: RowSpec[] = [
@@ -296,7 +302,7 @@ export function BoxInputs({ s, act, busy, unit, setNotice, prefix, title, help }
 }
 
 export function ChangeInputs({ s, act, busy, setNotice, callouts }: Common & { callouts: Callouts }) {
-  const pipes = s.baselinePlan?.entities.filter(e => e.kind === "pipe") ?? [];
+  const pipes = s.baselinePlan?.entities.filter(e => e.kind === "pipe" && inScope(s)(e.id)) ?? [];
   const [desc, setDesc] = useState(s.changeRequest?.description ?? "");
   const [ids, setIds] = useState<string[]>(s.changeRequest?.affectedEntityIds ?? []);
   useEffect(() => { setDesc(s.changeRequest?.description ?? ""); setIds(s.changeRequest?.affectedEntityIds ?? []); }, [s.changeRequest]);

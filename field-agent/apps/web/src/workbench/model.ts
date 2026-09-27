@@ -106,23 +106,26 @@ function toMm(value: number, unit: string | null): number | null {
 
 // ---------------------------------------------------------------- plan geometry for drawing
 
-export interface Segment { id: string; a: Point; b: Point; productId: string | null }
-export interface Marker { id: string; kind: Entity["kind"]; at: Point; productId: string | null }
+export interface Segment { id: string; a: Point; b: Point; productId: string | null; context?: boolean }
+export interface Marker { id: string; kind: Entity["kind"]; at: Point; productId: string | null; context?: boolean }
 export interface PlanShape { segments: Segment[]; markers: Marker[]; undrawable: Array<{ id: string; reason: string }> }
 
-/** Where the plan puts each entity. Positions are drawn as given; nothing is inferred. */
-export function planShape(plan: Plan | null | undefined): PlanShape {
+/**
+ * Where the plan puts each entity. Positions are drawn as given; nothing is inferred. Entities in
+ * `context` (outside the package scope) are flagged so they are drawn as retained context, not work.
+ */
+export function planShape(plan: Plan | null | undefined, context: ReadonlySet<string> = new Set()): PlanShape {
   const shape: PlanShape = { segments: [], markers: [], undrawable: [] };
   if (!plan) return shape;
   for (const e of plan.entities) {
     const known = e.ports.filter(p => p.position);
     if (e.kind === "pipe") {
       const a = e.ports.find(p => p.id === "start")?.position, b = e.ports.find(p => p.id === "end")?.position;
-      if (a && b) shape.segments.push({ id: e.id, a, b, productId: e.productId });
+      if (a && b) shape.segments.push({ id: e.id, a, b, productId: e.productId, ...(context.has(e.id) ? { context: true } : {}) });
       else shape.undrawable.push({ id: e.id, reason: e.ports.find(p => !p.position)?.unknownReason ?? "Pipe end position unknown" });
     } else if (known.length) {
       const at = { x: avg(known.map(p => p.position!.x)), y: avg(known.map(p => p.position!.y)), z: avg(known.map(p => p.position!.z)) };
-      shape.markers.push({ id: e.id, kind: e.kind, at, productId: e.productId });
+      shape.markers.push({ id: e.id, kind: e.kind, at, productId: e.productId, ...(context.has(e.id) ? { context: true } : {}) });
     } else shape.undrawable.push({ id: e.id, reason: e.ports[0]?.unknownReason ?? "Position unknown" });
   }
   return shape;
@@ -136,11 +139,12 @@ export interface Callouts { piece: Map<string, string>; fitting: Map<string, str
  * Labels shown on the plan and in tables. The fabrication detail's own callouts win when the server
  * returned them; otherwise pieces are numbered in plan order (a label, not a calculation).
  */
-export function callouts(plan: Plan | null | undefined, detail?: { cuts?: Array<{ pieceId: string; callout: number }>; fittings?: Array<{ id: string; callout: string }> }): Callouts {
+export function callouts(plan: Plan | null | undefined, detail?: { cuts?: Array<{ pieceId: string; callout: number }>; fittings?: Array<{ id: string; callout: string }> }, context: ReadonlySet<string> = new Set()): Callouts {
   const out: Callouts = { piece: new Map(), fitting: new Map(), tieIn: new Map() };
   if (!plan) return out;
   let p = 0, f = 0, t = 0;
   for (const e of plan.entities) {
+    if (context.has(e.id)) continue;
     if (e.kind === "pipe") out.piece.set(e.id, String(++p));
     else if (e.kind === "fitting") out.fitting.set(e.id, `F${++f}`);
     else if (e.kind === "tie_in") out.tieIn.set(e.id, `TI-${++t}`);
@@ -167,7 +171,7 @@ const frame = { id: "room", lengthUnit: "mm" as const, axes: "right_handed_z_up"
  * each end. Same structure as the server's integration fixture. Positions are the user's; no
  * routing or length is calculated here. Returns the problems instead when the run is incomplete.
  */
-export function buildRun(nodes: RunNode[], planId = "baseline", source = "Entered by you in Sprink"): BuiltRun | { problems: string[] } {
+export function buildRun(nodes: RunNode[], planId = "baseline", source = "Entered by you in Sprink", products: { pipe: string | null; elbow: string | null } = { pipe: PIPE, elbow: ELBOW }): BuiltRun | { problems: string[] } {
   const problems: string[] = [];
   if (nodes.length < 2) problems.push("Add at least two points: a start and an end.");
   nodes.forEach((n, i) => {
@@ -187,11 +191,11 @@ export function buildRun(nodes: RunNode[], planId = "baseline", source = "Entere
   const pipeId = (i: number) => `p${i + 1}`;
   let elbow = 0, tie = 0;
   for (let i = 0; i < nodes.length - 1; i++)
-    entities.push({ id: pipeId(i), kind: "pipe", productId: PIPE, ports: [port("start", nodes[i]), port("end", nodes[i + 1])] });
+    entities.push({ id: pipeId(i), kind: "pipe", productId: products.pipe, ports: [port("start", nodes[i]), port("end", nodes[i + 1])] });
   nodes.forEach((n, i) => {
     if (n.kind === "elbow") {
       const id = `f${++elbow}`;
-      entities.push({ id, kind: "fitting", productId: ELBOW, ports: [port("in", n), port("out", n)] });
+      entities.push({ id, kind: "fitting", productId: products.elbow, ports: [port("in", n), port("out", n)] });
       connections.push({ id: `${id}-in`, from: { entityId: pipeId(i - 1), portId: "end" }, to: { entityId: id, portId: "in" } });
       connections.push({ id: `${id}-out`, from: { entityId: pipeId(i), portId: "start" }, to: { entityId: id, portId: "out" } });
     } else if (n.kind === "tie_in") {
@@ -282,23 +286,29 @@ export const PROJECT_BASIS: Array<{ field: string; label: string; options: Array
   { field: "storage", label: "Occupancy storage", options: [["non_storage", "Non-storage"], ["storage", "Storage"]] },
 ];
 
+/** Entities outside the scope are retained context: shown, never part of the work. */
+export const contextIds = (s: Pick<WorkPackageSnapshot, "scope">): Set<string> => new Set(s.scope?.excludedEntityIds ?? []);
+export const inScope = (s: Pick<WorkPackageSnapshot, "scope">) => { const c = contextIds(s); return (id: string) => !c.has(id); };
+
 /** Presence checks only; the server decides whether the inputs are sufficient. */
 export function requirements(s: WorkPackageSnapshot): Requirement[] {
   const out: Requirement[] = [];
   const add = (r: Requirement) => out.push(r);
   const d = s.sourceDrawing;
   add({ id: "drawing", group: "Drawing", label: "Source drawing uploaded", done: !!d?.assetId });
+  if (d?.view) add({ id: "workArea", group: "Drawing", label: "Work area selected on the sheet", done: !!d.view.workArea });
   add({ id: "scale", group: "Drawing", label: "Drawing scale confirmed", done: d?.scale.basis === "confirmed_inputs", hint: d?.scale.reason ?? undefined });
   const plan = s.baselinePlan;
-  add({ id: "run", group: "Run", label: "Run entered (points, elbows, ends)", done: !!plan?.entities.length && !!s.scope });
-  add({ id: "run-confirmed", group: "Run", label: "Run dimensions confirmed against the drawing", done: plan?.confirmation === "confirmed" });
+  const work = inScope(s);
+  add({ id: "run", group: "Run", label: "Run traced or entered (points, turns, ends)", done: !!plan?.entities.length && !!s.scope });
+  add({ id: "run-confirmed", group: "Run", label: "Run confirmed against the drawing", done: plan?.confirmation === "confirmed" });
   if (plan) {
-    for (const pipe of plan.entities.filter(e => e.kind === "pipe"))
+    for (const pipe of plan.entities.filter(e => e.kind === "pipe" && work(e.id)))
       for (const end of ["start", "end"])
         add({ id: `datum.${end}.${pipe.id}`, group: "Dimensions", label: `How the ${end} of ${pipe.id} is dimensioned`, done: isConfirmed(findFact(s, `datum.${end}`, pipe.id)) });
-    for (const tie of plan.entities.filter(e => e.kind === "tie_in"))
+    for (const tie of plan.entities.filter(e => e.kind === "tie_in" && work(e.id)))
       add({ id: `netCutOffset.${tie.id}`, group: "Dimensions", label: `Net cut offset at tie-in ${tie.id}`, done: isConfirmed(findFact(s, "netCutOffset", tie.id)) });
-    for (const fit of plan.entities.filter(e => e.kind === "fitting"))
+    for (const fit of plan.entities.filter(e => e.kind === "fitting" && work(e.id)))
       for (const port of fit.ports)
         add({ id: `movement.${port.id}.${fit.id}`, group: "Assembly", label: `Joint movement at ${fit.id}/${port.id} can be made`, done: isConfirmed(findFact(s, `movement.${port.id}`, fit.id)) });
   }
@@ -401,7 +411,7 @@ export function runBlockers(s: WorkPackageSnapshot): string[] {
   const plan = s.baselinePlan;
   if (plan) {
     const connected = new Set(plan.connections.flatMap(c => [`${c.from.entityId}/${c.from.portId}`, `${c.to.entityId}/${c.to.portId}`]));
-    for (const pipe of plan.entities.filter(e => e.kind === "pipe"))
+    for (const pipe of plan.entities.filter(e => e.kind === "pipe" && inScope(s)(e.id)))
       pipe.ports.forEach((port, i) => {
         const end = i === 0 ? "start" : "end";
         const f = findFact(s, `datum.${end}`, pipe.id);

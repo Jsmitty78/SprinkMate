@@ -94,11 +94,22 @@ export function fabricationInput(
 ): FabricationInput {
   if (!s.sourceDrawing || !s.scope || !s.baselinePlan)
     throw new Error("Drawing, scope and baseline are required");
-  const pipes = plan.entities.filter((e) => e.kind === "pipe");
+  // Entities outside the scope are retained context (heads, adjacent pipe): kept in the plan and
+  // shown, never detailed, counted or connected. A connection into the context would be a guess.
+  const context = new Set(s.scope.excludedEntityIds);
+  if (
+    plan.connections.some((c) =>
+      [c.from, c.to].some((e) => context.has(e.entityId)),
+    )
+  )
+    throw new Error(
+      "Retained context is connected to the work; include it in the scope or disconnect it",
+    );
+  const pipes = plan.entities.filter(
+    (e) => e.kind === "pipe" && !context.has(e.id),
+  );
   if (!pipes.length)
     throw new Error("An empty pipe scope is not a work package");
-  if (s.scope.excludedEntityIds.some((id) => pipes.some((p) => p.id === id)))
-    throw new Error("Extract the selected work area before detailing");
   const evidence = [...s.detailing, ...s.siteFacts].map((f) => ({
     id: f.id,
     subjectIds: [...f.subjectIds, ...(f.subjectIds.length ? [] : [plan.id])],
@@ -210,7 +221,7 @@ export function fabricationInput(
   }
   if (remaining.length)
     throw new Error("Disconnected or closed route is unsupported");
-  for (const f of plan.entities.filter((e) => e.kind === "fitting")) {
+  for (const f of plan.entities.filter((e) => e.kind === "fitting" && !context.has(e.id))) {
     const ports = f.ports.map((port) => {
       const c = connected.get(`${f.id}/${port.id}`),
         piece = pieces.find((p) => p.id === c?.entityId);
@@ -270,7 +281,11 @@ export function fabricationInput(
     fittings,
     evidence,
     accessories: plan.entities
-      .filter((e) => ["head", "support", "unsupported"].includes(e.kind))
+      .filter(
+        (e) =>
+          ["head", "support", "unsupported"].includes(e.kind) &&
+          !context.has(e.id),
+      )
       .map((e) => ({
         id: e.id,
         kind:
