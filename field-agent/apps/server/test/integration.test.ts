@@ -1,3 +1,5 @@
+import { fs01Adaptation } from "./fixtures/fs01-adaptation.js";
+import { adaptationFixture } from "./fixtures/adaptation-package.js";
 import { exportSnapshot } from "../src/integration/snapshot.js";
 import { validateSnapshot } from "../src/exports/snapshot.js";
 import { afterEach, expect, it } from "vitest";
@@ -334,7 +336,7 @@ it.each(["cancel", "edit"] as const)(
       expect(after.freshness.results.every((r) => !r.current)).toBe(true);
   },
 );
-it("does not turn unsupported products or protected-context routing into a successful example", async () => {
+it("keeps unsupported product cuts unresolved and retains context without adding purchase items", async () => {
   const t = setup(),
     s = await create(t, 2, false, (input) => {
       input.baselinePlan!.entities.find((e) => e.kind === "pipe")!.productId =
@@ -358,8 +360,13 @@ it("does not turn unsupported products or protected-context routing into a succe
     input.scope!.includedEntityIds.push("protected-head");
   });
   const blocked = await run(t, p.id);
-  expect(blocked.run?.status).toBe("failed");
-  expect(blocked.outputs.candidates).toBeNull();
+  expect(blocked.run?.status).toBe("waiting_input");
+  expect(blocked.outputs.candidates?.candidates).toHaveLength(2);
+  for (const c of blocked.outputs.candidates!.candidates) {
+    expect(c.plan.entities.find(e => e.id === "protected-head")).toEqual(p.baselinePlan!.entities.find(e => e.id === "protected-head"));
+  }
+  expect(blocked.outputs.results.every(r => !r.materials.some(m => m.entityIds.includes("protected-head")))).toBe(true);
+  expect(blocked.outputs.results[0].gaps.some(g => g.id === "protected-context")).toBe(true);
 });
 it("blocks an empty search and exposes required checks plus raw source-bound detail through the authenticated API", async () => {
   const t = setup(),
@@ -390,4 +397,55 @@ it("blocks an empty search and exposes required checks plus raw source-bound det
     ),
   );
   expect(data.exportBinding.outputVersion).toBe(data.state.details[0].id);
+});
+
+it("runs an independently created rotated interval with retained context through selection, export and invalidation", async () => {
+  const t = setup();
+  const s = await create(t, 3, false, input => {
+    const fixture = adaptationFixture(31, true);
+    input.baselinePlan = fixture.baselinePlan;
+    input.scope = fixture.scope;
+    input.siteFacts = fixture.siteFacts;
+    input.detailing = fixture.detailing;
+    input.changeRequest = fixture.changeRequest;
+  });
+  const generated = await run(t, s.id);
+  expect(generated.run?.status, JSON.stringify(t.detailStore.get(s.id)?.latestRun)).toBe("waiting_input");
+  expect(generated.outputs.candidates?.candidates).toHaveLength(2);
+  const candidate = generated.outputs.candidates!.candidates[0];
+  t.packages.select(s.id, { expectedRevision: generated.inputRevision, planId: candidate.plan.id });
+  const selected = await run(t, s.id);
+  expect(selected.run?.status).toBe("completed");
+  const snapshot = exportSnapshot(selected, t.detailStore.get(s.id)!)!;
+  validateSnapshot(snapshot);
+  expect(snapshot.selectedPlan.context?.find(c => c.id === "terminal")?.kind).toBe("head");
+  expect(snapshot.cuts).toHaveLength(5);
+  expect(snapshot.cuts[0].length).toBeNull();
+  expect(snapshot.materials.some(m => m.subjectIds.includes("terminal"))).toBe(false);
+  const start = s.baselinePlan!.entities.find(e => e.id === "pipe")!.ports[0].position!;
+  expect(snapshot.selectedPlan.segments[0].from[0]).toBeCloseTo(start.x, 8);
+  expect(snapshot.selectedPlan.segments[0].from[1]).toBeCloseTo(start.y, 8);
+  const exported = await run(t, s.id, "export_selected_package");
+  expect(exported.run?.status).toBe("completed");
+  expect(exported.outputs.artifacts).toHaveLength(4);
+  const artifact = exported.outputs.artifacts[0];
+  const changed = t.packages.edit(s.id, { expectedRevision: exported.inputRevision, patch: { detailing: exported.detailing.map(f => f.field === "duct.max.y" ? { ...f, value: 2 } : f) } });
+  expect(changed.baselinePlan).toEqual(s.baselinePlan);
+  expect(() => t.packages.artifact(s.id, artifact.id)).toThrow("stale_artifact");
+  expect(() => t.packages.select(s.id, { expectedRevision: changed.inputRevision, planId: candidate.plan.id })).toThrow("stale_candidates");
+});
+
+it("persists FS-01 steel alternatives with unknown physical closure and no SF/CPVC default", async () => {
+  const t = setup(), s = await create(t, 3, false, input => Object.assign(input, fs01Adaptation(input.sourceDrawing!.assetId)));
+  const generated = await run(t, s.id);
+  expect(generated.outputs.candidates?.candidates, JSON.stringify(t.detailStore.get(s.id)?.latestRun)).toHaveLength(2);
+  const details = t.detailStore.get(s.id)!.details;
+  expect(details).toHaveLength(3);
+  for (const d of details) {
+    expect(d.input.nodes.filter(n => n.datum === "scope_interface")).toHaveLength(2);
+    expect(d.fabrication.cuts.every(c => c.cutLength.value === null)).toBe(true);
+    expect(d.fabrication.materials.some(m => m.productId?.startsWith("spears/"))).toBe(false);
+    expect(d.profile?.project.basis).toBeUndefined();
+  }
+  expect(generated.baselinePlan).toEqual(s.baselinePlan);
 });

@@ -88,9 +88,9 @@ html, body { margin: 0; background: var(--fa-bg); }
 .fa-canvas-empty { display: grid; place-items: center; }
 .fa-grid { fill: none; stroke: #e9ecf0; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .fa-hatch { stroke: #9aa3b0; stroke-width: 1; vector-effect: non-scaling-stroke; }
-.fa-envelope rect { fill: rgba(26, 111, 224, .025); stroke: #8fb3e6; stroke-dasharray: 6 5; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.fa-envelope polygon { fill: rgba(26, 111, 224, .025); stroke: #8fb3e6; stroke-dasharray: 6 5; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
 .fa-envelope text { fill: #5b83bd; font-weight: 550; }
-.fa-duct rect { fill: url(#fa-hatch); stroke: #7d8795; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.fa-duct polygon { fill: url(#fa-hatch); stroke: #7d8795; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
 .fa-duct text { fill: var(--fa-ink-2); font-weight: 600; text-anchor: middle; }
 .fa-hit { stroke: transparent; stroke-width: 18; vector-effect: non-scaling-stroke; stroke-linecap: round; cursor: pointer; }
 .fa-pipe { stroke-width: 3; vector-effect: non-scaling-stroke; stroke-linecap: round; fill: none; }
@@ -378,3 +378,9 @@ html, body { margin: 0; background: var(--fa-bg); }
   .fa-navigation .fa-btn { flex: 1; }
   .fa-work { min-height: calc(100dvh - 100px); }
 }
+
+.fa-steptags button[aria-pressed="true"] { outline: 2px solid currentColor; }
+
+.fa-protected .fa-pipe, .fa-protected .fa-fit, .fa-protected .fa-head, .fa-protected .fa-tie { stroke: #929aa3; }
+.fa-protected .fa-pipe { stroke-dasharray: 4 3; }
+.fa-focus .is-on .fa-fit, .fa-work .is-on .fa-fit { stroke: #e39224; stroke-width: 4; }
