@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PackageInputs } from "@field-agent/core";
 import { api, type Snapshot } from "./api.js";
 import { lengthInput, lengthText, parseLength, toMetres } from "./format.js";
@@ -69,7 +69,7 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
     await patchClearing(cur, {
       sourceDrawing: {
         ...cur.sourceDrawing, revision: rev.trim() || cur.sourceDrawing.revision, page: Math.max(1, Number(page) || 1),
-        scale: known && confirm ? { value, unit: scaleUnit, reason: null, basis: "confirmed_inputs" } : { value: null, unit: scaleUnit, reason: known ? "Scale entered but not confirmed" : "Scale not confirmed yet", basis: "unknown" },
+        scale: known ? { value, unit: scaleUnit, reason: null, basis: confirm ? "confirmed_inputs" : "proposed_inputs" } : { value: null, unit: scaleUnit, reason: "Scale not confirmed yet", basis: "unknown" },
       },
     }, setNotice);
   });
@@ -93,7 +93,7 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
       <span>Sheet</span><strong className="mono">{d.drawingId}</strong>
       <span>Revision</span><strong>{d.revision} · page {d.page}</strong>
       <span>Approval</span><strong>{d.approval === "approved" ? <Badge tone="green">Approved drawing</Badge> : d.approval === "superseded" ? <Badge tone="red">Superseded</Badge> : <Badge>Not reviewed</Badge>}</strong>
-      <span>Scale</span><strong>{d.scale.basis === "confirmed_inputs" ? <>{d.scale.value} {d.scale.unit} <Badge tone="green">Confirmed</Badge></> : <Badge tone="amber">{d.scale.reason ?? "Not confirmed"}</Badge>}</strong>
+      <span>Scale</span><strong>{d.scale.basis === "confirmed_inputs" ? <>{d.scale.value} {d.scale.unit} <Badge tone="green">Confirmed</Badge></> : d.scale.value !== null ? <>{d.scale.value} {d.scale.unit} <Badge tone="amber">Not confirmed</Badge></> : <Badge tone="amber">{d.scale.reason ?? "Not confirmed"}</Badge>}</strong>
     </div>
     {frozen ? <p className="fa-muted">{runConfirmed ? "The drawing is frozen with the confirmed run." : "The approved drawing is frozen in this package."} Start a new package for a new revision.</p> : <>
       <div className="fa-row3">
@@ -112,6 +112,13 @@ export function DrawingInputs({ s, act, busy, setNotice }: Common) {
 
 // ---------------------------------------------------------------- run editor
 
+/** Re-expresses a typed length in another unit; text that does not parse is left as typed. */
+const convertInput = (text: string, from: Unit, to: Unit) => {
+  if (!text.trim()) return text;
+  const mm = parseLength(text, from);
+  return mm === null ? text : lengthInput(mm, to);
+};
+
 const KIND_LABEL: Record<RunNodeKind, string> = { tie_in: "Tie-in", open_end: "Open end", elbow: "90° elbow" };
 
 export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & { callouts: Callouts }) {
@@ -119,10 +126,20 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
   const frozen = s.baselinePlan?.confirmation === "confirmed";
   const blank: RunNode[] = s.intent === "adapt_to_site" ? [{ kind: "tie_in", x: 0, y: 0 }, { kind: "tie_in", x: null, y: 0 }] : [{ kind: "open_end", x: 0, y: 0 }, { kind: "elbow", x: null, y: 0 }, { kind: "open_end", x: null, y: null }];
   const [rows, setRows] = useState<Array<{ kind: RunNodeKind; x: string; y: string }>>([]);
+  // Reset the table only when the saved geometry changes, not on every reload, so unsaved edits survive edits elsewhere.
+  const savedKey = JSON.stringify(saved);
   useEffect(() => {
     const nodes = saved ?? blank;
     setRows(nodes.map(n => ({ kind: n.kind, x: lengthInput(n.x, unit), y: lengthInput(n.y, unit) })));
-  }, [saved, unit]);
+  }, [savedKey]);
+  // A unit switch converts what is in the table, unsaved edits included.
+  const shownUnit = useRef(unit);
+  useEffect(() => {
+    const from = shownUnit.current;
+    shownUnit.current = unit;
+    if (from === unit) return;
+    setRows(rs => rs.map(r => ({ ...r, x: convertInput(r.x, from, unit), y: convertInput(r.y, from, unit) })));
+  }, [unit]);
 
   const nodes: RunNode[] = rows.map(r => ({ kind: r.kind, x: parseLength(r.x, unit), y: parseLength(r.y, unit) }));
   const built = buildRun(nodes, s.baselinePlan?.id ?? "baseline");
@@ -136,7 +153,10 @@ export function RunEditor({ s, act, busy, unit, setNotice, callouts }: Common & 
     const reshaped = topologyChanged(nodes, runNodes(cur.baselinePlan));
     const base = reshaped ? dropSubjectFacts(cur) : cur;
     const keep = built.datums.filter(d => findFact(base, d.field, d.subjectIds![0])?.value !== d.value);
-    await patchClearing(cur, { baselinePlan: built.plan, scope: built.scope, ...dropOrphanFacts(upsertFacts(base, keep), built.plan) }, setNotice);
+    // The site change names entities by id too, so a reshaped run clears it rather than pointing it at another segment.
+    const clearChange = reshaped && !!cur.changeRequest;
+    await patchClearing(cur, { baselinePlan: built.plan, scope: built.scope, ...dropOrphanFacts(upsertFacts(base, keep), built.plan), ...(clearChange ? { changeRequest: null } : {}) }, setNotice);
+    if (clearChange) setNotice("The run's shape changed, so the saved site change was cleared. Record the affected piece again on the new run.");
   });
   const confirm = () => {
     if (!s.baselinePlan) return;

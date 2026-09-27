@@ -51,8 +51,15 @@ export function usePackage(id: string, onAuthFailure: () => void): PackageState 
   const running = snapshot?.run?.status === "running";
   useEffect(() => {
     if (!running) return;
-    const timer = setInterval(() => { load().catch(fail); }, 900);
-    return () => clearInterval(timer);
+    // One poll in flight at a time: the next one is scheduled only after the last settles, so slow reads still land.
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      await load().catch(fail);
+      if (!stopped) timer = setTimeout(() => void tick(), 900);
+    };
+    timer = setTimeout(() => void tick(), 900);
+    return () => { stopped = true; clearTimeout(timer); };
   }, [running, load, fail]);
 
   const act = useCallback(async (label: string, fn: (s: Snapshot) => Promise<unknown>) => {
