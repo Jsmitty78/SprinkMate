@@ -1,6 +1,6 @@
 # Field Agent workbench (issues #11 and #12)
 
-The browser UI at `/` for the work-package API (`/api/work-packages`). The earlier Japanese task UI is still served at `/legacy`.
+The Sprink UI has one login and shared navigation: work packages at `/` (`/api/work-packages`) and field inspections at `/inspections` (`/api/tasks`). Old `/legacy` bookmarks redirect to `/inspections`; the old app shell and stylesheet have been removed. The UI uses custom CSS, without a component-library dependency.
 
 Code: `apps/web/src/workbench/`. The UI calculates nothing: cuts, quantities, routes, deltas and rule findings all come from the server. The UI converts units for display (ft-in to the nearest 1/16 in, plus mm) and says so on screen.
 
@@ -20,6 +20,10 @@ Selecting a piece on the plan or in the cut list highlights it in both places. T
 2. Generate route alternatives and preview each one on the plan. The comparison shows fittings, the centerline change, pieces and assembly steps. Rejected layouts are listed with their reasons.
 3. **Use Route X** records your selection, then builds the revised package. That package has the full quantities and cut list, plus the change from the original taken from the server's `delta`. The original baseline is kept and stated.
 4. Export makes the PDF, materials CSV and cut list CSV through the server's exporter, bound to the input revision.
+
+## Field inspections
+
+The Field inspections navigation opens existing task records without conversion. It preserves creation and cancellation, drawing orientation revisions, photo upload and viewing, manual fact corrections with evidence, additional requests and answers (including unavailable reasons), saved measurements, synthetic replays, validation, and JSON report generation/download. Domain panels live under `apps/web/src/workbench/inspections/` and use the shared Sprink controls and colors. The task and package APIs and stored records are unchanged.
 
 ## States handled
 
@@ -62,3 +66,12 @@ pnpm build
 ```
 
 Browser pass: both workflows were run end to end against `pnpm start` at 1600×1000 and 390×844. Screenshots are in `docs/ui/`.
+
+### Unified UI migration verification
+
+- All 24 test files pass (643 tests passed, 9 skipped); workspace typecheck and production build pass.
+- Local browser with an isolated data directory: created an inspection, loaded synthetic observations, edited and saved a fact, created and answered a request with stored evidence, generated a report, and invoked JSON download. The download success state appeared; the browser harness did not return a saved-file event.
+- Reloading `/legacy` redirects to `/inspections` and shows the saved inspection with its current revision.
+- Drawing preparation generated materials and cuts. Site adaptation generated alternatives, selected Route A, built the revised package, and generated PDF/CSV artifacts through the existing server.
+- Desktop (1440 px) and phone (390 px) inspection views checked visually. Phone package panels no longer overlap the canvas; page width stays within 390 px. No browser console errors were reported in the checked session.
+- Screenshots: `docs/ui/35-integrated-inspections.png` and `docs/ui/36-inspections-mobile.png`.
