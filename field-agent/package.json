@@ -13,7 +13,8 @@
     "build": "pnpm --filter @field-agent/web build",
     "start": "pnpm --filter @field-agent/server start",
     "replay": "tsx scripts/replay.ts",
-    "evaluate:real": "tsx scripts/evaluate-real.ts"
+    "rules:sf-basis": "node --import tsx scripts/resolve-sf-basis.ts",
+    "rules:evaluate": "node --import tsx scripts/evaluate-project.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -11,14 +11,14 @@ const installed = (): HeadFacts => ({
   verticalReference: confirmed("verified_record"),
 });
 
-describe("TY3231 installed orientation", () => {
+describe("TFP171 installed orientation", () => {
   it("passes the confirmed pendent case and pins the exact scope and sources", () => {
     const result = validateHead(installed(), context());
     expect(result).toMatchObject({
-      ruleId: "TY3231_INSTALL_ORIENTATION_V1", status: "pass", applicability: "applicable", missingInputs: [],
-      versions: { taskRevision: 4, ruleVersion: "1", sourceRevision: "August 2026" },
+      ruleId: "TFP171_INSTALL_ORIENTATION_V2", status: "pass", applicability: "applicable", missingInputs: [],
+      versions: { taskRevision: 4, ruleVersion: "2", sourceRevision: "August 2026" },
     });
-    expect(result.sourceRefs.map(source => source.page)).toEqual([3, 5]);
+    expect(result.sourceRefs.map(source => source.page)).toEqual([3, 5, 6, 7]);
     expect(RULE.scope).toContain("not whole-system compliance");
   });
 
@@ -95,11 +95,11 @@ describe("TY3231 installed orientation", () => {
     expect(validateHead(installed(), ctx)).toMatchObject({ status: "pass", versions: { taskRevision: 99 } });
   });
 
-  it.each(["other_model", "uninstalled", "recessed"])("returns not_applicable for confirmed %s despite unrelated missing facts", kind => {
+  it.each(["other_model", "uninstalled", "unsupported_recessed"])("returns not_applicable for confirmed %s despite unrelated missing facts", kind => {
     const facts = emptyFacts();
     if (kind === "other_model") facts.model = confirmed("TY3251");
     if (kind === "uninstalled") facts.installation = confirmed("uninstalled");
-    if (kind === "recessed") facts.mounting = confirmed("recessed");
+    if (kind === "unsupported_recessed") { facts.model = confirmed("TY4931"); facts.mounting = confirmed("recessed"); }
     expect(validateHead(facts, context())).toMatchObject({ status: "not_applicable", applicability: "not_applicable", missingInputs: [] });
   });
 

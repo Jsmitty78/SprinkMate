@@ -2,9 +2,10 @@ import type { Fact, RuleContext } from "./types.js";
 
 export function evidenceIssues(ids: string[] | undefined, ctx: RuleContext, path: string): string[] {
   if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string' || !id)) return [`${path}.evidenceIds`];
+  if (!Array.isArray(ctx.observations)) return ['observations'];
   return [...new Set(ids)].flatMap(id => {
-    const matches = ctx.observations.filter(item => item.id === id);
-    return matches.length !== 1 || matches[0].targetId !== ctx.targetId || matches[0].superseded
+    const matches = ctx.observations.filter(item => item && item.id === id);
+    return matches.length !== 1 || matches[0].targetId !== ctx.targetId || matches[0].superseded || matches[0].invalidated
       ? [`${path}.evidenceIds:${id}`]
       : [];
   });
@@ -20,7 +21,8 @@ export function factIssues<T>(fact: Fact<T> | undefined, ctx: RuleContext, path:
 
 export function contextIssues(ctx: RuleContext): string[] {
   return [
-    ...(!ctx.targetId.trim() ? ["targetId"] : []),
+    ...(typeof ctx.targetId !== 'string' || !ctx.targetId.trim() ? ["targetId"] : []),
     ...(!Number.isSafeInteger(ctx.taskRevision) || ctx.taskRevision < 0 ? ["taskRevision"] : []),
+    ...(!Array.isArray(ctx.observations) ? ['observations'] : []),
   ];
 }

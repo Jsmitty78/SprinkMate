@@ -1,8 +1,10 @@
-import { Type, type Static, type TSchema } from "typebox";
-import { Check, Errors } from "typebox/value";
+import { Type, type TSchema } from "typebox";
+import { Check } from "typebox/value";
+import { FACT_OPTIONS } from "./types.js";
 
 const identifier = () => Type.String({ minLength: 1 });
 const evidenceIds = () => Type.Array(identifier(), { uniqueItems: true });
+const options = <T extends string>(values: readonly T[]) => Type.Union(values.map(value => Type.Literal(value)));
 
 export function factSchema<T extends TSchema>(value: T) {
   return Type.Object({
@@ -16,18 +18,31 @@ export function factSchema<T extends TSchema>(value: T) {
 export const OrientationSchema = Type.Union([
   Type.Literal("pendent"), Type.Literal("upright"), Type.Literal("sideways"), Type.Literal("unknown"),
 ]);
-export const FactSchema = factSchema(Type.String());
 export const HeadFactsSchema = Type.Object({
   model: factSchema(Type.String()),
   installation: factSchema(Type.Union([Type.Literal("installed"), Type.Literal("uninstalled")])),
   mounting: factSchema(Type.Union([Type.Literal("standard"), Type.Literal("recessed")])),
   orientation: factSchema(OrientationSchema),
   verticalReference: factSchema(Type.Union([Type.Literal("gravity"), Type.Literal("verified_record"), Type.Literal("unknown")])),
+  escutcheon: Type.Optional(factSchema(options(FACT_OPTIONS.escutcheon))),
+  bulbCondition: Type.Optional(factSchema(options(FACT_OPTIONS.bulbCondition))),
+  installationWrench: Type.Optional(factSchema(options(FACT_OPTIONS.installationWrench))),
+  threadStandard: Type.Optional(factSchema(options(FACT_OPTIONS.threadStandard))),
+  installationTorqueFtLb: Type.Optional(factSchema(Type.Number({ minimum: 0 }))),
+  construction: Type.Optional(factSchema(options(FACT_OPTIONS.construction))),
+  fieldFinish: Type.Optional(factSchema(options(FACT_OPTIONS.fieldFinish))),
+  leakage: Type.Optional(factSchema(options(FACT_OPTIONS.leakage))),
+  corrosion: Type.Optional(factSchema(options(FACT_OPTIONS.corrosion))),
+  workingPressurePsi: Type.Optional(factSchema(Type.Number({ minimum: 0 }))),
+  approvalBasis: Type.Optional(factSchema(options(FACT_OPTIONS.approvalBasis))),
+  pressureBasis: Type.Optional(factSchema(options(FACT_OPTIONS.pressureBasis))),
 }, { additionalProperties: false });
+export const HeadFactsPatchSchema = Type.Partial(HeadFactsSchema, { additionalProperties: false });
 export const EvidenceSchema = Type.Object({
   id: identifier(),
   targetId: identifier(),
   superseded: Type.Optional(Type.Boolean()),
+  invalidated: Type.Optional(Type.Boolean()),
   spatial: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
 }, { additionalProperties: false });
 export const RuleContextSchema = Type.Object({
@@ -69,12 +84,3 @@ export const MeasurementSchema = Type.Union([
 ]);
 
 export { Check as checkSchema };
-
-export function validateSchema<T extends TSchema>(schema: T, input: unknown):
-  { valid: true; value: Static<T> } | { valid: false; errors: ReturnType<typeof Errors> } {
-  return Check(schema, input) ? { valid: true, value: input } : { valid: false, errors: Errors(schema, input) };
-}
-
-export function assertSchema<T extends TSchema>(schema: T, input: unknown): asserts input is Static<T> {
-  if (!Check(schema, input)) throw new Error(`Invalid input: ${JSON.stringify(Errors(schema, input))}`);
-}
