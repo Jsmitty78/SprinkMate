@@ -1,19 +1,21 @@
+import { Badge as WorkbenchBadge, Button as WorkbenchButton } from "../ui.js";
 import { useEffect, useState, type ReactNode } from "react";
 import { readImage } from "./api.js";
 
 export type Tone = "neutral" | "good" | "warning" | "bad" | "info";
+const tones = { neutral: "neutral", good: "green", warning: "amber", bad: "red", info: "blue" } as const;
 export function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: Tone }) {
-  return <span className={`badge badge-${tone}`}>{children}</span>;
+  return <WorkbenchBadge tone={tones[tone]}>{children}</WorkbenchBadge>;
 }
-export function Spinner() { return <span className="spinner" aria-hidden="true" />; }
+export function Spinner() { return <span className="fa-spinner" aria-hidden="true" />; }
 export function Button({ children, className = "", busy = false, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { busy?: boolean }) {
-  return <button {...props} className={`button ${className}`} aria-busy={busy || undefined}>{busy && <Spinner />}{children}</button>;
+  return <WorkbenchButton {...props} busy={busy} variant={className.includes("button-primary") ? "primary" : className.includes("button-quiet") ? "quiet" : "default"}>{children}</WorkbenchButton>;
 }
 export function Empty({ title, children }: { title: string; children?: ReactNode }) {
-  return <div className="empty-state"><span className="empty-mark" aria-hidden="true">＋</span><strong>{title}</strong>{children && <p>{children}</p>}</div>;
+  return <div className="fa-empty"><strong>{title}</strong>{children && <p>{children}</p>}</div>;
 }
 export function Section({ eyebrow, title, action, children, className = "" }: { eyebrow?: string; title: string; action?: ReactNode; children: ReactNode; className?: string }) {
-  return <section className={`panel ${className}`}><header className="section-heading"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h2>{title}</h2></div>{action}</header>{children}</section>;
+  return <section className={`inspection-panel ${className}`}><header className="inspection-section-heading"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h2>{title}</h2></div>{action}</header>{children}</section>;
 }
 export function AuthImage({ token, taskId, assetId, alt, className = "" }: { token: string; taskId: string; assetId: string; alt: string; className?: string }) {
   const [url, setUrl] = useState<string | null>(null);

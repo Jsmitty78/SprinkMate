@@ -5,20 +5,30 @@ import { dateTime } from "./format.js";
 import { Badge, Button, Callout, Field, Icon, Spinner } from "./ui.js";
 import { Workbench } from "./Workbench.js";
 import { SprinkLogo } from "./logo.js";
+import { Inspections } from "./inspections/Inspections.js";
 import "./workbench.css";
 
 const PROJECT_KEY = "field-agent.project";
 const readProject = () => { try { return localStorage.getItem(PROJECT_KEY) || "field-agent-demo"; } catch { return "field-agent-demo"; } };
 
 function usePath(): [string, (to: string) => void] {
-  const [path, setPath] = useState(location.pathname);
+  const [path, setPath] = useState(() => {
+    if (location.pathname === "/legacy" || location.pathname.startsWith("/legacy/")) {
+      history.replaceState(null, "", "/inspections");
+    }
+    return location.pathname;
+  });
   useEffect(() => { const on = () => setPath(location.pathname); addEventListener("popstate", on); return () => removeEventListener("popstate", on); }, []);
   return [path, (to: string) => { history.pushState(null, "", to); setPath(to); scrollTo(0, 0); }];
 }
 
-function TopBar({ right, crumbs, onHome }: { right?: ReactNode; crumbs?: ReactNode; onHome: () => void }) {
+function TopBar({ right, crumbs, onHome, onInspections, inspections = false }: { right?: ReactNode; crumbs?: ReactNode; onHome: () => void; onInspections: () => void; inspections?: boolean }) {
   return <header className="fa-top">
     <button type="button" className="fa-brand" onClick={onHome} aria-label="Sprink home"><SprinkLogo /></button>
+    <nav className="fa-navigation" aria-label="Workflows">
+      <Button variant="quiet" aria-current={!inspections ? "page" : undefined} onClick={onHome}>Work packages</Button>
+      <Button variant="quiet" aria-current={inspections ? "page" : undefined} onClick={onInspections}>Field inspections</Button>
+    </nav>
     {crumbs && <nav className="fa-crumbs" aria-label="Breadcrumb">{crumbs}</nav>}
     <div className="fa-top-right">{right}</div>
   </header>;
@@ -29,11 +39,15 @@ export function WorkbenchApp() {
   const [path, go] = usePath();
   const signOut = useCallback(() => { session.clear(); setToken(""); }, []);
   const home = () => go("/");
+  const inspections = () => go("/inspections");
   if (!token) return <Connect onConnect={t => { session.setToken(t); setToken(t); }} />;
+  if (path === "/inspections") return <div className="fa-app"><TopBar onHome={home} onInspections={inspections} inspections right={<Button variant="quiet" onClick={signOut}>Disconnect</Button>} />
+    <Inspections token={token} onAuthFailure={signOut} />
+  </div>;
   const match = /^\/p\/([^/]+)/.exec(path);
   if (match) return <div className="fa-app"><Workbench key={match[1]} id={decodeURIComponent(match[1])} onHome={home} onAuthFailure={signOut}
-    header={(right, crumbs) => <TopBar right={right} crumbs={crumbs} onHome={home} />} /></div>;
-  return <div className="fa-app"><TopBar onHome={home} right={<Button variant="quiet" onClick={signOut}>Disconnect</Button>} /><Home open={id => go(`/p/${encodeURIComponent(id)}`)} onAuthFailure={signOut} /></div>;
+    header={(right, crumbs) => <TopBar right={right} crumbs={crumbs} onHome={home} onInspections={inspections} />} /></div>;
+  return <div className="fa-app"><TopBar onHome={home} onInspections={inspections} right={<Button variant="quiet" onClick={signOut}>Disconnect</Button>} /><Home open={id => go(`/p/${encodeURIComponent(id)}`)} onAuthFailure={signOut} /></div>;
 }
 
 function Connect({ onConnect }: { onConnect: (token: string) => void }) {
@@ -57,7 +71,6 @@ function Connect({ onConnect }: { onConnect: (token: string) => void }) {
       </Field>
       {error && <Callout tone="red" title={error} />}
       <Button variant="primary" type="submit" busy={busy} disabled={!value.trim()}>Connect</Button>
-      <a className="fa-link small" href="/legacy">Open the previous app</a>
     </form>
   </div>;
 }

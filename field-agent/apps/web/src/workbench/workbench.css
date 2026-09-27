@@ -1,4 +1,4 @@
-/* Sprink workbench. Scoped under .fa-app; the legacy stylesheet is only loaded on /legacy. */
+/* Shared Sprink shell and work-package workspace. */
 :root {
   --fa-bg: #f5f6f8; --fa-surface: #ffffff; --fa-sunken: #f0f2f5; --fa-paper: #fbfcfd;
   --fa-ink: #16202e; --fa-ink-2: #3d4757; --fa-muted: #6b7482; --fa-line: #e3e6eb; --fa-line-2: #d3d8df;
@@ -472,3 +472,16 @@ html, body { margin: 0; background: var(--fa-bg); }
 }
 .fa-passage header .mono { white-space: nowrap; }
 @media (max-width: 760px) { .fa-hide-sm { display: none; } }
+/* Shared navigation for both workflows. */
+.fa-navigation { display: flex; gap: 4px; flex: none; }
+.fa-navigation [aria-current="page"] { background: var(--fa-blue-soft); color: var(--fa-blue-ink); }
+@media (max-width: 1200px) {
+  .fa-top { gap: 10px; }
+  .fa-top .fa-crumbs { display: none; }
+}
+@media (max-width: 700px) {
+  .fa-top { height: auto; min-height: 56px; flex-wrap: wrap; padding: 10px 12px; gap: 8px; }
+  .fa-navigation { order: 3; width: 100%; }
+  .fa-navigation .fa-btn { flex: 1; }
+  .fa-work { min-height: calc(100dvh - 100px); }
+}
