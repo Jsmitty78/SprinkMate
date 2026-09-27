@@ -43,6 +43,7 @@ export function Workbench({ id, onHome, onOpen, onAuthFailure }: { id: string; o
   const [setupOpen, setSetupOpen] = useState(false);
   const [siteOpen, setSiteOpen] = useState(false);
   const [checksOpen, setChecksOpen] = useState(false);
+  const [sampleReview, setSampleReview] = useState<{ id: string; revision: number } | null>(null);
   const [codesVisited, setCodesVisited] = useState(false);
   const [returnTo, setReturnTo] = useState<"materials" | "site">("materials");
   const selectPiece = (id: string | null) => {
@@ -62,6 +63,7 @@ export function Workbench({ id, onHome, onOpen, onAuthFailure }: { id: string; o
     <LanguageSwitch /><div className="wf-header-actions">{active !== "codes" && <Button disabled={!s} onClick={() => setExportOpen(true)}><Icon name="download" size={16} />{tr("出力")}</Button>}</div></header>;
   if (pkg.loading && !s) return <>{header}<Spinner label={tr("図面と資料を読み込んでいます…")} /></>;
   if (!s) return <>{header}<Callout tone="red" title={tr("作業を開けませんでした")}>{pkg.error}</Callout></>;
+  const sampleReviewed = sampleReview?.id === s.id && sampleReview.revision === s.inputRevision;
   const mode = s.intent === "adapt_to_site" ? "adapt" : "prepare";
   const baseline = s.baselinePlan;
   const base = resultFor(s, baseline?.id);
@@ -189,7 +191,8 @@ export function Workbench({ id, onHome, onOpen, onAuthFailure }: { id: string; o
         <div className="wf-results-footer">
           {active === "site" && blockers.length > 0 && <p className="fa-muted small">{tr(blockers[0])}</p>}
           {!workResult && active === "materials" && <p className="fa-muted small">{tr(blockers[0] ?? "入力から部材と組立情報を生成できます。")}</p>}
-          {active === "materials" && mode === "prepare" && (!base.result || !base.current) && <Button variant="primary" disabled={disabled || blockers.length > 0} busy={pkg.busy === "run"} onClick={() => void start("prepare_from_drawing")}>{tr("部材・組立を生成")}</Button>}
+          {active === "materials" && mode === "prepare" && hasSampleData(s) && <div className="wf-sample-review"><strong>架空条件での試算</strong><p>図面・寸法・施工条件はデモ用の仮定です。入力を確認してから暫定計算を実行できます。未確認の切断長や施工条件は未確定のまま残ります。</p><label><input type="checkbox" checked={sampleReviewed} onChange={e => setSampleReview(e.target.checked ? { id: s.id, revision: s.inputRevision } : null)} />架空の入力であることを確認した</label></div>}
+          {active === "materials" && mode === "prepare" && ((!base.result || !base.current) || (hasSampleData(s) && !base.result?.evaluations.length)) && <Button variant="primary" disabled={disabled || blockers.length > 0 || (hasSampleData(s) && !sampleReviewed)} busy={pkg.busy === "run"} onClick={() => void start("prepare_from_drawing")}>{base.result && base.current ? "暫定検証を再実行" : tr("部材・組立を生成")}</Button>}
           {active === "site" && mode === "adapt" && <div className="wf-proposal-actions">{selectedId && !selectedResult.current && !candidatesCurrent && <Button variant="primary" disabled={disabled || blockers.length > 0} busy={pkg.busy === "run"} onClick={() => void start("adapt_to_site")}>{tr("Retry selected route")}</Button>}{focus && candidatesCurrent ? <><Button variant="primary" disabled={disabled || focus.centerlineDeltaM === null} busy={pkg.busy === "select"} onClick={() => void choose(focus.plan.id)}>{tr(selectedId === focus.plan.id ? "Rebuild selected Route {route}" : "Select & build Route {route}", { route: focus.letter })}</Button><Button variant="quiet" disabled={disabled || blockers.length > 0} busy={pkg.busy === "run"} onClick={() => void regenerate()}>{tr("Regenerate routes")}</Button></> : <Button variant={selectedId && !selectedResult.current ? "quiet" : "primary"} disabled={disabled || blockers.length > 0} busy={pkg.busy === "run"} onClick={() => void regenerate()}>{routes.length ? tr("Regenerate routes") : tr("変更案を生成")}</Button>}{selectedId && <Button variant="quiet" disabled={disabled} onClick={() => baseline && void pkg.act("clear",cur=>api.select(cur.id,cur.inputRevision,baseline.id))}>{tr("選択を解除")}</Button>}</div>}
 
         </div>

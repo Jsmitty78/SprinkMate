@@ -35,8 +35,8 @@ export function sampleInputs(kind: "prepare" | "adapt", assetId: string): Pick<P
   }
   const facts = upsertFacts({ detailing: [], siteFacts: [] }, specs);
   return {
-    sourceDrawing: { assetId, drawingId: "SAMPLE-FP-201", revision: "C", page: 1, approval: "unreviewed", scale: { value: 1, unit: "mm/pixel", basis: "confirmed_inputs", reason: null } },
-    baselinePlan: { ...built.plan, confirmation: "confirmed" },
+    sourceDrawing: { assetId, drawingId: "SAMPLE-FP-201", revision: "C", page: 1, approval: "unreviewed", scale: { value: 1, unit: "mm/pixel", basis: kind === "prepare" ? "proposed_inputs" : "confirmed_inputs", reason: null } },
+    baselinePlan: { ...built.plan, confirmation: kind === "prepare" ? "proposed" : "confirmed" },
     scope: built.scope,
     ...facts,
     changeRequest: kind === "adapt"

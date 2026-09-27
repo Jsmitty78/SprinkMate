@@ -9,6 +9,7 @@ function request(){const s=new FixtureDomain().read('fixture-package');return ru
 it('sends the unfiltered rule catalog with distinct information and completion options',()=>{
   const r=request();expect(Object.keys(r.questions.next_action.criteria)).toEqual(['spacing',CLARIFY,SELECTION_DONE]);
   expect(r.questions.next_action.criteria.spacing).toContain('source:1');
+  expect(r.questions.next_action.instructions).toContain('synthetic_assumption facts are supported for provisional calculations');
 });
 it.each(['spacing',CLARIFY,SELECTION_DONE])('accepts semantic outcome %s without fallback',id=>{const r=request();expect(validateChoice(choiceEnvelope(r,id),r).id).toBe(id);});
 it.each(['foreign','stale','model','shape','distribution','tie'])('rejects %s response',kind=>{

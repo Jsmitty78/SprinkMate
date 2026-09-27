@@ -44,7 +44,7 @@ The Field inspections navigation opens existing task records without conversion.
 
 ## Sample data
 
-**Load sample input** fills an empty package through the real API. It uses invented test assumptions and draws a PNG sheet labelled SAMPLE DRAWING. Every sample fact is marked as a synthetic assumption with a `SAMPLE:` source, and the package shows a Sample data badge. The preparation sample uses two tie-ins so it can produce a draft without treating fictional physical pipe ends as confirmed; its dependent cut lengths remain unknown. No fixtures are bundled into production code paths.
+**Load sample input** fills an empty package through the real API. It uses invented test assumptions and draws a PNG sheet labelled SAMPLE DRAWING. Every sample fact is marked as a synthetic assumption with a `SAMPLE:` source, and the package shows a Sample data badge. The preparation sample's drawing scale and baseline run remain proposed. It uses two tie-ins so it can produce a draft without treating fictional physical pipe ends as confirmed; its dependent cut lengths remain unknown. Before running it, the user must acknowledge that the current revision's inputs are fictional. JEV may then choose an applicable provisional check; an UNKNOWN finding remains unresolved evidence, not construction approval. No fixtures are bundled into production code paths.
 
 ## Backend gaps found while integrating
 

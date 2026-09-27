@@ -60,7 +60,9 @@ export function ruleChoiceRequest(s: WorkSnapshot, goal: Goal, rules: RuleDescri
   return {model:JEV_MODEL, state:{inputRevision:s.inputRevision,configVersion:s.configVersion,intent:s.intent,goal,
     planId:s.selectedPlanId ?? s.baselinePlanId,gaps:s.gaps.map(g=>({id:g.id,description:g.description})),
     stage:'select_verification_rule', context:selectionContext(context)}, questions:{next_action:{type:'choice',
-    instructions:'Select ONE sprinkler verification rule with a unique highest probability (never a tied maximum) to execute next using applicability, facts and prior outcomes. Never select business operations. Do not repeat a rule on unchanged subjects/inputs already checked. Keep unimplemented/source-pending checks visible. Choose needs_clarification only if missing evidence prevents choosing a rule; an executable check may return missing inputs. Choose selection_complete when no further catalog rule is useful. Completion and all-pass are not coverage or construction approval.',
+    instructions:'Select ONE sprinkler verification rule with a unique highest probability (never a tied maximum) to execute next using applicability, facts and prior outcomes. Never select business operations. Do not repeat a rule on unchanged subjects/inputs already checked. Keep unimplemented/source-pending checks visible.'+
+      (goal==='prepare_from_drawing' ? ' Explicit synthetic_assumption facts are supported for provisional calculations: select an applicable executable rule even when its finding will be UNKNOWN because physical evidence is missing.' : '')+
+      ' Choose needs_clarification only if missing evidence prevents identifying any applicable rule; an executable check may report missing inputs. Choose selection_complete when no further catalog rule is useful. Completion and all-pass are not coverage or construction approval.',
     criteria:Object.fromEntries([...rules.map(r => [r.id, describe(r)]),
       [CLARIFY,'More information is needed to choose a verification rule.'],
       [SELECTION_DONE,'No further catalog rule is useful for this context; no coverage/approval claim.']])}}};

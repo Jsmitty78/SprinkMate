@@ -100,6 +100,8 @@ it("runs the browser's synthetic preparation sample without treating its values 
   const asset = await t.packages.upload(created.id, Buffer.from("%PDF-1.4\nfixture"), "application/pdf", "sample.pdf");
   const input = sampleInputs("prepare", asset.id);
   expect([...input.detailing, ...input.siteFacts].every(f => f.provenance === "synthetic_assumption" && f.confirmation === "proposed")).toBe(true);
+  expect(input.baselinePlan?.confirmation).toBe("proposed");
+  expect(input.sourceDrawing?.scale.basis).toBe("proposed_inputs");
   t.packages.edit(created.id, { expectedRevision: 1, patch: input });
 
   for (const field of ["workAreaAccess", "curePlan"]) {
