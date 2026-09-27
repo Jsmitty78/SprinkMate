@@ -81,13 +81,14 @@ export function spanFrame(plan: NonNullable<Snapshot["baselinePlan"]>, spanId: s
 }
 
 /** Plan and drawing coordinates of a local point, as formulas a reviewer can check by hand. */
-export function frameFormulas(frame: LocalFrame, rotationDeg: number | null) {
+export function frameFormulas(frame: LocalFrame, sheet: { rotationDeg: number; originMm: { x: number; y: number } } | null) {
   const plan = `Plan (mm) = (${affine(frame.origin.x, [[frame.x.x, "X"], [frame.y.x, "Y"]])}, ${affine(frame.origin.y, [[frame.x.y, "X"], [frame.y.y, "Y"]])}, ${affine(frame.origin.z, [[1, "Z"]])})`;
-  if (rotationDeg === null) return { plan, drawing: null };
-  // Plan = R(rotation)·(u, −v), where (u, v) are sheet millimetres from the frame origin with Y down the sheet.
-  const r = rotationDeg * Math.PI / 180, cos = Math.cos(r), sin = Math.sin(r);
+  if (sheet === null) return { plan, drawing: null };
+  // Plan = R(rotation)·(u, −v), where (u, v) are sheet millimetres from the plan origin with Y down the
+  // sheet; the plan origin itself sits at originMm from the sheet origin.
+  const r = sheet.rotationDeg * Math.PI / 180, cos = Math.cos(r), sin = Math.sin(r);
   const toSheet = (p: { x: number; y: number }) => ({ u: cos * p.x + sin * p.y, v: -(-sin * p.x + cos * p.y) });
-  const o = toSheet(frame.origin), ax = toSheet(frame.x), ay = toSheet(frame.y);
+  const at = toSheet(frame.origin), o = { u: at.u + sheet.originMm.x, v: at.v + sheet.originMm.y }, ax = toSheet(frame.x), ay = toSheet(frame.y);
   const clean = (v: number) => Math.abs(v) < 1e-12 ? 0 : v;
   return { plan, drawing: `Drawing XY (mm from the sheet origin, Y down the sheet) = (${affine(clean(o.u), [[clean(ax.u), "X"], [clean(ay.u), "Y"]])}, ${affine(clean(o.v), [[clean(ax.v), "X"], [clean(ay.v), "Y"]])})` };
 }
@@ -101,16 +102,20 @@ export function SiteFrameInputs({ s, act, busy, setNotice, callouts }: Common & 
   const plan = s.baselinePlan;
   const pipes = plan?.entities.filter(e => e.kind === "pipe" && inScope(s)(e.id)) ?? [];
   const saved = siteFrameOf(s);
-  const pinned = saved?.origin ? pipes.find(p => { const f = plan && spanFrame(plan, p.id); return f && Math.hypot(f.origin.x - saved.origin!.x, f.origin.y - saved.origin!.y) < 1e-6 && Math.abs(((f.yaw - saved.yaw! + 540) % 360) - 180) < 1e-9; })?.id : undefined;
-  const initial = () => pinned ?? s.changeRequest?.affectedEntityIds[0] ?? pipes[0]?.id ?? "";
+  const pinned = saved?.origin ? pipes.find(p => { const f = plan && spanFrame(plan, p.id); return f && Math.hypot(f.origin.x - saved.origin!.x, f.origin.y - saved.origin!.y, f.origin.z - saved.origin!.z) < 1e-6 && Math.abs(((f.yaw - saved.yaw! + 540) % 360) - 180) < 1e-9; })?.id : undefined;
+  // The frame belongs on the span the obstacle blocks; a frame left on another span shows as changed.
+  const affected = s.changeRequest?.affectedEntityIds.find(id => pipes.some(p => p.id === id));
+  const initial = () => affected ?? pinned ?? pipes[0]?.id ?? "";
   const [span, setSpan] = useState(initial);
-  useEffect(() => setSpan(initial()), [pinned, saved?.reason, s.changeRequest?.affectedEntityIds.join(",")]);
+  useEffect(() => setSpan(initial()), [affected, pinned, saved?.reason]);
   if (!plan || !pipes.length) return <p className="fa-muted">Trace or enter the existing run first, then pin the frame to the span the obstacle blocks.</p>;
 
   const target = span ? spanFrame(plan, span) : null;
   const frame = target ? frameFromYaw(target.origin, target.yaw) : null;
   const view = s.sourceDrawing?.view;
-  const formulas = frame ? frameFormulas(frame, view && plan.coordinateFrame.id === "drawing-plan" ? view.frame.rotationDeg : null) : null;
+  const scale = s.sourceDrawing?.scale.value ?? null;
+  const sheet = view && scale && plan.coordinateFrame.id === "drawing-plan" ? { rotationDeg: view.frame.rotationDeg, originMm: { x: view.frame.origin.x * scale, y: view.frame.origin.y * scale } } : null;
+  const formulas = frame ? frameFormulas(frame, sheet) : null;
   const label = (id: string) => { const l = findFact(s, "sourceLabel", id)?.value; return `Piece ${callouts.piece.get(id) ?? id}${typeof l === "string" && l ? ` (${l})` : ""}`; };
   const endLabel = (end: "start" | "end") => {
     const pipe = plan.entities.find(e => e.id === span);

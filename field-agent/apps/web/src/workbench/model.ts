@@ -117,6 +117,14 @@ export function siteFrameOf(s: Pick<WorkPackageSnapshot, "detailing" | "siteFact
     return { facts, yaw: null, origin: null, toLocal: null, toDrawing: null, reason: e instanceof Error ? e.message : String(e) };
   }
 }
+/**
+ * Sets the local frame and both boxes back to proposed, keeping their numbers: they were read along a
+ * span that is no longer the affected one, so they must be confirmed again before routing.
+ */
+export function reopenSiteGeometry(cur: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">) {
+  const reopen = (f: Fact): Fact => /^(adaptationFrame|duct|workEnvelope)\./.test(f.field) && f.confirmation === "confirmed" ? { ...f, confirmation: "proposed" } : f;
+  return { detailing: cur.detailing.map(reopen), siteFacts: cur.siteFacts.map(reopen) };
+}
 /** Which faces a box still needs, in words a fitter would use. */
 export function boxGaps(s: Pick<WorkPackageSnapshot, "detailing" | "siteFacts">, prefix: string, local: boolean): string[] {
   const v = readBox(s, prefix).values;
