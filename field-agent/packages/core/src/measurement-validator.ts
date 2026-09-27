@@ -12,7 +12,7 @@ function endpointIssues(point: MeasurementEndpoint, method: "ar_raycast" | "fixt
   if (!permittedHits.includes(point.hit)) issues.push(`${name}.hit`);
   if (method === "ar_raycast") {
     const sameFrame = point.evidenceIds.some(id => {
-      const image = ctx.observations.find(e => e.id === id && e.targetId === ctx.targetId && !e.superseded);
+      const image = ctx.observations.find(e => e.id === id && e.targetId === ctx.targetId && !e.superseded && !e.invalidated);
       return image?.spatial?.captureSessionId === point.captureSessionId
         && image.spatial.coordinateFrameId === point.coordinateFrameId
         && image.spatial.timestamp === point.timestamp
