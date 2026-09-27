@@ -1,15 +1,16 @@
-import type { Plan, Version, WorkSnapshot, Goal } from './contracts.js';
+import type { Version, WorkSnapshot, Goal, RuleDescriptor } from './contracts.js';
 import { sameVersion } from './contracts.js';
 
 export const JEV_MODEL = 'jev-1.13.0';
 export const JEV_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 export const CLARIFY = 'needs_clarification';
+export const SELECTION_DONE = 'selection_complete';
 export interface ChoiceRequest {
   model: typeof JEV_MODEL;
   state: Version & {
     intent: WorkSnapshot['intent']; goal: Goal; planId: string; stage: string;
     gaps: { id: string; description: string }[];
-    recentResult?: string;
+    context?: unknown;
   };
   questions: { next_action: { type: 'choice'; instructions: string; criteria: Record<string, string> } };
 }
@@ -18,22 +19,51 @@ export interface ChoiceEnvelope extends Version { response: unknown }
 export interface ChoiceClient {
   choose(request: ChoiceRequest, signal: AbortSignal): Promise<ChoiceEnvelope>;
 }
-export function choiceRequest(s: WorkSnapshot, goal: Goal, plan: Plan, recentResult?: string): ChoiceRequest {
-  if (plan.eligible.length > 254) throw new Error('too_many_eligible_actions');
-  const ids = plan.eligible.map(a => a.id);
-  if (new Set(ids).size !== ids.length || ids.includes(CLARIFY)) throw new Error('invalid_eligible_ids');
-  return {
-    model: JEV_MODEL,
-    state: { inputRevision: s.inputRevision, configVersion: s.configVersion, intent: s.intent, goal,
-      planId: s.selectedPlanId ?? s.baselinePlanId, stage: plan.stage,
-      gaps: s.gaps.map(g => ({ id: g.id, description: g.description })), recentResult },
-    questions: { next_action: {
-      type: 'choice',
-      instructions: 'Choose the most useful eligible next operation for this goal. Arguments are already bound by the server. Use needs_clarification when the supplied context cannot distinguish the operations. Do not confirm evidence, adopt a plan, invent dimensions, approve construction, waive checks or declare completion.',
-      criteria: Object.fromEntries([...plan.eligible.map(a => [a.id, a.description]),
-        [CLARIFY, 'The context is insufficient to distinguish the eligible next operations.']]),
-    } },
+// JEV chooses a rule; calculation geometry and duplicated report catalogs stay in Pi's
+// detailed tool context. This projection preserves every candidate and saved outcome.
+function selectionContext(value: unknown): unknown {
+  const root = value as Record<string, any> | undefined;
+  if (!root || typeof root !== 'object') return value;
+  const saved = root.savedInformation ?? {};
+  const snapshot = saved.snapshot ?? {};
+  const outcomes = new Map<string, unknown>();
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) { value.forEach(visit); return; }
+    if (!value || typeof value !== 'object') return;
+    const row = value as Record<string, any>;
+    if (typeof row.ruleId === 'string' && row.status) {
+      const outcome = {ruleId:row.ruleId,subjectIds:row.subjectIds,status:row.status,
+        reason:row.reason,missingInputs:row.missingInputs,verificationState:row.verificationState};
+      outcomes.set(JSON.stringify(outcome),outcome);
+    }
+    if (row.basis && typeof row.basis === 'object' && typeof row.basis.status === 'string')
+      outcomes.set('edition_basis', row.basis);
+    for (const [key, child] of Object.entries(row))
+      if (!['coverage','catalog','sourceRefs','sources','fabrication','input','plan'].includes(key)) visit(child);
   };
+  visit(root.ruleResults); visit(saved.results);
+  return {understanding:root.understanding,
+    drawing:snapshot.sourceDrawing,
+    subjects:snapshot.baselinePlan?.entities?.map((e:any)=>({id:e.id,kind:e.kind,productId:e.productId})),
+    facts:[...(snapshot.detailing ?? []),...(snapshot.siteFacts ?? [])].map((f:any)=>({
+      id:f.id,field:f.field,value:f.value,unit:f.unit,subjectIds:f.subjectIds,
+      confirmation:f.confirmation,provenance:f.provenance,source:f.source,unknownReason:f.unknownReason})),
+    changeRequest:snapshot.changeRequest,selectedPlanId:snapshot.selectedPlan?.id,
+    answers:snapshot.answers,priorRuleOutcomes:[...outcomes.values()]};
+}
+export function ruleChoiceRequest(s: WorkSnapshot, goal: Goal, rules: RuleDescriptor[], context: unknown): ChoiceRequest {
+  if (rules.length > 253 || new Set(rules.map(r => r.id)).size !== rules.length || rules.some(r => [CLARIFY, SELECTION_DONE].includes(r.id))) throw new Error('invalid_rule_catalog');
+  const describe = (r: RuleDescriptor) => {
+    const sources=r.sourceRefs.map(value=>{if (typeof value === 'string') return value; const ref=value as Record<string,unknown>;return [ref.documentId ?? ref.document,ref.revision,ref.clauses].filter(Boolean).join(' ');});
+    return `${r.title}; ${r.implementationStatus}; ${r.check}${r.applicability===r.check?'':`; Applies: ${r.applicability}`} Subjects: ${r.subjectTypes.join(',')}. Inputs: ${r.requiredInputs.join(',')}. Sources: ${[...new Set(sources)].join(';')}. Version ${r.version}.`;
+  };
+  return {model:JEV_MODEL, state:{inputRevision:s.inputRevision,configVersion:s.configVersion,intent:s.intent,goal,
+    planId:s.selectedPlanId ?? s.baselinePlanId,gaps:s.gaps.map(g=>({id:g.id,description:g.description})),
+    stage:'select_verification_rule', context:selectionContext(context)}, questions:{next_action:{type:'choice',
+    instructions:'Select ONE sprinkler verification rule to execute next using applicability, facts and prior outcomes. Never select business operations. Do not repeat a rule on unchanged subjects/inputs already checked. Keep unimplemented/source-pending checks visible. Choose needs_clarification only if missing evidence prevents choosing a rule; an executable check may return missing inputs. Choose selection_complete when no further catalog rule is useful. Completion and all-pass are not coverage or construction approval.',
+    criteria:Object.fromEntries([...rules.map(r => [r.id, describe(r)]),
+      [CLARIFY,'More information is needed to choose a verification rule.'],
+      [SELECTION_DONE,'No further catalog rule is useful for this context; no coverage/approval claim.']])}}};
 }
 const object = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 const probability = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1;
@@ -53,10 +83,14 @@ export function validateChoice(envelope: ChoiceEnvelope, request: ChoiceRequest)
   const p = a.probabilities;
   if (!object(p) || Object.keys(p).length !== ids.length || ids.some(id => !Object.hasOwn(p, id) || !probability(p[id]))) return fail('invalid_distribution');
   const values = ids.map(id => p[id] as number);
-  if (Math.abs(values.reduce((sum, n) => sum + n, 0) - 1) > 1e-6) return fail('distribution_sum');
+  // The service returns hundredth-rounded masses (observed 49 options summing to 0.99).
+  // Accept only the mathematically possible rounding error; retain raw probabilities.
+  const roundedHundredths = values.every(n => Math.abs(n * 100 - Math.round(n * 100)) < 1e-8);
+  const tolerance = roundedHundredths ? ids.length * 0.005 + 1e-8 : 1e-6;
+  const sum = values.reduce((total, n) => total + n, 0);
+  if (sum <= 0 || Math.abs(sum - 1) > tolerance) return fail('distribution_sum');
   const maximum = Math.max(...values);
   if (p[a.choice] !== maximum) return fail('choice_not_maximum');
-  if (a.choice === CLARIFY) return fail('needs_clarification');
   if (values.filter(n => n === maximum).length !== 1) return fail('ambiguous_distribution');
   return { id: a.choice, confidence: a.confidence };
 }

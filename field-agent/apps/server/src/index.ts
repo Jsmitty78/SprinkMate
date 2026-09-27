@@ -1,4 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
+import { parseEnv } from 'node:util';
+import { workflowLlmFromEnv, JevHttpClient } from '@field-agent/workflow';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolve, join } from 'node:path';
@@ -16,8 +18,14 @@ if(!token) {
   try{token=readFileSync(tokenPath,'utf8').trim();}
   catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;token=randomBytes(32).toString('hex');writeFileSync(tokenPath,token,{mode:0o600,flag:'wx'});}
 }
+// Project-local credentials override inherited keys without logging either value.
+let localEnv: NodeJS.ProcessEnv = {};
+try { localEnv = parseEnv(readFileSync(fileURLToPath(new URL('../../../.env.local', import.meta.url)), 'utf8')); }
+catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+const llm = workflowLlmFromEnv(process.env, localEnv);
+const jevKey = localEnv.TYPESAFE_API_KEY ?? process.env.TYPESAFE_API_KEY;
 const service=new FieldService(dataDir);
-const integrated=createIntegratedServices(new WorkPackageStore(service.store.db),dataDir);
+const integrated=createIntegratedServices(new WorkPackageStore(service.store.db),dataDir,{llm, ...(jevKey ? {choice: new JevHttpClient(jevKey)} : {})});
 const app=createApp(service,{token,workPackages:integrated.packages,workPackageExports:integrated.exports,workPackageDetails:integrated.details,webDir:fileURLToPath(new URL('../../web/dist/',import.meta.url))});
 const hostname=process.env.FIELD_AGENT_HOST??'127.0.0.1',port=Number(process.env.PORT??4310);
 const server=serve({fetch:app.fetch,hostname,port},info=>{

@@ -147,6 +147,12 @@ function evaluate(rule: RuleDefinition, facts: HeadFacts, ctx: RuleContext): Rul
   }
 }
 
+export function validateRule(ruleId: string, facts: HeadFacts, ctx: RuleContext): RuleResult {
+  const rule = ADOPTED_RULES.find(item => item.id === ruleId);
+  if (!rule) throw new Error(`Unknown head rule: ${ruleId}`);
+  return evaluate(rule, facts, ctx);
+}
+
 export function validateRules(facts: HeadFacts, ctx: RuleContext): RuleResult[] {
   return ADOPTED_RULES.map(rule => evaluate(rule, facts, ctx));
 }

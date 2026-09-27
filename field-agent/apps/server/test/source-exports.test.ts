@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import type { WorkPackageSnapshot } from "@field-agent/core";
 import { deriveWorkPackage, fabricationCatalog } from "@field-agent/fabrication";
 import { fabricationInput, planningPlan } from "../src/integration/model.js";
-import { evaluateProfile } from "../src/integration/profiles.js";
+import { deriveFabricationProfile } from "../src/integration/profiles.js";
 import { exportSnapshot } from "../src/integration/snapshot.js";
 import { csvFiles } from "../src/exports/csv.js";
 import { validateSnapshot } from "../src/exports/snapshot.js";
@@ -15,7 +15,7 @@ export async function sourceExport() {
   const input = fabricationInput(s, s.baselinePlan!);
   const fabrication = deriveWorkPackage(input, fabricationCatalog(s.configVersion));
   const plan = planningPlan(s, input);
-  const profile = evaluateProfile(s, input, fabrication, plan, plan);
+  const profile = deriveFabricationProfile(s, input, fabrication, plan, plan);
   return exportSnapshot(s, { inputRevision: s.inputRevision, configVersion: s.configVersion, refs: [], details: [{ id: "saved-intake-output", input, fabrication, plan, profile }] })!;
 }
 it("preserves saved drawing labels, requirements, context and unknown cuts in exports", async () => {

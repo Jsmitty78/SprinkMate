@@ -504,3 +504,13 @@ export function evaluateSfLocalChangeRecords(input: {
     evaluateExistingRiser({ ...input, sourceDrawing }),
   ];
 }
+
+export function evaluateSfLocalChangeRecordRule(input: Parameters<typeof evaluateSfLocalChangeRecords>[0], ruleId: string): ProjectRuleResult[] {
+  const context = { ...input, sourceDrawing: drawingRevision(input.input, input.projectId, input.taskRevision, input.evidence) };
+  switch (ruleId) {
+    case "SFFD_AB204_NO_REINSTALL_REMOVED_OR_WELDED_SPRINKLER_I14D_V1": return evaluateThreadedReuse(context);
+    case "SFFD_AB204_REMOVE_UNUSED_EXCESS_PIPE_I14A_V1": return evaluateExcessPipe(context);
+    case "SFFD_AB204_EXISTING_CONFIGURATION_RISER_FOR_ADDITIONS_I15_V1": return [evaluateExistingRiser(context)];
+    default: throw new Error(`Unknown local record rule: ${ruleId}`);
+  }
+}

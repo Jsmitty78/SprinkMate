@@ -1,3 +1,4 @@
+import { integrationStream, integrationChoice } from "../../../packages/workflow/test/integration-stream.js";
 import { afterEach, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,7 +15,7 @@ afterEach(() => cleanup.splice(0).forEach(fn => fn()));
 it.each([2, 3] as const)("executes every mandatory fabrication subject through the real scenario %s runtime", async scenario => {
   const dir = mkdtempSync(join(tmpdir(), "profile-subjects-"));
   const field = new FieldService(dir);
-  const t = createIntegratedServices(new WorkPackageStore(field.store.db), dir);
+  const t = createIntegratedServices(new WorkPackageStore(field.store.db), dir, {testStream:integrationStream, choice:integrationChoice});
   cleanup.push(() => { t.packages.close(); field.store.close(); rmSync(dir, { recursive: true, force: true }); });
   const intent = scenario === 2 ? "prepare_from_drawing" : "adapt_to_site";
   let s = t.packages.create({ title: "Synthetic arithmetic and execution coverage control", projectId: "profile-control", intent });
@@ -43,15 +44,9 @@ it.each([2, 3] as const)("executes every mandatory fabrication subject through t
     expect(profile.required.filter(c => c.id === "ASSEMBLY_CONDITIONS").map(c => [...c.subjectIds].sort())).toEqual([pipeIds]);
     expect(profile.checks.filter(c => c.id === "ASSEMBLY_CONDITIONS").map(c => [...c.subjectIds].sort())).toEqual([pipeIds]);
     expect(profile.checks.find(c => c.id === "SUBJECT_SCOPE")).toMatchObject({ status: "unknown", state: "input_missing" });
-    expect(profile.required.some(c => c.id === "PROJECT_BASIS")).toBe(true);
-    if (index === 0) {
-      expect(profile.excluded.some(c => c.id === "sf-local-change-2025" && c.reason.includes("no proposed change"))).toBe(true);
-    } else {
-      for (const id of ["SFFD_LOCAL_CHANGE_APPROVED_BASELINE_V1", "SFFD_LOCAL_CHANGE_ROUTE_GEOMETRY_V1", "LOCAL_CHANGE_STRAIGHT_PIPE_DUCT_ENVELOPE_V1", "NFPA13_LOCAL_HEAD_SPACING_SOURCE_PENDING_V1", "NFPA13_LOCAL_OBSTRUCTION_SOURCE_PENDING_V1", "SFFD_AB204_HYDRAULIC_RECALC_I22A2_V1"]) {
-        expect(profile.required.some(c => c.id === id), id).toBe(true);
-        expect(profile.checks.filter(c => c.id === id), id).toHaveLength(1);
-      }
-      expect(profile.checks.find(c => c.id === "ASSEMBLY_CONDITIONS")?.status).toBe("unknown");
-    }
+    expect(detail.ruleExecutions).toHaveLength(1);
+    expect(profile.excluded).toEqual([]);
+    // This run verifies exactly JEV's one choice; it does not preselect a regional pack.
+    expect(profile.required.some(c => c.id === "SFFD_AB204_HYDRAULIC_RECALC_I22A2_V1")).toBe(false);
   }
 });

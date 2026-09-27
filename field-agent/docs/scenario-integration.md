@@ -1,4 +1,6 @@
-# Scenario 2/3 server integration
+# Historical scenario 2/3 integration record
+
+This records the earlier fixed-policy implementation and its tests. It is not the current execution design or acceptance evidence. See [Pi rule selection](pi-rule-selection-design.md) for the replacement.
 
 The production server now connects the authenticated, revision-bound work-package API to the actual Pi workflow, bounded candidate planner, fabrication engine, rule evaluator and Jake's PDF/CSV exporter. `GET /api/work-packages/:id/detail` exposes the persisted calculation inputs, outputs, required evaluation rows and latest workflow record behind the same bearer authentication.
 
@@ -41,8 +43,6 @@ pnpm install --frozen-lockfile
 pnpm test
 pnpm typecheck
 pnpm build
-pnpm exec tsx scripts/integration-demo.ts /tmp/innovation-integration-evidence
-pnpm --filter @field-agent/workflow smoke:jev
 ```
 
 The demo starts the real server on an ephemeral loopback port, creates/uploads/edits through HTTP, runs actual Pi and domain engines, selects a candidate, exports and downloads all four artifacts per scenario. It saves the detail records and a summary. Its structured drawing and site confirmations are explicitly invented acceptance fixtures, not field evidence. The integration tests' Choice response is hand-authored test data, not a recorded live service response.
@@ -58,7 +58,7 @@ For PDF output, configure `FIELD_AGENT_PDF_FONT` to a readable Unicode font if n
 3. **No browser or product acceptance.** This work covers the server/API/export path. Closed UI PR #20 is not restored, and the earlier browser workflow is not claimed complete.
 4. **Permit, hydraulic, head/support and source-pending requirements remain explicit.** This is a bounded draft work package, not comprehensive design or construction approval.
 
-Issue #19 must remain open for these acceptance boundaries. No CI workflow is added by this integration.
+The issue references and test counts below describe that historical run only.
 
 ## Integration verification (2026-09-27 UTC)
 

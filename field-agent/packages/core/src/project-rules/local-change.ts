@@ -521,101 +521,36 @@ export function evaluateLocalChange(request: ProjectEvaluationRequest): { rules:
   const scope = scopeState(request);
   rules.push(result(request, "SFFD_LOCAL_CHANGE_SCOPE_V1", "Supported San Francisco local-change scope", scope.state === "verified" ? "pass" : "unknown", scope.state, scope.reason, [input.id], SOURCES.scope, scope.evidence, scope.missing));
 
-  const approvedDoc = docFact(request, input.approvedDrawing.document, "approvedDrawing.document", [input.id], ["permit", "drawing"]);
-  const approvedState = checkFact(request, input.approvedDrawing.approval, "approvedDrawing.approval", [input.id], ["permit", "drawing"], approvedDoc.value);
-  const baselineDrawing = sourceDrawingCheck(request, input.baseline, "baseline");
-  const baselineMatchesApproval = sameRevision(approvedDoc.value, baselineDrawing.value);
-  const baselineApprovalStatus = !approvedDoc.issues.length && !approvedState.issues.length && approvedState.value === "approved" && !baselineDrawing.issues.length && baselineMatchesApproval;
-  const knownBaselineRejection = !approvedDoc.issues.length && !approvedState.issues.length && approvedState.value === "not_approved" && !baselineDrawing.issues.length && baselineMatchesApproval;
-  rules.push(result(request, "SFFD_LOCAL_CHANGE_APPROVED_BASELINE_V1", "Approved baseline drawing is revision-linked", baselineApprovalStatus ? "pass" : knownBaselineRejection ? "fail" : "unknown", baselineApprovalStatus || knownBaselineRejection ? "verified" : "input_missing",
-    baselineApprovalStatus ? "The approved baseline and baseline plan identify the same current drawing revision." : knownBaselineRejection ? "The identified baseline plan revision is confirmed not approved." : "The approved drawing approval, source revision, and baseline plan drawing must be confirmed and linked before comparison.",
-    [input.id, input.baseline.id], SOURCES.plans, [...approvedDoc.evidenceIds, ...approvedState.evidenceIds, ...baselineDrawing.evidenceIds], [...approvedDoc.issues, ...approvedState.issues, ...baselineDrawing.issues, ...(!baselineMatchesApproval ? ["baseline.sourceDrawing:approvedDrawing.document"] : [])]));
+  const approval = approvedBaselineContext(request, input);
+  const { approvedDoc, baselineDrawing } = approval;
+  rules.push(approvedBaselineCheck(request, input, approval));
 
-  const proposedDrawing = sourceDrawingCheck(request, input.proposed, "proposed");
-  const revisedDoc: FactCheck<DocumentRevisionRef> = input.revisedDrawing
-    ? docFact(request, input.revisedDrawing.document, "revisedDrawing.document", [input.id], ["permit", "drawing"])
-    : { issues: ["revisedDrawing.document"], evidenceIds: [], state: "input_missing" };
-  const revisedApproval: FactCheck<"approved" | "not_approved"> = input.revisedDrawing
-    ? checkFact(request, input.revisedDrawing.approval, "revisedDrawing.approval", [input.id], ["permit", "drawing"], revisedDoc.value)
-    : { issues: ["revisedDrawing.approval"], evidenceIds: [], state: "input_missing" };
-  const sameAsBaseline = sameRevision(proposedDrawing.value, approvedDoc.value);
-  const revisedMatches = sameRevision(revisedDoc.value, proposedDrawing.value);
-  const lineageOk = !proposedDrawing.issues.length && (sameAsBaseline || (!revisedDoc.issues.length && revisedMatches));
-  rules.push(result(request, "SFFD_LOCAL_CHANGE_DRAWING_LINEAGE_V1", "Proposed plan drawing revision is identified", lineageOk ? "pass" : "unknown", lineageOk ? "verified" : "input_missing",
-    lineageOk ? "The proposed plan is linked to its named drawing revision." : "A proposal must identify a current drawing revision; a changed revision also needs its matching revised-drawing record.",
-    [input.id, input.proposed.id], SOURCES.plans, [...proposedDrawing.evidenceIds, ...revisedDoc.evidenceIds], [...proposedDrawing.issues, ...(!sameAsBaseline && !revisedMatches ? [...revisedDoc.issues, "revisedDrawing.document:proposed.sourceDrawing"] : [])]));
+  const drawing = proposedDrawingContext(request, input, approvedDoc);
+  const { proposedDrawing } = drawing;
+  rules.push(drawingLineageCheck(request, input, drawing));
 
-  const geometryBase = evaluateLocalPlanGeometry(input.baseline);
-  const geometryProposed = evaluateLocalPlanGeometry(input.proposed);
-  const baseEvidence = planGeometryFacts(request, input.baseline);
-  const proposedEvidence = planGeometryFacts(request, input.proposed);
-  const baseline = maskGeometry(geometryBase, baseEvidence.issues);
-  const proposed = maskGeometry(geometryProposed, proposedEvidence.issues);
-  const delta = compareGeometry(baseline, proposed);
-  const stable = compareStableContext(request, input);
-  const hasRouteParts = input.baseline.segments.length > 0 && input.proposed.segments.length > 0;
-  rules.push(result(request, "SFFD_LOCAL_CHANGE_ROUTE_GEOMETRY_V1", "Confirmed straight-pipe route, cut lengths, and geometry delta", delta.state === "verified" && stable.state === "verified" && hasRouteParts ? "pass" : "unknown",
-    delta.state === "unsupported" ? "unsupported" : delta.state === "input_missing" || stable.state !== "verified" || !hasRouteParts ? "input_missing" : "verified",
-    "The deterministic calculation covers straight axis-parallel pipe centerlines, explicit fitting/tie-in takeouts, and route quantity deltas only; it does not model full fitting bodies, hydraulic loss, or design tolerances.",
-    [input.id, input.baseline.id, input.proposed.id, ...stable.changedIds], SOURCES.geometry,
-    [...baseEvidence.evidenceIds, ...proposedEvidence.evidenceIds, ...stable.evidence], [...baseline.missingInputs, ...proposed.missingInputs, ...stable.missing]));
-
+  const geometry = localGeometryContext(request, input);
+  const { baseline, proposed, delta, stable } = geometry;
   const clearances = proposed.ductClearances;
-  const clearanceNeighborhood = impactNeighborhoodCheck(request, input);
-  const expectedClearanceCount = input.proposed.segments.length * input.proposed.ducts.length;
-  const collision = clearances.some(item => item.state === "collision");
-  const unsupportedClearance = clearances.some(item => item.state === "unsupported");
-  const missingClearance = clearances.some(item => item.state === "input_missing");
-  const clearancePairsComplete = expectedClearanceCount > 0 && clearances.length === expectedClearanceCount;
-  const allDuctsCovered = input.proposed.ducts.length > 0 && [...new Set([...input.baseline.ducts, ...input.proposed.ducts].map(duct => duct.id))].every(id => clearanceNeighborhood.value?.ductIds.includes(id));
-  const clearanceState: LocalChangeVerificationState = unsupportedClearance || proposed.state === "unsupported" || baseline.state === "unsupported" ? "unsupported" : missingClearance || baseline.state !== "verified" || proposed.state !== "verified" || stable.state !== "verified" || clearanceNeighborhood.issues.length > 0 || !clearancePairsComplete || !allDuctsCovered ? "input_missing" : "verified";
-  const clearanceStatus: RuleStatus = collision ? "fail" : clearanceState === "verified" ? "pass" : "unknown";
-  rules.push(result(request, "LOCAL_CHANGE_STRAIGHT_PIPE_DUCT_ENVELOPE_V1", "Straight pipe envelope versus modeled ducts", clearanceStatus, clearanceState,
-    collision ? "At least one modeled straight-pipe radius envelope intersects a modeled duct box." : "This result describes only modeled straight-pipe-to-duct geometry; it does not determine sprinkler-discharge obstruction compliance or fitting-body clearance.",
-    [input.proposed.id, ...clearances.flatMap(item => [item.segmentId, item.ductId])], SOURCES.pending,
-    [...proposedEvidence.evidenceIds, ...stable.evidence, ...clearanceNeighborhood.evidenceIds], [...proposed.missingInputs, ...stable.missing, ...clearanceNeighborhood.issues, ...(!clearancePairsComplete ? ["proposed.ductClearances.completeComparisonSet"] : []), ...(!allDuctsCovered ? ["changeRequest.impactNeighborhood.ductIds:allProposedDucts"] : [])]));
+  rules.push(routeGeometryCheck(request, input, geometry));
+
+  rules.push(ductEnvelopeCheck(request, input, geometry));
 
   const interfaces = interfaceChecks(request, input);
   rules.push(interfaces.result);
   const bomResult = bomDeltas(request, input, baseline, proposed);
   const bom = bomResult.output;
-  rules.push(result(request, "LOCAL_CHANGE_BOM_ACCOUNTING_V1", "Derived plan bill of material reconciled with supplied rows", bomResult.status, bomResult.verificationState,
-    bomResult.reason,
-    [input.id, ...bom.map(line => line.itemId)], SOURCES.pending, bomResult.evidence, bomResult.missing));
+  rules.push(bomAccountingCheck(request, input, bomResult));
 
-  const heads = headChanges(request, input);
-  const neighborhood = impactNeighborhoodCheck(request, input);
-  const routeChanged = routeHasChanged(input.baseline, input.proposed, delta);
-  const listedHeads = neighborhood.value?.headIds ?? [];
-  const movedNotCovered = heads.moved.filter(id => !listedHeads.includes(id));
-  const routeRequiresHeadScope = routeChanged && !listedHeads.length;
-  const neighborMissing = [...neighborhood.issues, ...(routeRequiresHeadScope ? ["changeRequest.impactNeighborhood.headIds"] : []), ...(movedNotCovered.length ? ["changeRequest.impactNeighborhood.headIds:" + movedNotCovered.join(",")] : []), ...heads.issues];
-  const headStatus: RuleStatus = neighborMissing.length ? "unknown" : heads.moved.length ? "pass" : "not_applicable";
-  const headState: LocalChangeVerificationState = neighborMissing.length ? "input_missing" : "verified";
-  rules.push(result(request, "LOCAL_CHANGE_HEAD_NEIGHBORHOOD_V1", "Head positions and local impact neighborhood recorded", headStatus, headState,
-    neighborMissing.length ? "Head/neighbor impact is not assessed because the changed route or affected-neighborhood evidence is incomplete." : heads.moved.length ? "Moved head IDs and measured locations are reported for human review; no NFPA spacing or discharge-compliance result is inferred." : "No head displacement was found in the represented plan set; this does not establish spacing or obstruction compliance.",
-    [input.id, ...heads.deltas.map(item => item.headId), ...listedHeads], SOURCES.pending, [...heads.evidence, ...neighborhood.evidenceIds], neighborMissing));
+  const headContext = localHeadContext(request, input, delta);
+  const { heads, routeChanged, listedHeads } = headContext;
+  rules.push(headNeighborhoodCheck(request, input, headContext));
   rules.push(unknownResult(request, "NFPA13_LOCAL_HEAD_SPACING_SOURCE_PENDING_V1", "Head spacing and coverage after the proposed change", "source_pending", NFPA_REASON, [input.id, ...listedHeads], SOURCES.pending, ["NFPA13.headSpacingAndCoverage"]));
   rules.push(unknownResult(request, "NFPA13_LOCAL_OBSTRUCTION_SOURCE_PENDING_V1", "Sprinkler discharge obstruction after the proposed change", "source_pending", "A clear modeled straight-pipe/duct envelope is not a discharge-obstruction determination. The applicable NFPA 13-2025 obstruction clauses and project inputs are not implemented.", [input.id, ...listedHeads, ...clearances.map(item => item.ductId)], SOURCES.pending, ["NFPA13.obstructionCriteria"]));
 
-  for (const headId of heads.moved) {
-    const sources = [...SOURCES.plans];
-    let status: RuleStatus = "unknown";
-    let state: LocalChangeVerificationState = "input_missing";
-    let reason = "A moved head needs a revised approved plan linked to the proposed drawing revision.";
-    const missing: string[] = [];
-    const evidence = [...heads.evidence];
-    if (revisedDoc.issues.length || !revisedDoc.value || !revisedMatches || revisedApproval.issues.length || !revisedApproval.value) {
-      missing.push(...revisedDoc.issues, ...revisedApproval.issues, ...(!revisedDoc.value ? ["revisedDrawing.document"] : []), ...(!revisedApproval.value ? ["revisedDrawing.approval"] : []), ...(!revisedMatches ? ["revisedDrawing.document:proposed.sourceDrawing"] : []));
-    } else if (revisedApproval.value === "approved") {
-      status = "pass"; state = "verified"; reason = "The proposed head relocation is shown on a revision-matched drawing confirmed approved; this checks plan representation only.";
-    } else {
-      status = "fail"; state = "verified"; reason = "The proposed head relocation is shown only on a revision confirmed not approved; AB 2.04 I.14(C) requires relocations to follow an approved plan.";
-    }
-    evidence.push(...revisedDoc.evidenceIds, ...revisedApproval.evidenceIds);
-    rules.push(result(request, "SFFD_AB204_HEAD_RELOCATION_I14C_V1", "Moved head represented on a revised approved plan", status, state, reason, [input.id, headId], sources, evidence, missing));
-    if (status !== "pass") requiredArtifacts.push({ id: `SFFD_AB204_REVISED_APPROVED_PLAN_I14C_${headId}`, title: `Approved revised plan for relocated head ${headId}`, state: "required", reason: "AB 2.04 I.14(C) requires a sprinkler relocation to follow an approved plan.", subjectIds: [input.id, headId], sourceRefs: SOURCES.plans });
-  }
+  const relocation = headRelocationCheck(request, input, heads, drawing);
+  rules.push(...relocation.rules);
+  requiredArtifacts.push(...relocation.requiredArtifacts);
 
   const supportChanged = input.baseline.supports.length !== input.proposed.supports.length || input.proposed.supports.some(support => !input.baseline.supports.some(prior => prior.supportId === support.supportId && JSON.stringify(prior.attachedPipeSegmentIds.value) === JSON.stringify(support.attachedPipeSegmentIds.value)));
   if (supportChanged || routeChanged || heads.moved.length > 0) {
@@ -626,17 +561,9 @@ export function evaluateLocalChange(request: ProjectEvaluationRequest): { rules:
   rules.push(hydraulic.result);
   if (hydraulic.artifact) requiredArtifacts.push(hydraulic.artifact);
 
-  const fieldDeviation = input.changeRequest.fieldInstallationDeviationFromApprovedPlan;
-  if (!fieldDeviation) {
-    rules.push(unknownResult(request, "SFFD_AB204_FIELD_DEVIATION_I14E_V1", "Actual field deviation from approved plan", "input_missing", "This is a field-history condition and cannot be inferred from a proposed geometry difference. Confirm whether as-built work differs from the approved plan.", [input.id], SOURCES.fieldDeviation, ["fieldInstallationDeviationFromApprovedPlan"]));
-  } else {
-    const check = checkFact(request, fieldDeviation, "changeRequest.fieldInstallationDeviationFromApprovedPlan", [input.changeRequest.id], ["installation", "inspection"]);
-    if (check.issues.length) rules.push(unknownResult(request, "SFFD_AB204_FIELD_DEVIATION_I14E_V1", "Actual field deviation from approved plan", "input_missing", "The actual field-deviation fact lacks current installation/inspection evidence. A plan proposal cannot establish field history.", [input.id], SOURCES.fieldDeviation, check.issues, check.evidenceIds));
-    else if (check.value === "yes") {
-      rules.push(unknownResult(request, "SFFD_AB204_FIELD_DEVIATION_I14E_V1", "Actual field deviation from approved plan", "unimplemented", "AB 2.04 I.14(E) says a field deviation may require recalculation. This deviation needs project-specific review; it is not an automatic failure or a confirmed recalculation trigger.", [input.id], SOURCES.fieldDeviation, ["projectSpecificI14EReview"], check.evidenceIds));
-      requiredArtifacts.push({ id: "SFFD_AB204_FIELD_DEVIATION_REVIEW_I14E", title: "Review field deviation and decide whether recalculation is required", state: "may_be_required", reason: "AB 2.04 I.14(E) says a deviation may require recalculation, considering new pipe/fittings.", subjectIds: [input.id], sourceRefs: SOURCES.fieldDeviation });
-    } else rules.push(result(request, "SFFD_AB204_FIELD_DEVIATION_I14E_V1", "Actual field deviation from approved plan", "not_applicable", "verified", "Current installation/inspection evidence confirms no field deviation from the approved plan.", [input.id], SOURCES.fieldDeviation, check.evidenceIds));
-  }
+  const deviation = fieldDeviationCheck(request, input);
+  rules.push(...deviation.rules);
+  requiredArtifacts.push(...deviation.requiredArtifacts);
 
   const pressure = pressureReport(request, input);
   rules.push(pressure.result);
@@ -763,4 +690,212 @@ function calculationLink(request: ProjectEvaluationRequest, input: ProjectLocalC
   if (!baselineRefs.length || !revisedRefs.length || JSON.stringify(baselineRefs) !== JSON.stringify(revisedRefs)) conflicts.push("calculation.referencePointIds:baselineAndRevisedMustMatch");
   if (conflicts.length) return { ok: false, status: "fail", state: "verified", reason: `Calculation document links conflict with the required drawing revision, affected targets, or shared reference points (${conflicts.join(", ")}).`, missing: conflicts, evidence };
   return { ok: true, status: "pass", state: "verified", reason: "Baseline and revised calculation metadata are linked to the corresponding drawings and share the changed targets/reference points; calculation adequacy is not assessed.", missing: [], evidence };
+}
+
+export interface LocalChangeRuleOutput {
+  rules: ProjectRuleResult[];
+  requiredArtifacts: ProjectLocalChangeReport["requiredArtifacts"];
+}
+
+/** Execute a single check through the same verdict implementation used by bulk reports. */
+export function evaluateLocalChangeRule(request: ProjectEvaluationRequest, ruleId: string): LocalChangeRuleOutput {
+  const input = request.localChange;
+  if (!input) throw new Error("localChange is required");
+  localIds(input);
+  const one = (rule: ProjectRuleResult): LocalChangeRuleOutput => ({ rules: [rule], requiredArtifacts: [] });
+  const scope = scopeState(request);
+  if (ruleId === "SFFD_LOCAL_CHANGE_SCOPE_V1") return one(result(request, ruleId, "Supported San Francisco local-change scope", scope.state === "verified" ? "pass" : "unknown", scope.state, scope.reason, [input.id], SOURCES.scope, scope.evidence, scope.missing));
+  // Execution guards do not prefilter the selection catalog.
+  if (ruleId.startsWith("SFFD_") && scope.state !== "verified") return one(unknownResult(request, ruleId, ruleId, scope.state, scope.reason, [input.id], SOURCES.scope, scope.missing, scope.evidence));
+  switch (ruleId) {
+    case "LOCAL_CHANGE_CONFIRMED_INTERFACE_SCREEN_V1": return one(interfaceChecks(request, input).result);
+    case "LOCAL_CHANGE_PART_PRESSURE_COMPATIBILITY_V1": return one(pressureReport(request, input).result);
+    case "SFFD_AB204_FIELD_DEVIATION_I14E_V1": return fieldDeviationCheck(request, input);
+    case "SFFD_LOCAL_CHANGE_APPROVED_BASELINE_V1": return one(approvedBaselineCheck(request, input, approvedBaselineContext(request, input)));
+    case "SFFD_LOCAL_CHANGE_DRAWING_LINEAGE_V1": return one(drawingLineageCheck(request, input, proposedDrawingContext(request, input, approvedBaselineContext(request, input).approvedDoc)));
+    case "SFFD_AB204_HEAD_RELOCATION_I14C_V1": return headRelocationCheck(request, input, headChanges(request, input), proposedDrawingContext(request, input, approvedBaselineContext(request, input).approvedDoc));
+    case "SFFD_AB204_HYDRAULIC_RECALC_I22A2_V1": {
+      const checked = hydraulicCheck(request, input);
+      if (checked.result.ruleId !== ruleId) return one({ ...checked.result, ruleId, status: "not_applicable", applicability: "not_applicable", reason: "The selected existing-system trigger rule does not cover the confirmed new-system pathway. The new-system hydraulic review remains unimplemented." });
+      return { rules: [checked.result], requiredArtifacts: checked.artifact ? [checked.artifact] : [] };
+    }
+    case "SFFD_LOCAL_CHANGE_ROUTE_GEOMETRY_V1": return one(routeGeometryCheck(request, input, localGeometryContext(request, input)));
+    case "LOCAL_CHANGE_STRAIGHT_PIPE_DUCT_ENVELOPE_V1": return one(ductEnvelopeCheck(request, input, localGeometryContext(request, input)));
+    case "LOCAL_CHANGE_BOM_ACCOUNTING_V1": {
+      const { baseline, proposed } = localGeometryContext(request, input);
+      return one(bomAccountingCheck(request, input, bomDeltas(request, input, baseline, proposed)));
+    }
+    case "LOCAL_CHANGE_HEAD_NEIGHBORHOOD_V1": return one(headNeighborhoodCheck(request, input, localHeadContext(request, input, localGeometryContext(request, input).delta)));
+    default: throw new Error(`Unknown executable local change rule: ${ruleId}`);
+  }
+}
+
+export function localChangeRuleSources(ruleId: string): ProjectSourceReference[] {
+  if (ruleId.includes("SCOPE")) return SOURCES.scope;
+  if (ruleId.includes("I14D")) return SOURCES.headReuse;
+  if (ruleId.includes("I14A")) return SOURCES.headRemoval;
+  if (ruleId.includes("I15_")) return SOURCES.riser;
+  if (ruleId.includes("I14E")) return SOURCES.fieldDeviation;
+  if (ruleId.includes("HYDRAULIC")) return SOURCES.hydraulic;
+  if (ruleId.includes("GEOMETRY") || ruleId.includes("ENVELOPE") || ruleId.includes("INTERFACE") || ruleId.includes("BOM")) return SOURCES.geometry;
+  return SOURCES.plans;
+}
+
+function approvedBaselineContext(request: ProjectEvaluationRequest, input: ProjectLocalChangeInput) {
+  const approvedDoc = docFact(request, input.approvedDrawing.document, "approvedDrawing.document", [input.id], ["permit", "drawing"]);
+  const approvedState = checkFact(request, input.approvedDrawing.approval, "approvedDrawing.approval", [input.id], ["permit", "drawing"], approvedDoc.value);
+  const baselineDrawing = sourceDrawingCheck(request, input.baseline, "baseline");
+  const baselineMatchesApproval = sameRevision(approvedDoc.value, baselineDrawing.value);
+  const baselineApprovalStatus = !approvedDoc.issues.length && !approvedState.issues.length && approvedState.value === "approved" && !baselineDrawing.issues.length && baselineMatchesApproval;
+  const knownBaselineRejection = !approvedDoc.issues.length && !approvedState.issues.length && approvedState.value === "not_approved" && !baselineDrawing.issues.length && baselineMatchesApproval;
+  return { approvedDoc, approvedState, baselineDrawing, baselineMatchesApproval, baselineApprovalStatus, knownBaselineRejection };
+}
+
+function proposedDrawingContext(request: ProjectEvaluationRequest, input: ProjectLocalChangeInput, approvedDoc: FactCheck<DocumentRevisionRef>) {
+  const proposedDrawing = sourceDrawingCheck(request, input.proposed, "proposed");
+  const revisedDoc: FactCheck<DocumentRevisionRef> = input.revisedDrawing
+    ? docFact(request, input.revisedDrawing.document, "revisedDrawing.document", [input.id], ["permit", "drawing"])
+    : { issues: ["revisedDrawing.document"], evidenceIds: [], state: "input_missing" };
+  const revisedApproval: FactCheck<"approved" | "not_approved"> = input.revisedDrawing
+    ? checkFact(request, input.revisedDrawing.approval, "revisedDrawing.approval", [input.id], ["permit", "drawing"], revisedDoc.value)
+    : { issues: ["revisedDrawing.approval"], evidenceIds: [], state: "input_missing" };
+  const sameAsBaseline = sameRevision(proposedDrawing.value, approvedDoc.value);
+  const revisedMatches = sameRevision(revisedDoc.value, proposedDrawing.value);
+  const lineageOk = !proposedDrawing.issues.length && (sameAsBaseline || (!revisedDoc.issues.length && revisedMatches));
+  return { proposedDrawing, revisedDoc, revisedApproval, sameAsBaseline, revisedMatches, lineageOk };
+}
+
+function localGeometryContext(request: ProjectEvaluationRequest, input: ProjectLocalChangeInput) {
+  const geometryBase = evaluateLocalPlanGeometry(input.baseline);
+  const geometryProposed = evaluateLocalPlanGeometry(input.proposed);
+  const baseEvidence = planGeometryFacts(request, input.baseline);
+  const proposedEvidence = planGeometryFacts(request, input.proposed);
+  const baseline = maskGeometry(geometryBase, baseEvidence.issues);
+  const proposed = maskGeometry(geometryProposed, proposedEvidence.issues);
+  const delta = compareGeometry(baseline, proposed);
+  const stable = compareStableContext(request, input);
+  const hasRouteParts = input.baseline.segments.length > 0 && input.proposed.segments.length > 0;
+  return { baseline, proposed, baseEvidence, proposedEvidence, delta, stable, hasRouteParts };
+}
+
+function localHeadContext(request: ProjectEvaluationRequest, input: ProjectLocalChangeInput, delta: ProjectLocalChangeReport["delta"]) {
+  const heads = headChanges(request, input);
+  const neighborhood = impactNeighborhoodCheck(request, input);
+  const routeChanged = routeHasChanged(input.baseline, input.proposed, delta);
+  const listedHeads = neighborhood.value?.headIds ?? [];
+  const movedNotCovered = heads.moved.filter(id => !listedHeads.includes(id));
+  const routeRequiresHeadScope = routeChanged && !listedHeads.length;
+  const neighborMissing = [...neighborhood.issues, ...(routeRequiresHeadScope ? ["changeRequest.impactNeighborhood.headIds"] : []), ...(movedNotCovered.length ? ["changeRequest.impactNeighborhood.headIds:" + movedNotCovered.join(",")] : []), ...heads.issues];
+  const headStatus: RuleStatus = neighborMissing.length ? "unknown" : heads.moved.length ? "pass" : "not_applicable";
+  const headState: LocalChangeVerificationState = neighborMissing.length ? "input_missing" : "verified";
+  return { heads, neighborhood, routeChanged, listedHeads, neighborMissing, headStatus, headState };
+}
+
+function approvedBaselineCheck(request: ProjectEvaluationRequest, input: ProjectLocalChangeInput, context: ReturnType<typeof approvedBaselineContext>) {
+  const rules: ProjectRuleResult[] = [];
+  const { approvedDoc, approvedState, baselineDrawing, baselineMatchesApproval, baselineApprovalStatus, knownBaselineRejection } = context;
+  rules.push(result(request, "SFFD_LOCAL_CHANGE_APPROVED_BASELINE_V1", "Approved baseline drawing is revision-linked", baselineApprovalStatus ? "pass" : knownBaselineRejection ? "fail" : "unknown", baselineApprovalStatus || knownBaselineRejection ? "verified" : "input_missing",
+    baselineApprovalStatus ? "The approved baseline and baseline plan identify the same current drawing revision." : knownBaselineRejection ? "The identified baseline plan revision is confirmed not approved." : "The approved drawing approval, source revision, and baseline plan drawing must be confirmed and linked before comparison.",
+    [input.id, input.baseline.id], SOURCES.plans, [...approvedDoc.evidenceIds, ...approvedState.evidenceIds, ...baselineDrawing.evidenceIds], [...approvedDoc.issues, ...approvedState.issues, ...baselineDrawing.issues, ...(!baselineMatchesApproval ? ["baseline.sourceDrawing:approvedDrawing.document"] : [])]));
+  return rules[0]!;
+}
+
+function drawingLineageCheck(request: ProjectEvaluationRequest, input: ProjectLocalChangeInput, context: ReturnType<typeof proposedDrawingContext>) {
+  const rules: ProjectRuleResult[] = [];
+  const { proposedDrawing, revisedDoc, sameAsBaseline, revisedMatches, lineageOk } = context;
+  rules.push(result(request, "SFFD_LOCAL_CHANGE_DRAWING_LINEAGE_V1", "Proposed plan drawing revision is identified", lineageOk ? "pass" : "unknown", lineageOk ? "verified" : "input_missing",
+    lineageOk ? "The proposed plan is linked to its named drawing revision." : "A proposal must identify a current drawing revision; a changed revision also needs its matching revised-drawing record.",
+    [input.id, input.proposed.id], SOURCES.plans, [...proposedDrawing.evidenceIds, ...revisedDoc.evidenceIds], [...proposedDrawing.issues, ...(!sameAsBaseline && !revisedMatches ? [...revisedDoc.issues, "revisedDrawing.document:proposed.sourceDrawing"] : [])]));
+  return rules[0]!;
+}
+
+function routeGeometryCheck(request: ProjectEvaluationRequest, input: ProjectLocalChangeInput, context: ReturnType<typeof localGeometryContext>) {
+  const rules: ProjectRuleResult[] = [];
+  const { baseline, proposed, baseEvidence, proposedEvidence, delta, stable, hasRouteParts } = context;
+  rules.push(result(request, "SFFD_LOCAL_CHANGE_ROUTE_GEOMETRY_V1", "Confirmed straight-pipe route, cut lengths, and geometry delta", delta.state === "verified" && stable.state === "verified" && hasRouteParts ? "pass" : "unknown",
+    delta.state === "unsupported" ? "unsupported" : delta.state === "input_missing" || stable.state !== "verified" || !hasRouteParts ? "input_missing" : "verified",
+    "The deterministic calculation covers straight axis-parallel pipe centerlines, explicit fitting/tie-in takeouts, and route quantity deltas only; it does not model full fitting bodies, hydraulic loss, or design tolerances.",
+    [input.id, input.baseline.id, input.proposed.id, ...stable.changedIds], SOURCES.geometry,
+    [...baseEvidence.evidenceIds, ...proposedEvidence.evidenceIds, ...stable.evidence], [...baseline.missingInputs, ...proposed.missingInputs, ...stable.missing]));
+  return rules[0]!;
+}
+
+function ductEnvelopeCheck(request: ProjectEvaluationRequest, input: ProjectLocalChangeInput, context: ReturnType<typeof localGeometryContext>) {
+  const rules: ProjectRuleResult[] = [];
+  const { baseline, proposed, proposedEvidence, stable } = context;
+  const clearances = proposed.ductClearances;
+  const clearanceNeighborhood = impactNeighborhoodCheck(request, input);
+  const expectedClearanceCount = input.proposed.segments.length * input.proposed.ducts.length;
+  const collision = clearances.some(item => item.state === "collision");
+  const unsupportedClearance = clearances.some(item => item.state === "unsupported");
+  const missingClearance = clearances.some(item => item.state === "input_missing");
+  const clearancePairsComplete = expectedClearanceCount > 0 && clearances.length === expectedClearanceCount;
+  const allDuctsCovered = input.proposed.ducts.length > 0 && [...new Set([...input.baseline.ducts, ...input.proposed.ducts].map(duct => duct.id))].every(id => clearanceNeighborhood.value?.ductIds.includes(id));
+  const clearanceState: LocalChangeVerificationState = unsupportedClearance || proposed.state === "unsupported" || baseline.state === "unsupported" ? "unsupported" : missingClearance || baseline.state !== "verified" || proposed.state !== "verified" || stable.state !== "verified" || clearanceNeighborhood.issues.length > 0 || !clearancePairsComplete || !allDuctsCovered ? "input_missing" : "verified";
+  const clearanceStatus: RuleStatus = collision ? "fail" : clearanceState === "verified" ? "pass" : "unknown";
+  rules.push(result(request, "LOCAL_CHANGE_STRAIGHT_PIPE_DUCT_ENVELOPE_V1", "Straight pipe envelope versus modeled ducts", clearanceStatus, clearanceState,
+    collision ? "At least one modeled straight-pipe radius envelope intersects a modeled duct box." : "This result describes only modeled straight-pipe-to-duct geometry; it does not determine sprinkler-discharge obstruction compliance or fitting-body clearance.",
+    [input.proposed.id, ...clearances.flatMap(item => [item.segmentId, item.ductId])], SOURCES.pending,
+    [...proposedEvidence.evidenceIds, ...stable.evidence, ...clearanceNeighborhood.evidenceIds], [...proposed.missingInputs, ...stable.missing, ...clearanceNeighborhood.issues, ...(!clearancePairsComplete ? ["proposed.ductClearances.completeComparisonSet"] : []), ...(!allDuctsCovered ? ["changeRequest.impactNeighborhood.ductIds:allProposedDucts"] : [])]));
+  return rules[0]!;
+}
+
+function bomAccountingCheck(request: ProjectEvaluationRequest, input: ProjectLocalChangeInput, bomResult: ReturnType<typeof bomDeltas>) {
+  const rules: ProjectRuleResult[] = [];
+  const bom = bomResult.output;
+  rules.push(result(request, "LOCAL_CHANGE_BOM_ACCOUNTING_V1", "Derived plan bill of material reconciled with supplied rows", bomResult.status, bomResult.verificationState,
+    bomResult.reason,
+    [input.id, ...bom.map(line => line.itemId)], SOURCES.pending, bomResult.evidence, bomResult.missing));
+  return rules[0]!;
+}
+
+function headNeighborhoodCheck(request: ProjectEvaluationRequest, input: ProjectLocalChangeInput, context: ReturnType<typeof localHeadContext>) {
+  const rules: ProjectRuleResult[] = [];
+  const { heads, neighborhood, listedHeads, neighborMissing, headStatus, headState } = context;
+  rules.push(result(request, "LOCAL_CHANGE_HEAD_NEIGHBORHOOD_V1", "Head positions and local impact neighborhood recorded", headStatus, headState,
+    neighborMissing.length ? "Head/neighbor impact is not assessed because the changed route or affected-neighborhood evidence is incomplete." : heads.moved.length ? "Moved head IDs and measured locations are reported for human review; no NFPA spacing or discharge-compliance result is inferred." : "No head displacement was found in the represented plan set; this does not establish spacing or obstruction compliance.",
+    [input.id, ...heads.deltas.map(item => item.headId), ...listedHeads], SOURCES.pending, [...heads.evidence, ...neighborhood.evidenceIds], neighborMissing));
+  return rules[0]!;
+}
+
+function headRelocationCheck(request: ProjectEvaluationRequest, input: ProjectLocalChangeInput, heads: ReturnType<typeof headChanges>, drawing: ReturnType<typeof proposedDrawingContext>) {
+  const rules: ProjectRuleResult[] = [];
+  const requiredArtifacts: ProjectLocalChangeReport["requiredArtifacts"] = [];
+  const { revisedDoc, revisedApproval, revisedMatches } = drawing;
+  for (const headId of heads.moved) {
+    const sources = [...SOURCES.plans];
+    let status: RuleStatus = "unknown";
+    let state: LocalChangeVerificationState = "input_missing";
+    let reason = "A moved head needs a revised approved plan linked to the proposed drawing revision.";
+    const missing: string[] = [];
+    const evidence = [...heads.evidence];
+    if (revisedDoc.issues.length || !revisedDoc.value || !revisedMatches || revisedApproval.issues.length || !revisedApproval.value) {
+      missing.push(...revisedDoc.issues, ...revisedApproval.issues, ...(!revisedDoc.value ? ["revisedDrawing.document"] : []), ...(!revisedApproval.value ? ["revisedDrawing.approval"] : []), ...(!revisedMatches ? ["revisedDrawing.document:proposed.sourceDrawing"] : []));
+    } else if (revisedApproval.value === "approved") {
+      status = "pass"; state = "verified"; reason = "The proposed head relocation is shown on a revision-matched drawing confirmed approved; this checks plan representation only.";
+    } else {
+      status = "fail"; state = "verified"; reason = "The proposed head relocation is shown only on a revision confirmed not approved; AB 2.04 I.14(C) requires relocations to follow an approved plan.";
+    }
+    evidence.push(...revisedDoc.evidenceIds, ...revisedApproval.evidenceIds);
+    rules.push(result(request, "SFFD_AB204_HEAD_RELOCATION_I14C_V1", "Moved head represented on a revised approved plan", status, state, reason, [input.id, headId], sources, evidence, missing));
+    if (status !== "pass") requiredArtifacts.push({ id: `SFFD_AB204_REVISED_APPROVED_PLAN_I14C_${headId}`, title: `Approved revised plan for relocated head ${headId}`, state: "required", reason: "AB 2.04 I.14(C) requires a sprinkler relocation to follow an approved plan.", subjectIds: [input.id, headId], sourceRefs: SOURCES.plans });
+  }
+  return { rules, requiredArtifacts };
+}
+
+function fieldDeviationCheck(request: ProjectEvaluationRequest, input: ProjectLocalChangeInput) {
+  const rules: ProjectRuleResult[] = [];
+  const requiredArtifacts: ProjectLocalChangeReport["requiredArtifacts"] = [];
+  const fieldDeviation = input.changeRequest.fieldInstallationDeviationFromApprovedPlan;
+  if (!fieldDeviation) {
+    rules.push(unknownResult(request, "SFFD_AB204_FIELD_DEVIATION_I14E_V1", "Actual field deviation from approved plan", "input_missing", "This is a field-history condition and cannot be inferred from a proposed geometry difference. Confirm whether as-built work differs from the approved plan.", [input.id], SOURCES.fieldDeviation, ["fieldInstallationDeviationFromApprovedPlan"]));
+  } else {
+    const check = checkFact(request, fieldDeviation, "changeRequest.fieldInstallationDeviationFromApprovedPlan", [input.changeRequest.id], ["installation", "inspection"]);
+    if (check.issues.length) rules.push(unknownResult(request, "SFFD_AB204_FIELD_DEVIATION_I14E_V1", "Actual field deviation from approved plan", "input_missing", "The actual field-deviation fact lacks current installation/inspection evidence. A plan proposal cannot establish field history.", [input.id], SOURCES.fieldDeviation, check.issues, check.evidenceIds));
+    else if (check.value === "yes") {
+      rules.push(unknownResult(request, "SFFD_AB204_FIELD_DEVIATION_I14E_V1", "Actual field deviation from approved plan", "unimplemented", "AB 2.04 I.14(E) says a field deviation may require recalculation. This deviation needs project-specific review; it is not an automatic failure or a confirmed recalculation trigger.", [input.id], SOURCES.fieldDeviation, ["projectSpecificI14EReview"], check.evidenceIds));
+      requiredArtifacts.push({ id: "SFFD_AB204_FIELD_DEVIATION_REVIEW_I14E", title: "Review field deviation and decide whether recalculation is required", state: "may_be_required", reason: "AB 2.04 I.14(E) says a deviation may require recalculation, considering new pipe/fittings.", subjectIds: [input.id], sourceRefs: SOURCES.fieldDeviation });
+    } else rules.push(result(request, "SFFD_AB204_FIELD_DEVIATION_I14E_V1", "Actual field deviation from approved plan", "not_applicable", "verified", "Current installation/inspection evidence confirms no field deviation from the approved plan.", [input.id], SOURCES.fieldDeviation, check.evidenceIds));
+  }
+  return { rules, requiredArtifacts };
 }

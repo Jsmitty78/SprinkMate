@@ -1,6 +1,10 @@
 import {
-  evaluateProject,
+  executeProjectRule,
   type WorkPackageSnapshot,
+  type ProjectEvaluationOutput,
+  type ProjectRuleExecutionOutput,
+  type ProjectQuantity,
+  type Fact,
   type ProjectEvaluationRequest,
   type ProjectLocalPlan,
   type ProjectLocalChangeInput,
@@ -11,7 +15,7 @@ import type {
   FabricationInput,
 } from "@field-agent/fabrication";
 import type { Plan } from "@field-agent/planning";
-import { fact, known, unknown } from "./model.js";
+import { fact, known, unknown, savedFact } from "./model.js";
 export interface CheckResult {
   id: string;
   subjectIds: string[];
@@ -25,14 +29,15 @@ export interface ProfileOutput {
   required: { id: string; subjectIds: string[] }[];
   checks: CheckResult[];
   excluded: { id: string; reason: string }[];
-  project: ReturnType<typeof evaluateProject>;
+  project: ProjectEvaluationOutput & Partial<Pick<ProjectRuleExecutionOutput, "requiredArtifacts">>;
 }
-export function evaluateProfile(
+function buildProfile(
   s: WorkPackageSnapshot,
   input: FabricationInput,
   output: FabricationOutput,
   plan: Plan,
   baseline: Plan,
+  ruleId?: string,
 ): ProfileOutput {
   const adaptation = s.intent === "adapt_to_site" && plan.id !== baseline.id;
   const profile = !adaptation ? "drawing_preparation" : "site_adaptation";
@@ -41,24 +46,25 @@ export function evaluateProfile(
   const heads = s.baselinePlan!.entities.filter(
     (e) => e.kind === "head" && !context.has(e.id),
   );
-  const tyco = heads.filter((e) => e.productId === "TY3231");
   const supports = s.baselinePlan!.entities.filter((e) => e.kind === "support" && !context.has(e.id));
-  const jurisdiction = fact<string>(s, "jurisdiction");
-  const sfApplicable = jurisdiction.confirmed && jurisdiction.value === "san_francisco" && jurisdiction.evidenceIds.length > 0;
+  const quantity = (field: string, subject: string): Fact<ProjectQuantity> => {
+    const v = fact<number>(s, field, subject), unit = savedFact(s, field, subject)?.unit;
+    const valid = typeof v.value === "number" && Number.isFinite(v.value) && ["m","ft","in","Pa","kPa","bar","psi","N_m","ft_lb"].includes(unit ?? "");
+    return {...v, value: valid ? {value:v.value!,unit:unit as ProjectQuantity["unit"]} as ProjectQuantity : null, confirmed: valid && v.confirmed};
+  };
+  const temperature = (subject: string): Fact<{value:number;unit:"F"|"C"}> => {
+    const v = fact<number>(s,"manufacturerTemperatureRating",subject), unit = savedFact(s,"manufacturerTemperatureRating",subject)?.unit;
+    const valid = typeof v.value === "number" && Number.isFinite(v.value) && (unit === "F" || unit === "C");
+    return {...v,value:valid ? {value:v.value!,unit:unit as "F"|"C"} : null,confirmed:valid && v.confirmed};
+  };
   const request: ProjectEvaluationRequest = {
     project: {
       id: s.projectId,
       revision: s.inputRevision,
       asOf: s.updatedAt.slice(0, 10),
     },
-    selectedRulePacks: [
-      ...(sfApplicable ? ["sf-project-basis" as const] : []),
-      ...(sfApplicable && supports.length ? ["sf-supports-2025" as const] : []),
-      ...(tyco.length
-        ? ["tyco-tfp171-head" as const, "tyco-tfp171-extra" as const]
-        : []),
-      ...(sfApplicable && adaptation ? ["sf-local-change-2025" as const] : []),
-    ],
+    // Selection belongs to JEV; scripts retain their own applicability validation.
+    selectedRulePacks: [],
     facts: {
       sfNfpa13: {
         jurisdiction: fact(s, "jurisdiction"),
@@ -71,8 +77,27 @@ export function evaluateProfile(
       sprinklerType: fact(s, "sprinklerType"),
       storage: fact(s, "storage"),
     },
-    heads: tyco.map((h) => ({ id: h.id })),
-    supports: supports.map((h) => ({ id: h.id })),
+    heads: heads.map((h) => ({ id: h.id, facts: {
+      model: fact(s,"model",h.id), installation: fact(s,"installation",h.id), mounting: fact(s,"mounting",h.id),
+      orientation: fact(s,"orientation",h.id), verticalReference: fact(s,"verticalReference",h.id),
+      escutcheon: fact(s,"escutcheon",h.id), bulbCondition: fact(s,"bulbCondition",h.id),
+      installationWrench: fact(s,"installationWrench",h.id), threadStandard: fact(s,"threadStandard",h.id),
+      construction: fact(s,"construction",h.id), fieldFinish: fact(s,"fieldFinish",h.id), leakage: fact(s,"leakage",h.id),
+      corrosion: fact(s,"corrosion",h.id), approvalBasis: fact(s,"approvalBasis",h.id), pressureBasis: fact(s,"pressureBasis",h.id),
+      installationTorque: quantity("installationTorque",h.id), workingPressure: quantity("workingPressure",h.id),
+    }, manufacturerExtra: {
+      installationWrenchEngagementArea: fact(s,"installationWrenchEngagementArea",h.id),
+      pipeThreadSealantAppliedBeforeHandTightening: fact(s,"pipeThreadSealantAppliedBeforeHandTightening",h.id),
+      headHandTightenedBeforeWrenchTightening: fact(s,"headHandTightenedBeforeWrenchTightening",h.id),
+      mountingPlateInstalledBeforeHandTightening: fact(s,"mountingPlateInstalledBeforeHandTightening",h.id),
+      manufacturerTemperatureRating: temperature(h.id), manufacturerListedAgency: fact(s,"manufacturerListedAgency",h.id),
+      sprinklerBodyFinish: fact(s,"sprinklerBodyFinish",h.id), sprinklerSalesHemisphere: fact(s,"sprinklerSalesHemisphere",h.id),
+    } })),
+    supports: supports.map((h) => ({ id: h.id, facts: {
+      use: fact(s,"use",h.id), fastenerType: fact(s,"fastenerType",h.id), substrate: fact(s,"substrate",h.id),
+      installationState: fact(s,"installationState",h.id), pipeMovedOrAltered: fact(s,"pipeMovedOrAltered",h.id),
+      hangerHoldsProperly: fact(s,"hangerHoldsProperly",h.id), crackedConcreteQualification: fact(s,"crackedConcreteQualification",h.id),
+    } })),
     evidence: [],
   };
   const drawing = {
@@ -169,7 +194,10 @@ export function evaluateProfile(
     const e = request.evidence.find((e) => e.id === f.id);
     if (e) e.subjectIds.push(s.projectId);
   }
-  const project = evaluateProject(request);
+  const project: ProfileOutput["project"] = ruleId ? executeProjectRule(request, ruleId) : {
+    projectId:s.projectId, taskRevision:s.inputRevision, asOf:request.project.asOf,
+    rules:[], coverage:[], missingInputs:[],
+  };
   // Intake requirements can be package-wide or scoped. Never borrow another entity's facts.
   const requirement = (field: string, subject: string) => {
     const scoped = fact<string | number | boolean>(s, field, subject);
@@ -186,23 +214,14 @@ export function evaluateProfile(
     return Number(fraction[1] ?? 0) + Number(fraction[2]) / Number(fraction[3]);
   };
   const checks: CheckResult[] = [
-    {
-      id: "PROJECT_BASIS",
-      subjectIds: [],
-      status:
-        project.basis?.status === "resolved"
-          ? "pass"
-          : project.basis?.status === "not_applicable"
-            ? "not_applicable"
-            : "unknown",
-      state:
-        project.basis?.status === "resolved" ? "verified" : "input_missing",
-      reason:
-        jurisdiction.confirmed && jurisdiction.value !== "san_francisco"
-          ? `No executable rule pack for jurisdiction "${jurisdiction.value}"; Sprink's code rule packs are for San Francisco only, so code rules are not evaluated.`
-          : (project.basis?.reason ?? "Project basis unresolved"),
-      sourceRefs: project.basis?.sourceRefs.map((r) => r.url) ?? [],
-    },
+    ...(project.basis ? [{
+      id: "N01_SF_EDITION_BASIS",
+      subjectIds: [project.basis.targetId],
+      status: project.basis.status === "resolved" ? "pass" as const : project.basis.status,
+      state: project.basis.status === "resolved" ? "verified" : project.basis.status === "unknown" ? "input_missing" : "not_applicable",
+      reason: project.basis.reason + (project.basis.missingInputs.length ? ` Missing inputs: ${project.basis.missingInputs.join(", ")}.` : ""),
+      sourceRefs: project.basis.sourceRefs.map(r => r.url),
+    }] : []),
     ...output.selectedProducts.filter(p => p.limitations?.length).map(p => ({
       id: `PRODUCT-SUITABILITY-${p.id}`, subjectIds: input.pieces.filter(x => x.productId === p.id).map(x => x.id),
       status: "unknown" as const, state: "input_missing", reason: p.limitations!.join(" "), sourceRefs: p.sourceIds,
@@ -281,16 +300,21 @@ export function evaluateProfile(
       reason: r.reason,
       sourceRefs: r.sourceRefs.map((x) => x.url),
     })),
+    ...(project.requiredArtifacts ?? []).map(a => ({
+      id: `DELIVERABLE-${a.id}`, subjectIds:a.subjectIds,
+      status: a.state === "not_triggered" ? "not_applicable" as const : "unknown" as const,
+      state:a.state, reason:`${a.title}: ${a.reason}`, sourceRefs:a.sourceRefs.map(r=>r.url),
+    })),
     ...project.coverage
       .filter(
-        (c) => c.state !== "supported" && ((sfApplicable && c.area === "nfpa13") || c.selected),
+        (c) => c.state !== "supported",
       )
       .map((c) => ({
         id: `COVERAGE-${c.id}`,
         subjectIds: [],
         status: "unknown" as const,
         state: c.state,
-        reason: c.reason,
+        reason: c.selected ? c.reason : `Catalog limitation; applicability not established; not executed. ${c.reason}`,
         sourceRefs: c.sourceRefs.map((r) => r.url),
       })),
     {
@@ -313,33 +337,24 @@ export function evaluateProfile(
         sourceRefs: [],
       })),
   ];
+  // A rule can return separate findings for several heads; exported findings need stable identities.
+  const counts = new Map<string, number>();
+  for (const c of checks) counts.set(c.id, (counts.get(c.id) ?? 0) + 1);
+  for (const c of checks) if (counts.get(c.id)! > 1) c.id = `${c.id}-${c.subjectIds.join("-")}`;
   return {
     profile,
     required: checks.map((c) => ({ id: c.id, subjectIds: c.subjectIds })),
     checks,
     project,
-    excluded: [
-      ...(!sfApplicable ? [{ id: "sf-project-basis", reason: "No confirmed San Francisco jurisdiction; source drawing basis does not establish current applicability." },
-        { id: "sf-supports-2025", reason: "San Francisco applicability is unconfirmed or outside this project." },
-        { id: "sf-local-change-2025", reason: "San Francisco applicability is unconfirmed or outside this project." }] : []),
-      ...(sfApplicable && !adaptation
-        ? [
-            {
-              id: "sf-local-change-2025",
-              reason:
-                "Baseline drawing preparation has no proposed change or change-specific hydraulic trigger",
-            },
-          ]
-        : []),
-      ...(!tyco.length
-        ? [
-            {
-              id: "tyco-tfp171",
-              reason:
-                "No selected TY3231 head; unknown products remain explicit unsupported requirements",
-            },
-          ]
-        : []),
-    ],
+    excluded: [],
   };
+}
+
+/** Execute only the rule selected by JEV, preserving fabrication limitations alongside its findings. */
+export function evaluateProfile(s: WorkPackageSnapshot, input: FabricationInput, output: FabricationOutput, plan: Plan, baseline: Plan, ruleId: string): ProfileOutput {
+  return buildProfile(s,input,output,plan,baseline,ruleId);
+}
+/** Fabrication arithmetic and source compatibility only; does not select or execute sprinkler rules. */
+export function deriveFabricationProfile(s: WorkPackageSnapshot, input: FabricationInput, output: FabricationOutput, plan: Plan, baseline: Plan): ProfileOutput {
+  return buildProfile(s,input,output,plan,baseline);
 }

@@ -1,7 +1,8 @@
+import { integrationStream, integrationChoice } from "../../../packages/workflow/test/integration-stream.js";
 import { afterEach, expect, it } from "vitest";
 import { deriveWorkPackage, fabricationCatalog } from "@field-agent/fabrication";
 import { fabricationInput, planningPlan } from "../src/integration/model.js";
-import { evaluateProfile } from "../src/integration/profiles.js";
+import { deriveFabricationProfile } from "../src/integration/profiles.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -19,7 +20,7 @@ afterEach(() => cleanup.splice(0).forEach(f => f()));
 function setup() {
   const dir = mkdtempSync(join(tmpdir(), "intake-"));
   const field = new FieldService(dir);
-  const t = createIntegratedServices(new WorkPackageStore(field.store.db), dir);
+  const t = createIntegratedServices(new WorkPackageStore(field.store.db), dir, {testStream:integrationStream, choice:integrationChoice});
   const app = createApp(field, { token: "intake-test-token", workPackages: t.packages, workPackageExports: t.exports, workPackageDetails: t.details });
   cleanup.push(() => { t.packages.close(); field.store.close(); rmSync(dir, { recursive: true, force: true }); });
   return { ...t, app };
@@ -215,8 +216,8 @@ it("gives an honest R2 partial package: requirement not purchase, projected leng
   expect(text).not.toMatch(/plastic|bevel|cement|FS-5|quarter/i);
   expect(result.assembly[0].instruction).toBe("Detail cutting and end preparation for piece 1 once its product and connection are selected.");
   // No San Francisco rules for another jurisdiction, and no product checks for retained context heads.
-  expect(result.evaluations.some(e => /NFPA 13-2025|head product/i.test(e.reason))).toBe(false);
-  expect(result.evaluations.find(e => /No executable rule pack/.test(e.reason))?.status).toBe("unknown");
+  expect(result.evaluations.filter(e => /NFPA 13-2025/i.test(e.reason)).every(e => e.reason.startsWith("Catalog limitation; applicability not established; not executed."))).toBe(true);
+  expect(result.evaluations.find(e => e.reason.includes("Full sprinkler, support"))?.status).toBe("unknown");
   // No CPVC cure question and no CPVC procedure cited for a product that is not selected.
   expect(done.outputs.requests.some(r => /cure/i.test(r.question))).toBe(false);
   expect(result.evaluations.find(e => /^Assembly has unresolved/.test(e.reason))?.sourceRefs).toEqual([]);
@@ -254,7 +255,7 @@ it.each(["detailing", "siteFacts"] as const)("preserves scoped source requiremen
   const input = fabricationInput(reloaded, reloaded.baselinePlan!);
   const fabrication = deriveWorkPackage(input, fabricationCatalog(reloaded.configVersion));
   const plan = planningPlan(reloaded, input);
-  const profile = evaluateProfile(reloaded, input, fabrication, plan, plan);
+  const profile = deriveFabricationProfile(reloaded, input, fabrication, plan, plan);
   expect(profile.checks.find(c => c.id === "MATERIAL-CONFLICT-p1")).toMatchObject({ status: "fail", sourceRefs: ["requiredConnectionMethod"] });
   for (const f of facts) expect(profile.checks.find(c => c.id === `SOURCE-REQUIREMENT-p1-${f.field}`)?.reason).toContain(f.value);
   const output = exportSnapshot(reloaded, { inputRevision: reloaded.inputRevision, configVersion: reloaded.configVersion, refs: [], details: [{ id: "saved-source-check", input, fabrication, plan, profile }] })!;

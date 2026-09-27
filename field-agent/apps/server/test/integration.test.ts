@@ -13,17 +13,23 @@ import { createApp } from "../src/api.js";
 import { WorkPackageStore } from "../src/work-packages/store.js";
 import { createIntegratedServices } from "../src/integration/runtime.js";
 import { integratedInput } from "./fixtures/integrated-package.js";
+import { integrationStream, integrationChoice } from "../../../packages/workflow/test/integration-stream.js";
+import { SourceStore } from "../src/sources/store.js";
+import { scriptedStream } from "../../../packages/workflow/test/fixtures/scripted-stream.js";
+import { getProjectRuleCatalog } from "@field-agent/core";
+import { evaluateProfile } from "../src/integration/profiles.js";
 import type { ChoiceClient } from "@field-agent/workflow";
 const cleanup: (() => void)[] = [];
 afterEach(() => cleanup.splice(0).forEach((f) => f()));
-function setup(choice?: ChoiceClient) {
+function setup(choice?: ChoiceClient, testStream = integrationStream) {
   const dir = mkdtempSync(join(tmpdir(), "real-pi-integration-"));
   const field = new FieldService(dir);
   const events: string[] = [];
+  const toolResults: { name: string; result: unknown }[] = [];
   const integrated = createIntegratedServices(
     new WorkPackageStore(field.store.db),
     dir,
-    { choice, onEvent: (_id, e) => events.push(e.type) },
+    { choice: choice ?? integrationChoice, testStream, onEvent: (_id, e) => { events.push(e.type); if (e.type === "tool_execution_end") toolResults.push({name:e.toolName,result:e.result}); } },
   );
   const app = createApp(field, {
     token: "integration-test-token",
@@ -36,7 +42,7 @@ function setup(choice?: ChoiceClient) {
     field.store.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  return { ...integrated, field, events, app };
+  return { ...integrated, field, events, toolResults, app };
 }
 async function create(
   t: ReturnType<typeof setup>,
@@ -102,7 +108,8 @@ it("runs real Pi for a drawing-only open spool and exports the authoritative sav
   );
   expect(d.profile?.profile).toBe("drawing_preparation");
   expect(d.profile?.project.localChange).toBeUndefined();
-  expect(d.profile?.required.length).toBeGreaterThan(5);
+  expect(d.profile?.required.length).toBeGreaterThan(0);
+  expect(d.ruleExecutions).toHaveLength(1);
   expect(t.events).toContain("tool_execution_end");
   validateSnapshot(
     exportSnapshot(t.packages.get(s.id), t.detailStore.get(s.id)!)!,
@@ -153,23 +160,10 @@ it("generates two real CPVC alternatives without a supplied reroute, waits for h
   ).toBeCloseTo(12.9333, 8);
   for (const d of state.details.slice(1)) {
     expect(d.profile?.profile).toBe("site_adaptation");
-    expect(d.profile?.project.localChange).toBeDefined();
-    expect(d.profile?.required.map((r) => r.id)).toEqual(
-      expect.arrayContaining([
-        "SFFD_LOCAL_CHANGE_APPROVED_BASELINE_V1",
-        "SFFD_LOCAL_CHANGE_ROUTE_GEOMETRY_V1",
-        "LOCAL_CHANGE_STRAIGHT_PIPE_DUCT_ENVELOPE_V1",
-        "NFPA13_LOCAL_HEAD_SPACING_SOURCE_PENDING_V1",
-        "NFPA13_LOCAL_OBSTRUCTION_SOURCE_PENDING_V1",
-        "SFFD_AB204_HYDRAULIC_RECALC_I22A2_V1",
-        "ASSEMBLY_CONDITIONS",
-      ]),
-    );
-    expect(
-      d.profile?.checks.find(
-        (c) => c.id === "NFPA13_LOCAL_HEAD_SPACING_SOURCE_PENDING_V1",
-      )?.state,
-    ).toBe("source_pending");
+    expect(d.ruleExecutions).toHaveLength(1);
+    expect(d.profile?.required.map(r => r.id)).toContain("ASSEMBLY_CONDITIONS");
+    // Region and product no longer trigger an entire fixed pack behind JEV's selection.
+    expect(d.profile?.checks.some(c => c.id === "SFFD_AB204_HYDRAULIC_RECALC_I22A2_V1")).toBe(false);
     expect(
       d.fabrication.operations.some(
         (o) => o.code === "resolve_connection" && o.status === "unsupported",
@@ -198,36 +192,15 @@ it("generates two real CPVC alternatives without a supplied reroute, waits for h
   ).toBe("completed");
   expect(exported.outputs.artifacts).toHaveLength(4);
 });
-it("uses a recorded Choice between real missing questions, persists wait/answer and resumes in a fresh Pi Agent", async () => {
+it("uses a recorded rule Choice, persists wait/answer and resumes in a fresh Pi Agent", async () => {
   let calls = 0;
   const choice: ChoiceClient = {
     async choose(request) {
       calls++;
       const ids = Object.keys(request.questions.next_action.criteria);
-      expect(ids).toEqual([
-        "request_input:workAreaAccess",
-        "request_input:curePlan",
-        "needs_clarification",
-      ]);
-      return {
-        inputRevision: request.state.inputRevision,
-        configVersion: request.state.configVersion,
-        response: {
-          model: request.model,
-          answers: {
-            next_action: {
-              type: "choice",
-              choice: "request_input:workAreaAccess",
-              confidence: 0.8,
-              probabilities: {
-                "request_input:workAreaAccess": 0.8,
-                "request_input:curePlan": 0.15,
-                needs_clarification: 0.05,
-              },
-            },
-          },
-        },
-      };
+      expect(ids).not.toContain("request_input:workAreaAccess");
+      expect(ids).toContain("selection_complete");
+      return integrationChoice.choose(request, new AbortController().signal);
     },
   };
   const t = setup(choice),
@@ -553,4 +526,65 @@ it("lists every entity outside the affected span as retained context in adaptati
   expect(ids).not.toContain("P27");
   expect(ids).not.toContain("H1");
   expect(ids).not.toContain("H3");
+});
+
+it("returns scoped registered passages and detailed saved results to Pi without artifact bytes", async () => {
+  const t = setup();
+  const s = await create(t, 2, true);
+  const library = new SourceStore(t.field.store.db);
+  for (const [id, projectId] of [["this-project", s.projectId], ["other-project", "another-project"]]) library.import({
+    id, title: id, publisher: "Test author", type: "project_document", edition: "1", scope: {projectId},
+    demonstration: true, authorization: {basis:"Authored fixture", storeAndIndex:true,useWithAi:true,display:"full"},
+    content: "## 1.1 Cut instructions\nInspect physical ends before cutting the pipe.", filename: id + ".md",
+  });
+  await run(t, s.id);
+  const text = JSON.stringify(t.toolResults);
+  expect(text).toContain("this-project");
+  expect(text).toContain("Inspect physical ends before cutting");
+  expect(text).not.toContain("other-project");
+  expect(text).toContain("cutLength");
+  expect(text).toContain("ruleExecutions");
+  expect(text).toContain("sourceRefs");
+  t.toolResults.splice(0);
+  await run(t, s.id, "export_selected_package");
+  const exported = t.toolResults.find(r => r.name === "export_work_package");
+  expect(JSON.stringify(exported)).toContain("work-package.pdf");
+  expect(JSON.stringify(exported)).toContain("byteLength");
+  expect(JSON.stringify(exported)).not.toContain('"type":"Buffer"');
+});
+
+
+it("does not advertise an arbitrary derive subject as a valid rule target", async () => {
+  const steps: {name:string;arguments:Record<string,unknown>}[] = [];
+  const t = setup(undefined, scriptedStream(steps));
+  const s = await create(t,3);
+  const wrongTarget = s.changeRequest!.id;
+  const ruleId = getProjectRuleCatalog().find(r=>r.id.startsWith("TFP171"))!.id;
+  steps.push(
+    {name:"generate_change_candidates",arguments:{subjectId:s.id}},
+    {name:"derive_work_package",arguments:{subjectId:wrongTarget}},
+    {name:"select_verification_rule",arguments:{context:"Synthetic regression selects one catalog rule"}},
+    {name:"evaluate_work_package",arguments:{subjectId:wrongTarget,ruleId}},
+    {name:"finish_work",arguments:{status:"blocked",explanation:"Invalid rule target must be recoverable."}},
+  );
+  const result = await run(t,s.id);
+  expect(result.run?.status, JSON.stringify(t.detailStore.get(s.id)?.latestRun)).toBe("blocked");
+  expect(t.detailStore.get(s.id)?.latestRun?.error).toBeUndefined();
+  expect(t.detailStore.get(s.id)?.refs.some(r=>r.kind === "package" && r.subjectId === wrongTarget)).toBe(false);
+  expect(JSON.stringify(t.toolResults.find(r=>r.name === "evaluate_work_package"))).toContain("allowedSubjectIds");
+});
+
+it("executes each catalog adapter on every synthetic site plan without domain exceptions", async () => {
+  const t = setup(), s = await create(t,3);
+  await run(t,s.id);
+  const details = t.detailStore.get(s.id)!.details;
+  expect(details).toHaveLength(3);
+  const errors: {ruleId:string;planId:string;error:string}[] = [];
+  const catalog = getProjectRuleCatalog();
+  expect(catalog.length).toBe(47);
+  for (const rule of catalog) for (const d of details) {
+    try { evaluateProfile(s,d.input,d.fabrication,d.plan,details[0].plan,rule.id); }
+    catch(error) { errors.push({ruleId:rule.id,planId:d.plan.id,error:error instanceof Error ? error.message : String(error)}); }
+  }
+  expect(errors).toEqual([]);
 });
