@@ -142,7 +142,7 @@ const frame = { id: "room", lengthUnit: "mm" as const, axes: "right_handed_z_up"
  * each end. Same structure as the server's integration fixture. Positions are the user's; no
  * routing or length is calculated here. Returns the problems instead when the run is incomplete.
  */
-export function buildRun(nodes: RunNode[], planId = "baseline", source = "Entered by you in Field Agent"): BuiltRun | { problems: string[] } {
+export function buildRun(nodes: RunNode[], planId = "baseline", source = "Entered by you in Sprink"): BuiltRun | { problems: string[] } {
   const problems: string[] = [];
   if (nodes.length < 2) problems.push("Add at least two points: a start and an end.");
   nodes.forEach((n, i) => {

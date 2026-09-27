@@ -69,7 +69,7 @@ export async function sampleDrawing(kind: "prepare" | "adapt"): Promise<File> {
   g.fillStyle = "#b45309"; g.font = "bold 44px sans-serif"; g.fillText("SAMPLE DRAWING, NOT A REAL SHEET", 60, 90);
   g.fillStyle = "#374151"; g.font = "28px sans-serif"; g.fillText(`SAMPLE-FP-201 Rev C · ${kind === "prepare" ? "open CPVC spool" : "branch between two tie-ins"}`, 60, 140);
   g.strokeStyle = "#111827"; g.lineWidth = 3; g.strokeRect(1080, 820, 480, 140);
-  g.font = "24px sans-serif"; g.fillText("Field Agent demo sheet", 1100, 870); g.fillText("Invented for demonstration", 1100, 910);
+  g.font = "24px sans-serif"; g.fillText("Sprink demo sheet", 1100, 870); g.fillText("Invented for demonstration", 1100, 910);
   const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error("Could not draw the sample sheet")), "image/png"));
   return new File([blob], `sample-${kind}-drawing.png`, { type: "image/png" });
 }

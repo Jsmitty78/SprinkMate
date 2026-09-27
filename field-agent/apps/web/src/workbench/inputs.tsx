@@ -12,7 +12,7 @@ export type Act = (label: string, fn: (s: Snapshot) => Promise<unknown>) => Prom
 export type Unit = "mm" | "in";
 interface Common { s: Snapshot; act: Act; busy: string; unit: Unit; setNotice: (t: string) => void }
 
-export const BY_YOU = "Confirmed by you in Field Agent";
+export const BY_YOU = "Confirmed by you in Sprink";
 export const MEASURED = "Measured on site by you";
 
 /**

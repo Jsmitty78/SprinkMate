@@ -4,6 +4,7 @@ import { api, ApiError, session, type Summary } from "./api.js";
 import { dateTime } from "./format.js";
 import { Badge, Button, Callout, Field, Icon, Spinner } from "./ui.js";
 import { Workbench } from "./Workbench.js";
+import { SprinkLogo } from "./logo.js";
 import "./workbench.css";
 
 const PROJECT_KEY = "field-agent.project";
@@ -17,7 +18,7 @@ function usePath(): [string, (to: string) => void] {
 
 function TopBar({ right, crumbs, onHome }: { right?: ReactNode; crumbs?: ReactNode; onHome: () => void }) {
   return <header className="fa-top">
-    <button type="button" className="fa-brand" onClick={onHome}><span className="fa-logo"><Icon name="building" size={18} /></span>Field Agent</button>
+    <button type="button" className="fa-brand" onClick={onHome} aria-label="Sprink home"><SprinkLogo /></button>
     {crumbs && <nav className="fa-crumbs" aria-label="Breadcrumb">{crumbs}</nav>}
     <div className="fa-top-right">{right}</div>
   </header>;
@@ -48,8 +49,8 @@ function Connect({ onConnect }: { onConnect: (token: string) => void }) {
   };
   return <div className="fa-app fa-connect">
     <form className="fa-connect-card" onSubmit={e => { e.preventDefault(); void submit(); }}>
-      <span className="fa-logo big"><Icon name="building" size={26} /></span>
-      <h1>Field Agent</h1>
+      <span className="fa-connect-logo"><SprinkLogo height={40} /></span>
+      <h1 className="sr-only">Sprink</h1>
       <p className="fa-muted">Materials, cuts and site changes for sprinkler fitters, from one source-linked work package.</p>
       <Field label="Server access token" hint="Kept in this browser tab only. Ask whoever runs the server; it is in .data/access-token.">
         <input type="password" autoComplete="off" autoFocus value={value} onChange={e => setValue(e.target.value)} required />

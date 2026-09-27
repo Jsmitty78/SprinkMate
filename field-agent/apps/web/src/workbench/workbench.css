@@ -1,11 +1,11 @@
-/* Field Agent workbench. Scoped under .fa-app; the legacy stylesheet is only loaded on /legacy. */
+/* Sprink workbench. Scoped under .fa-app; the legacy stylesheet is only loaded on /legacy. */
 :root {
   --fa-bg: #f5f6f8; --fa-surface: #ffffff; --fa-sunken: #f0f2f5; --fa-paper: #fbfcfd;
   --fa-ink: #16202e; --fa-ink-2: #3d4757; --fa-muted: #6b7482; --fa-line: #e3e6eb; --fa-line-2: #d3d8df;
   --fa-blue: #1a6fe0; --fa-blue-ink: #0f55b3; --fa-blue-soft: #e8f1fd; --fa-blue-tint: #f3f8fe;
   --fa-amber: #9a5b00; --fa-amber-line: #e0a53a; --fa-amber-soft: #fdf4e3;
   --fa-red: #b42318; --fa-red-soft: #fdecea; --fa-green: #1c7a4d; --fa-green-soft: #e7f5ee;
-  --fa-slate: #5b6b8c; --fa-existing: #98a1ae;
+  --fa-brand: #b4462a; --fa-slate: #5b6b8c; --fa-existing: #98a1ae;
   --fa-radius: 8px; --fa-shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .08);
   --fa-font: "Inter Variable", Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
   --fa-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
@@ -25,6 +25,9 @@ html, body { margin: 0; background: var(--fa-bg); }
 /* ---------- top bar */
 .fa-top { height: 56px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 16px 0 14px; background: var(--fa-surface); border-bottom: 1px solid var(--fa-line); position: sticky; top: 0; z-index: 20; }
 .fa-brand { display: flex; align-items: center; gap: 10px; border: 0; background: none; font-weight: 650; font-size: 16px; cursor: pointer; padding: 0; letter-spacing: -.01em; }
+.fa-logo-lockup { display: inline-flex; align-items: center; gap: 8px; color: var(--fa-brand); }
+.fa-logo-lockup img { display: block; width: auto; }
+.fa-connect-logo { display: flex; margin-bottom: 4px; }
 .fa-logo { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--fa-blue); color: #fff; }
 .fa-logo.big { width: 48px; height: 48px; border-radius: 12px; }
 .fa-crumbs { display: flex; align-items: center; gap: 8px; color: var(--fa-muted); min-width: 0; padding-left: 20px; border-left: 1px solid var(--fa-line); height: 28px; }
@@ -331,7 +334,7 @@ html, body { margin: 0; background: var(--fa-bg); }
 /* ---------- phone: canvas on top, panel as a bottom sheet, action pinned */
 @media (max-width: 760px) {
   .fa-top { height: 52px; gap: 10px; padding: 0 12px; }
-  .fa-brand { font-size: 0; gap: 0; }
+  .fa-brand .fa-logo-lockup img { display: none; }
   .fa-crumbs { padding-left: 10px; font-size: 13px; }
   .fa-crumbs .fa-crumb, .fa-crumbs > span:not(.fa-crumb-current) { display: none; }
   .fa-top-right .fa-btn { padding: 0 10px; }
