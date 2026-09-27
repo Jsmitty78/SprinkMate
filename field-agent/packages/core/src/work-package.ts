@@ -31,10 +31,34 @@ export const PackageFactSchema = object({
   context: Type.Union([Type.Literal('observed'), Type.Literal('installed'), Type.Literal('detailing')]),
   source,
 });
+const sheetPoint = object({ x: Type.Number(), y: Type.Number() });
+const lengthUnit = choices('mm', 'm', 'in', 'ft');
+/**
+ * How one view of the sheet maps to the plan frame. Sheet coordinates are PDF points of the page
+ * at 1x (Y down) or image pixels (Y down). Plan millimetres are
+ * `rotate(rotationDeg) * ((sx - origin.x) * scale, -(sy - origin.y) * scale)`, Z up.
+ */
+export const DrawingViewSchema = object({
+  sheetUnit: choices('pdf_pt', 'image_px'),
+  workArea: Type.Union([object({ x: Type.Number(), y: Type.Number(), width: Type.Number({ exclusiveMinimum: 0 }), height: Type.Number({ exclusiveMinimum: 0 }) }), Type.Null()]),
+  calibration: Type.Union([object({
+    method: choices('two_point', 'printed_scale'),
+    a: Type.Union([sheetPoint, Type.Null()]), b: Type.Union([sheetPoint, Type.Null()]),
+    realDistance: Type.Union([object({ value: Type.Number({ exclusiveMinimum: 0 }), unit: lengthUnit }), Type.Null()]),
+    printedScale: nullableText,
+    reference: text,
+    /** Plan-length uncertainty of one picked point, from the pick tolerance; not a construction tolerance. */
+    pointUncertaintyMm: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
+  }), Type.Null()]),
+  frame: object({ origin: sheetPoint, rotationDeg: Type.Number({ minimum: -360, maximum: 360 }) }),
+  /** Set when the upload is a copy (raster, crop, rotation) of another document; names the original. */
+  derivativeOf: nullableText,
+});
 export const DrawingRefSchema = object({
   assetId: id, drawingId: id, revision: text, page: Type.Integer({ minimum: 1 }),
   approval: choices('unreviewed', 'approved', 'superseded'),
   scale: QuantityValueSchema,
+  view: Type.Optional(DrawingViewSchema),
 });
 const scope = object({ coordinateFrame: frame, includedEntityIds: ids, excludedEntityIds: ids, tieInEntityIds: ids });
 const change = object({ id, description: text, affectedEntityIds: ids, factIds: ids });
@@ -87,6 +111,8 @@ export const PublishPackageOutputsSchema = object({
 });
 export type PackageIntent = Static<typeof PackageIntentSchema>;
 export type PackagePlan = Static<typeof PackagePlanSchema>;
+export type DrawingRef = Static<typeof DrawingRefSchema>;
+export type DrawingView = Static<typeof DrawingViewSchema>;
 export type PackageInputs = Static<typeof PackageInputsSchema>;
 export type CreateWorkPackage = Static<typeof CreateWorkPackageSchema>;
 export type EditWorkPackage = Static<typeof EditWorkPackageSchema>;

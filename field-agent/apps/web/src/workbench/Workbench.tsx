@@ -2,8 +2,13 @@ import { adaptationFrame } from "@field-agent/core";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, type Snapshot } from "./api.js";
 import { dateTime } from "./format.js";
-import { ChangeInputs, ClearanceInput, DetailingInputs, DrawingInputs, EvidenceInputs, RunEditor, BoxInputs, type Unit } from "./inputs.js";
-import { callouts, findFact, isConfirmed, readBox, requirements, resultFor, routeOptions, runBlockers, type Plan } from "./model.js";
+import { ChangeInputs, ClearanceInput, DetailingInputs, EvidenceInputs, RunEditor, BoxInputs, type Unit } from "./inputs.js";
+import { callouts, contextIds, findFact, isConfirmed, readBox, requirements, resultFor, routeOptions, runBlockers, type Plan } from "./model.js";
+import { IntakeInputs } from "./intake/IntakeInputs.js";
+import { SheetView } from "./intake/SheetView.js";
+import { FRAME_ID } from "./intake/sheet.js";
+import { useIntake } from "./intake/useIntake.js";
+import "./intake/intake.css";
 import { Assembly, Checks, Freshness, MaterialsCuts, PackageDelta, RouteComparison } from "./outputs.js";
 import { PlanCanvas } from "./PlanCanvas.js";
 import { hasSampleData, sampleDrawing, sampleInputs } from "./sample.js";
@@ -21,6 +26,7 @@ const SELECT_QUESTION = /^Which alternative/;
 export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; onHome: () => void; onAuthFailure: () => void; header: (right: ReactNode, crumbs: ReactNode) => ReactNode }) {
   const pkg = usePackage(id, onAuthFailure);
   const s = pkg.snapshot;
+  const intake = useIntake(s);
   const [tab, setTab] = useState<Tab | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [piece, setPiece] = useState<string | null>(null);
@@ -34,7 +40,8 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
 
   const mode = s?.intent === "adapt_to_site" ? "adapt" : "prepare";
   const detailFor = (planId: string | undefined) => pkg.detail?.state?.details.find(d => d.plan.id === planId);
-  const calloutsFor = useMemo(() => (plan: Plan) => callouts(plan, detailFor(plan.id)?.fabrication), [pkg.detail]);
+  const context = useMemo(() => contextIds(s ?? { scope: null }), [s?.scope]);
+  const calloutsFor = useMemo(() => (plan: Plan) => callouts(plan, detailFor(plan.id)?.fabrication, context), [pkg.detail, context]);
 
   if (pkg.loading && !s) return <>{header(null, null)}<Spinner label="Loading work package…" /></>;
   if (!s) return <>{header(null, null)}<div className="fa-page-msg"><Callout tone="red" title="Could not open this work package">{pkg.error}</Callout><Button onClick={onHome}>Back to packages</Button></div></>;
@@ -106,16 +113,22 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
     <Button onClick={() => setAskOpen(true)} aria-expanded={askOpen}><Icon name="ask" size={16} /><span className="fa-hide-sm">Ask Sprink</span></Button>
     <Button onClick={() => setExportOpen(true)}><Icon name="download" size={16} />Export</Button></>;
 
-  const common = { s, act: pkg.act, busy: pkg.busy, unit, setNotice: pkg.setNotice };
   const baseCallouts = baseline ? calloutsFor(baseline) : callouts(null);
   const workCallouts = workPlan ? calloutsFor(workPlan) : callouts(null);
+  const common = { s, act: pkg.act, busy: pkg.busy, unit, setNotice: pkg.setNotice };
+  const showSheet = () => { setView("drawing"); setSheetOpen(false); };
+  const traced = !baseline || baseline.coordinateFrame.id === FRAME_ID;
+  const intakeInputs = <>
+    <Section title="Drawing and trace" defaultOpen={baseline?.confirmation !== "confirmed"}><IntakeInputs {...common} intake={intake} showSheet={showSheet} /></Section>
+    {!traced && <Section title="Run (typed coordinates)" defaultOpen={baseline?.confirmation !== "confirmed"}><RunEditor {...common} callouts={baseCallouts} /></Section>}
+    {!baseline && <Section title="Type the run instead" defaultOpen={false}><RunEditor {...common} callouts={baseCallouts} /></Section>}
+  </>;
 
   const panel = (() => {
     switch (activeTab) {
       case "inputs": return <>
         <MissingList reqs={reqs} />
-        <Section title="Drawing" defaultOpen={!s.sourceDrawing || s.sourceDrawing.scale.basis !== "confirmed_inputs"}><DrawingInputs {...common} /></Section>
-        <Section title="Run and work area" defaultOpen={baseline?.confirmation !== "confirmed"}><RunEditor {...common} callouts={baseCallouts} /></Section>
+        {intakeInputs}
         <DetailingInputs {...common} callouts={baseCallouts} />
       </>;
       case "site": return <>
@@ -125,10 +138,7 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
         <Section title="Work boundary" defaultOpen={!readBox(s, "workEnvelope").confirmed}><BoxInputs {...common} prefix="workEnvelope" title="Work boundary" help="Where new pipe may go." /></Section>
         <Section title="Clearance"><ClearanceInput {...common} /></Section>
         <Section title="Photos" count={s.siteFacts.filter(f => f.field.startsWith("evidence.photo")).length}><EvidenceInputs {...common} /></Section>
-        <Section title="Existing run and drawing" defaultOpen={!baseline}>
-          <DrawingInputs {...common} />
-          <RunEditor {...common} callouts={baseCallouts} />
-        </Section>
+        {intakeInputs}
         <DetailingInputs {...common} callouts={baseCallouts} />
       </>;
       case "materials": return <MaterialsCuts result={base.result} current={base.current} revision={s.inputRevision} plan={baseline} callouts={baseCallouts} detail={detailFor(baseline?.id)} selectedPiece={piece} onSelectPiece={setPiece} sources={sources} />;
@@ -191,13 +201,13 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
         {pkg.notice && <div className="fa-toast tone-blue" role="status">{pkg.notice}<button type="button" onClick={() => pkg.setNotice("")} aria-label="Dismiss"><Icon name="x" size={14} /></button></div>}
         {openRequests.map(r => <RequestCallout key={r.id} s={s} request={r} act={pkg.act} busy={pkg.busy} onGoToInputs={() => setTab(mode === "prepare" ? "inputs" : "site")} />)}
         <div className="fa-stage">
-          {view === "drawing" && d ? <DrawingView s={s} /> :
+          {view === "drawing" && d ? <SheetView s={s} intake={intake} /> :
             <PlanCanvas mode={mode} baseline={baseline} routes={mode === "adapt" ? routes : []} staleRoutes={!candidatesCurrent && !(selectedId && selectedResult.current)} focusRouteId={focusId} selectedRouteId={selectedId} duct={frameError ? null : duct} envelope={frameError ? null : envelope} boxToDrawing={toDrawing}
-              affectedIds={s.changeRequest?.affectedEntityIds ?? []} cuts={cuts} calloutsFor={calloutsFor} selectedPiece={piece} onSelectPiece={p => { setPiece(p); if (p) { setTab(mode === "prepare" ? "materials" : "package"); setSheetOpen(true); } }}
+              context={context} affectedIds={s.changeRequest?.affectedEntityIds ?? []} cuts={cuts} calloutsFor={calloutsFor} selectedPiece={piece} onSelectPiece={p => { setPiece(p); if (p) { setTab(mode === "prepare" ? "materials" : "package"); setSheetOpen(true); } }}
               onSelectRoute={id => { setPreview(id); setTab("routes"); }} tool={tool}
               empty={<div className="fa-empty big"><Icon name="layers" size={32} /><p>{mode === "adapt" ? "Enter the existing run and what you measured on site." : "Upload a drawing and enter the run to prepare."}</p>
                 <small>Everything you enter is saved to this work package on the server.</small>
-                <div className="fa-actions center"><Button variant="primary" onClick={() => { setTab(mode === "prepare" ? "inputs" : "site"); setSheetOpen(true); }}>Start with inputs</Button>
+                <div className="fa-actions center"><Button variant="primary" onClick={() => { setTab(mode === "prepare" ? "inputs" : "site"); setSheetOpen(true); if (d) setView("drawing"); }}>{d ? "Trace on the drawing" : "Upload a drawing"}</Button>
                   <Button busy={pkg.busy === "sample"} disabled={!!pkg.busy || !!s.baselinePlan} onClick={() => void loadSample()}>Load sample input</Button></div>
                 <small className="fa-sample-note">Sample input is invented demo data and is marked Sample everywhere it appears.</small></div>} />}
         </div>
@@ -205,7 +215,7 @@ export function Workbench({ id, onHome, onAuthFailure, header }: { id: string; o
       <aside className={`fa-panel ${sheetOpen ? "is-open" : ""}`} aria-label="Details">
         <button type="button" className="fa-sheet-handle" onClick={() => setSheetOpen(!sheetOpen)} aria-expanded={sheetOpen}><span />{TABS[mode].find(t => t[0] === activeTab)?.[1]}</button>
         <div className="fa-panel-head">
-          <h2>{mode === "adapt" ? "Site condition" : "Run"}<span className="fa-muted"> · {baseline ? `${baseline.entities.filter(e => e.kind === "pipe").length} piece run` : "not entered"}</span></h2>
+          <h2>{mode === "adapt" ? "Site condition" : "Run"}<span className="fa-muted"> · {baseline ? `${baseline.entities.filter(e => e.kind === "pipe" && !context.has(e.id)).length} span run` : "not entered"}</span></h2>
           <div className="fa-tabs" role="tablist">{TABS[mode].map(([k, label]) => <button key={k} role="tab" type="button" aria-selected={activeTab === k} className={activeTab === k ? "is-on" : ""} onClick={() => setTab(k)}>
             {label}{k === "inputs" || k === "site" ? missing.length > 0 && <span className="fa-dot">{missing.length}</span> : null}
           </button>)}</div>
@@ -262,22 +272,6 @@ function RequestCallout({ s, request, act, busy, onGoToInputs }: { s: Snapshot; 
       </div>
     </Callout>
     <span className="sr-only">Request for revision {s.inputRevision}</span>
-  </div>;
-}
-
-function DrawingView({ s }: { s: Snapshot }) {
-  const d = s.sourceDrawing!;
-  const [url, setUrl] = useState<{ href: string; type: string } | null>(null);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let made: string | null = null, live = true;
-    api.asset(s.id, d.assetId).then(b => { if (live) { made = URL.createObjectURL(b); setUrl({ href: made, type: b.type }); } }).catch(e => setError(e instanceof Error ? e.message : "Could not load the drawing"));
-    return () => { live = false; if (made) URL.revokeObjectURL(made); };
-  }, [s.id, d.assetId]);
-  return <div className="fa-drawing">
-    <div className="fa-drawing-bar"><b className="mono">{d.drawingId}</b> Rev {d.revision} · page {d.page}<span className="fa-muted">Shown separately from the plan. The package has no alignment between sheet and plan coordinates.</span></div>
-    {error ? <Callout tone="red" title="Could not load the drawing">{error}</Callout> : !url ? <Spinner label="Loading drawing…" /> :
-      url.type === "application/pdf" ? <object data={`${url.href}#page=${d.page}`} type="application/pdf" aria-label="Source drawing PDF"><a href={url.href} target="_blank" rel="noreferrer">Open the PDF</a></object> : <img src={url.href} alt={`Drawing ${d.drawingId}`} />}
   </div>;
 }
 

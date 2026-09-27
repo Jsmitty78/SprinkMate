@@ -42,8 +42,8 @@ The Field inspections navigation opens existing task records without conversion.
 
 ## Backend gaps found while integrating
 
-1. **Drawing alignment.** `sourceDrawing` has a scale but no origin, rotation or page region. The plan therefore cannot be overlaid on the sheet, and a work area cannot be picked on the drawing. The sheet is shown in its own view, and run coordinates are typed in. A contract for alignment and `scope.region` would close this.
-2. **Scale calibration.** Scale is one quantity with a free-text unit. There is no contract for a two-point, known-distance calibration.
+1. **Drawing alignment.** Closed by #27: `sourceDrawing.view` saves the sheet unit, work area, calibration and plan frame. See [Drawing intake](#drawing-intake-issue-27).
+2. **Scale calibration.** Closed by #27: two-point or printed-scale calibration, checked by the server.
 3. **`runner_failed` hides the cause.** `fabricationInput` throws on structural problems instead of publishing a gap or request. An open end without a confirmed `physical_pipe_end` datum is one example. The UI pre-checks that case (`runBlockers`) and explains the bare `runner_failed`.
 4. **Evidence photos have no field.** Photos are stored as site facts `evidence.photo.N` with `source.assetId`. The adapter ignores unknown fields, so this is safe, but the evidence belongs in the contract.
 5. **Selecting a route bumps the input revision.** The candidate set becomes stale right after a choice, so switching routes needs a regenerate. Changing site facts does not clear the selection on the server.
@@ -53,9 +53,25 @@ The Field inspections navigation opens existing task records without conversion.
 
 ## Not done yet
 
-- Selecting a work area or region on the drawing sheet, and an overlay of the plan on the sheet (gap 1).
-- Heads, supports and branch trees in the run editor. It handles one open run.
+- Supports and branch trees in the tracer. It handles one open run, with heads and adjacent pipe as context.
 - The route planner does not read photos. They are evidence only.
+
+## Drawing intake (issue #27)
+
+The Inputs tab (and the Site evidence tab for adaptation) starts with **Drawing and trace**. It is the same component in both workflows, so adaptation never needs a preparation package first.
+
+1. **Upload** a PDF, PNG or JPEG. Uploading never marks the drawing approved. "Copy of" names the original when the file is a scan, crop or raster.
+2. **Page and work area.** A PDF page is chosen from its real page count; each page is its own view, so switching page starts its area, scale and trace over. The work area is a box dragged on the sheet and is drawn sharply at up to 4096 px on its long side.
+3. **Scale.** Either two picked points and their real length in ft, in, mm or m, or (PDF only) a printed ratio such as 1/8 in = 1 ft (PDF points are 1/72 in of paper). The server re-derives a two-point scale and rejects one that does not match (`scale_calibration_mismatch`). The pick precision (half a screen pixel at the zoom used, converted to mm) is saved as `pointUncertaintyMm`; it is not a construction tolerance.
+4. **Plan frame.** `plan = rotate(rotationDeg) · ((x − origin.x) · scale, −(y − origin.y) · scale)` in mm, Z up. The Y flip makes the frame right-handed. Picking two points along a line sets plan X, so a rotated copy gives the same plan geometry.
+5. **Trace.** Clicks along the run, in order. Ends are *interfaces* (where this work meets something else; a scope boundary, not a physical end or a joint) or open ends; points between are turns. A head at an end station is marked as a retained head. Heads elsewhere and adjacent pipe are context. Context entities are saved in the plan outside `scope.includedEntityIds`, never connected, and the runner keeps them out of materials and assembly. Coordinates can be typed exactly in the table. Sheet labels (P27, H1) are saved as `sourceLabel` facts; entity ids stay project-local (`p1`, `t1`, `h1`).
+6. **Product.** None is assumed. "Not selected yet" saves `productId: null`, so cuts and procedures stay unresolved. The CPVC catalog set can be chosen explicitly; the typed-coordinates editor has the same choice.
+7. **Source requirements.** Nominal size as printed, required material and requirement text, with where it is stated. A catalog choice that conflicts with the stated material is shown as a conflict.
+8. **Confirm trace** freezes the plan together with the drawing, scale and frame, as the server already did for the run editor.
+
+The trace is kept in this browser until it is saved, so a reload before saving keeps clicked points. A trace cannot be saved without a scale, because plan positions are millimetres.
+
+Not in #27: automatic extraction. The FS-01 vector extraction (`packages/core/src/reference/itd-mezzanine.json`) stays an optional fixture and is not wired into the intake. Drawing rendering uses pdf.js in the browser; Ask Sprink parses reference documents separately on the server, and the two could share a PDF layer later.
 
 ## Checks
 

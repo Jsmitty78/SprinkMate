@@ -23,6 +23,8 @@ export interface CanvasProps {
   onSelectRoute?: (planId: string) => void;
   tool: "select" | "pan";
   empty?: ReactNode;
+  /** Entities outside the package scope: drawn as retained context, never selectable work. */
+  context?: ReadonlySet<string>;
 }
 
 interface View { cx: number; cy: number; zoom: number }
@@ -44,8 +46,9 @@ export function PlanCanvas(props: CanvasProps) {
     return () => ro.disconnect();
   }, []);
 
-  const baseShape = useMemo(() => planShape(baseline), [baseline]);
-  const routeShapes = useMemo(() => routes.map(r => ({ route: r, shape: planShape(r.plan) })), [routes]);
+  const context = props.context;
+  const baseShape = useMemo(() => planShape(baseline, context), [baseline, context]);
+  const routeShapes = useMemo(() => routes.map(r => ({ route: r, shape: planShape(r.plan, context) })), [routes, context]);
 
   const protectedIds = new Set(mode === "adapt" ? baseline?.entities.filter(e => !props.affectedIds.includes(e.id)).map(e => e.id) : []);
   const boxPoints = (b: Box) => [b.min, { ...b.min, x: b.max.x }, b.max, { ...b.max, x: b.min.x }].map(p => props.boxToDrawing?.(p) ?? p);
@@ -105,7 +108,8 @@ export function PlanCanvas(props: CanvasProps) {
 
   const drawPieces = (shape: ReturnType<typeof planShape>, c: Callouts, cls: string, interactive: boolean) => (
     <g className={cls}>
-      {shape.segments.map(s => {
+      {shape.segments.filter(s => s.context).map(s => <line key={s.id} className="fa-context-pipe" x1={s.a.x} y1={Y(s.a)} x2={s.b.x} y2={Y(s.b)} />)}
+      {shape.segments.filter(s => !s.context).map(s => {
         const on = interactive && s.id === selectedPiece;
         return <g key={s.id} data-piece={interactive ? s.id : undefined} className={`${on ? "is-on" : ""} ${protectedIds.has(s.id) ? "fa-protected" : ""}`}>
           {on && <line className="fa-halo" x1={s.a.x} y1={Y(s.a)} x2={s.b.x} y2={Y(s.b)} />}
@@ -115,8 +119,8 @@ export function PlanCanvas(props: CanvasProps) {
       })}
       {shape.markers.map(m => <g key={m.id} data-piece={interactive ? m.id : undefined} className={`${protectedIds.has(m.id) ? "fa-protected" : ""} ${m.id === selectedPiece ? "is-on" : ""}`}>{m.kind === "tie_in"
         ? <rect key={m.id} className="fa-tie" x={m.at.x - px(6)} y={Y(m.at) - px(6)} width={px(12)} height={px(12)} />
-        : m.kind === "fitting" ? <circle key={m.id} className="fa-fit" cx={m.at.x} cy={Y(m.at)} r={px(5)} /> : <circle key={m.id} className="fa-head" cx={m.at.x} cy={Y(m.at)} r={px(6)} />}</g>)}
-      {interactive && shape.segments.filter(s => !protectedIds.has(s.id)).map(s => {
+        : m.kind === "fitting" ? <circle key={m.id} className="fa-fit" cx={m.at.x} cy={Y(m.at)} r={px(5)} /> : <circle key={m.id} className={`fa-head ${m.context ? "is-context" : ""}`} cx={m.at.x} cy={Y(m.at)} r={px(m.context ? 9 : 6)} />}</g>)}
+      {interactive && shape.segments.filter(s => !s.context && !protectedIds.has(s.id)).map(s => {
         const mx = (s.a.x + s.b.x) / 2, my = (Y(s.a) + Y(s.b)) / 2;
         const label = c.piece.get(s.id) ?? "?";
         const on = s.id === selectedPiece;
@@ -185,6 +189,7 @@ export function PlanCanvas(props: CanvasProps) {
           {others.length > 0 && <span><i className="lg-alt" />Other routes</span>}
           <span><i className="lg-existing" />Existing route</span>
         </> : <span><i className="lg-route" />Run</span>}
+        {baseShape.markers.some(m => m.context) || baseShape.segments.some(s => s.context) ? <span><i className="lg-context" />Retained context</span> : null}
         {mode === "adapt" && <span><i className="lg-existing" />Protected context</span>}
         {duct && <span><i className="lg-duct" />Duct (saved input)</span>}
         {envelope && <span><i className="lg-env" />Work boundary</span>}
