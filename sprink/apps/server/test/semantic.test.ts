@@ -59,3 +59,32 @@ describe('JEV source selection', () => {
     expect(await search.select('q', [])).toEqual([]);
   });
 });
+
+it('preserves demonstration provenance in the provider request', async () => {
+  const row = passage(1); row.doc.demonstration = true;
+  await new JevSourceSearch(undefined, async req => {
+    expect((req.state as any).passages[0].demonstration).toBe(true);
+    return reply(req);
+  }).select('Fixture', [row]);
+});
+
+it('discards successful batches when any sibling fails', async () => {
+  let calls = 0;
+  const search = new JevSourceSearch(undefined, async req => {
+    if (++calls === 2) throw new Error('private transport detail');
+    return reply(req);
+  });
+  await expect(search.select('Fixture', Array.from({ length: 8 }, (_, i) => passage(i, 'Test prose. '.repeat(1700))))).rejects.toMatchObject({ code: 'source_search_transport_failed' });
+});
+
+it('bounds the whole search even if every individual batch stays within its deadline', async () => {
+  const search = new JevSourceSearch(undefined, async req => { await new Promise(resolve => setTimeout(resolve, 20)); return reply(req); }, { timeoutMs: 25, batchTimeoutMs: 100 });
+  await expect(search.select('Fixture', Array.from({ length: 8 }, (_, i) => passage(i, 'Test prose. '.repeat(1700))))).rejects.toMatchObject({ code: 'source_search_timeout' });
+});
+
+it('rejects excessive library size before making any provider call', async () => {
+  let calls = 0;
+  const search = new JevSourceSearch(undefined, async req => { calls++; return reply(req); });
+  await expect(search.select('Fixture', Array.from({ length: 8193 }, (_, i) => passage(i)))).rejects.toMatchObject({ code: 'source_search_capacity' });
+  expect(calls).toBe(0);
+});

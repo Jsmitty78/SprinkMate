@@ -8,8 +8,8 @@ export interface SourceSearch {
 }
 type Question = { type: 'choice' | 'noul'; instructions: string; criteria: Record<string, string> };
 export interface SearchRequest { model: string; state: unknown; questions: Record<string, Question> }
-type Transport = (request: SearchRequest) => Promise<unknown>;
-const fail = (code: string): never => { throw new SourceError(503, code, 'Source search is unavailable. Please try again.'); };
+type Transport = (request: SearchRequest, signal: AbortSignal) => Promise<unknown>;
+const fail = (code: string): never => { throw new SourceError(code === 'source_search_timeout' ? 504 : 503, code, code === 'source_search_timeout' ? 'Source search timed out. Please try again.' : 'Source search is unavailable. Please try again.'); };
 const object = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
 const probability = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
 // Conservative UTF-8 byte upper bound, not chars/4 (unsafe for CJK). Leave room for
@@ -26,7 +26,7 @@ function request(question: string, passages: Passage[]): SearchRequest {
     exists: { type: 'noul', instructions: `Does the supplied text contain enough information to answer state.query? ${evidence}`, criteria: { true: 'An explicit answer exists in these passages.', false: 'Absent, only a related topic, or insufficient information.' } },
   };
   passages.forEach((_, i) => { questions[`support${i}`] = { type: 'noul', instructions: `Does passage p${i} supply an explicit answer or a necessary part of the answer to state.query? ${evidence}`, criteria: { true: 'Direct supporting text, including necessary qualifications.', false: 'Only related vocabulary, unrelated content, or no supporting answer.' } }; });
-  return { model: JEV_MODEL, state: { query: question, passages: passages.map(({ doc, section }, i) => ({ id: `p${i}`, key: section.key, document: doc.title, type: doc.type, scope: doc.scope, edition: doc.edition, sectionId: section.sectionId, heading: section.heading, text: section.text, table: section.table })) }, questions };
+  return { model: JEV_MODEL, state: { query: question, passages: passages.map(({ doc, section }, i) => ({ id: `p${i}`, key: section.key, document: doc.title, type: doc.type, scope: doc.scope, edition: doc.edition, demonstration: doc.demonstration, sectionId: section.sectionId, heading: section.heading, text: section.text, table: section.table })) }, questions };
 }
 function answers(raw: unknown, req: SearchRequest): Record<string, any> {
   if (!object(raw) || raw.model !== JEV_MODEL || !object(raw.answers)) return fail('source_search_invalid_response');
@@ -47,45 +47,111 @@ function answers(raw: unknown, req: SearchRequest): Record<string, any> {
   return raw.answers;
 }
 
+/** A deadline also covers queueing, all batches and response-body reads. */
+function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const aborted = () => reject(signal.reason);
+    if (signal.aborted) { reject(signal.reason); return; }
+    signal.addEventListener('abort', aborted, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', aborted));
+  });
+}
+async function responseJson(response: Response, signal: AbortSignal): Promise<unknown> {
+  const reader = response.body?.getReader();
+  if (!reader) return fail('source_search_invalid_response');
+  const chunks: Uint8Array[] = []; let size = 0;
+  try {
+    while (true) {
+      const part = await abortable(reader.read(), signal);
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > 1_048_576) { void reader.cancel().catch(() => {}); return fail('source_search_invalid_response'); }
+      chunks.push(part.value);
+    }
+    try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+    catch { return fail('source_search_invalid_response'); }
+  } catch (error) { void reader.cancel().catch(() => {}); throw error; }
+  finally { reader.releaseLock(); }
+}
+
 export class JevSourceSearch implements SourceSearch {
   private readonly transport: Transport;
-  constructor(apiKey?: string, transport?: Transport) {
-    this.transport = transport ?? (async req => {
+  private activeSearches = 0;
+  private activeBatches = 0;
+  private waiters = new Set<() => void>();
+  constructor(apiKey?: string, transport?: Transport, private readonly limits = { timeoutMs: 45_000, batchTimeoutMs: 30_000 }) {
+    this.transport = transport ?? (async (req, signal) => {
       if (!apiKey?.trim()) return fail('source_search_not_configured');
-      try {
-        const response = await fetch(JEV_ENDPOINT, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30_000), headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(req) });
-        if (!response.ok) return fail(`source_search_http_${response.status}`);
-        return await response.json();
-      } catch (error) { if (error instanceof SourceError) throw error; return fail('source_search_transport_failed'); }
+      const response = await fetch(JEV_ENDPOINT, { method: 'POST', redirect: 'error', signal, headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(req) });
+      if (!response.ok) { void response.body?.cancel().catch(() => {}); return fail(`source_search_http_${response.status}`); }
+      return responseJson(response, signal);
     });
   }
-  async select(query: string, passages: Passage[]): Promise<string[]> {
-    const batches: Passage[][] = [];
-    let batch: Passage[] = [];
-    for (const passage of passages) {
-      // Never truncate a clause: oversized individual clauses require re-sectioning on import.
-      if (!fits(request(query, [passage]))) throw new SourceError(422, 'source_section_too_large', `Section ${passage.section.sectionId} exceeds the search input budget. Split it into smaller sections before searching.`);
-      if (batch.length === 255 || !fits(request(query, [...batch, passage]))) { batches.push(batch); batch = []; }
-      batch.push(passage);
+  private async acquire(signal: AbortSignal) {
+    while (this.activeBatches >= 4) {
+      let wake!: () => void;
+      const waiting = new Promise<void>(resolve => { wake = resolve; this.waiters.add(wake); });
+      try { await abortable(waiting, signal); } finally { this.waiters.delete(wake); }
     }
-    if (batch.length) batches.push(batch);
-    const selected: string[][] = new Array(batches.length);
-    let next = 0;
-    let failure: unknown;
-    await Promise.all(Array.from({ length: Math.min(4, batches.length) }, async () => {
-      while (!failure) {
-        const index = next++;
-        if (index >= batches.length) return;
-        try {
-          const rows = batches[index], req = request(query, rows);
-          const a = answers(await this.transport(req), req);
-          // Existence is independent of ranking: a top-ranked non-answer is never used.
-          selected[index] = a.exists.noul > 0.5 ? rows.map((p, i) => ({ key: p.section.key, support: a[`support${i}`].noul, rank: a.relevant.probabilities[`p${i}`] }))
-            .filter(p => p.support > 0.5).sort((a, b) => b.rank - a.rank).map(p => p.key) : [];
-        } catch (error) { failure = error; }
+    signal.throwIfAborted();
+    this.activeBatches++;
+  }
+  private release() {
+    this.activeBatches--;
+    // Wake contenders; acquire checks the limit again before reserving a slot.
+    for (const wake of this.waiters) wake();
+    this.waiters.clear();
+  }
+  async select(query: string, passages: Passage[]): Promise<string[]> {
+    if (!passages.length) return [];
+    if (this.activeSearches >= 8) return fail('source_search_busy');
+    // Reject the whole request instead of silently dropping clauses from a large library.
+    if (passages.length > 8192 || passages.reduce((bytes, p) => bytes + tokens({ text: p.section.text, table: p.section.table }), 0) > 8_000_000) return fail('source_search_capacity');
+    this.activeSearches++;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new DOMException('Search deadline', 'TimeoutError')), this.limits.timeoutMs);
+    const signal = controller.signal;
+    try {
+      const batches: Passage[][] = [];
+      let batch: Passage[] = [];
+      for (const passage of passages) {
+        if (!fits(request(query, [passage]))) throw new SourceError(422, 'source_section_too_large', 'A source section exceeds the search input budget. Ask the library operator to split it into smaller sections.');
+        if (batch.length === 255 || !fits(request(query, [...batch, passage]))) { batches.push(batch); batch = []; }
+        batch.push(passage);
       }
-    }));
-    if (failure) throw failure;
-    return [...new Set(selected.flat())];
+      if (batch.length) batches.push(batch);
+      const selected: string[][] = new Array(batches.length);
+      let next = 0;
+      const workers = Array.from({ length: Math.min(4, batches.length) }, async () => {
+        while (!signal.aborted) {
+          const index = next++;
+          if (index >= batches.length) return;
+          await this.acquire(signal);
+          const batchController = new AbortController();
+          const batchTimer = setTimeout(() => batchController.abort(new DOMException('Batch deadline', 'TimeoutError')), this.limits.batchTimeoutMs);
+          const batchSignal = AbortSignal.any([signal, batchController.signal]);
+          try {
+            const rows = batches[index], req = request(query, rows);
+            const a = answers(await abortable(this.transport(req, batchSignal), batchSignal), req);
+            // Preserve the independent existence and per-passage support thresholds.
+            selected[index] = a.exists.noul > 0.5 ? rows.map((p, i) => ({ key: p.section.key, support: a[`support${i}`].noul, rank: a.relevant.probabilities[`p${i}`] }))
+              .filter(p => p.support > 0.5).sort((a, b) => b.rank - a.rank).map(p => p.key) : [];
+          } catch (error) {
+            controller.abort(error);
+            throw error;
+          } finally { clearTimeout(batchTimer); this.release(); }
+        }
+      });
+      // Wait for all siblings to release their slots; a failed batch never yields partial evidence.
+      const results = await Promise.allSettled(workers);
+      const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+      if (failed) throw failed.reason;
+      signal.throwIfAborted();
+      return [...new Set(selected.flat())];
+    } catch (error) {
+      if (error instanceof SourceError) throw error;
+      if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) return fail('source_search_timeout');
+      return fail('source_search_transport_failed');
+    } finally { clearTimeout(timer); controller.abort(); this.activeSearches--; }
   }
 }
