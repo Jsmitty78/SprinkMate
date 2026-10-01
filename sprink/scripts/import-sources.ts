@@ -7,7 +7,7 @@
  * A package is a metadata JSON (see demo-sources/*.source.json) pointing to the original text
  * file and, optionally, a separate explanation-notes file. The authorization block is required.
  */
-import { resolve } from 'node:path';
+import { resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../apps/server/src/store.js';
 import { SourceStore } from '../apps/server/src/sources/store.js';
@@ -17,6 +17,7 @@ const args = process.argv.slice(2);
 const projectAt = args.indexOf('--project');
 const projectId = projectAt >= 0 ? args[projectAt + 1] : undefined;
 const files = args.filter((a, i) => !a.startsWith('--') && (projectAt < 0 || i !== projectAt + 1));
+if (process.env.SPRINK_DATA_DIR !== undefined && (!process.env.SPRINK_DATA_DIR.trim() || !isAbsolute(process.env.SPRINK_DATA_DIR))) throw new Error('SPRINK_DATA_DIR must be an absolute path to persistent storage.');
 const dataDir = resolve(process.env.SPRINK_DATA_DIR ?? fileURLToPath(new URL('../.data/', import.meta.url)));
 // The same database file the server uses (Store opens .data/field.sqlite).
 const store = new SourceStore(new Store(dataDir).db);
