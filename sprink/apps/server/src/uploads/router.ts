@@ -18,6 +18,14 @@ export function uploadRouter(uploads: UploadService) {
     return c.json({ error: 'The upload operation failed. Retry.', code: 'internal_error' }, 500);
   });
 
+  app.use('/uploads/:id/*', async (c, next) => {
+    if (c.req.method === 'GET') {
+      const demonstration = uploads.assertPublicDisplay(c.req.param('id'));
+      if (demonstration !== null) c.header('X-Sprink-Demonstration', String(demonstration));
+    }
+    await next();
+    if (c.req.method === 'GET' && c.res.ok) uploads.assertPublicDisplay(c.req.param('id'));
+  });
   app.post('/uploads', bodyLimit({ maxSize: LIMITS.maxBytes + 1024 * 1024, onError: c => c.json({ error: `The file is larger than ${LIMITS.maxBytes / 1048576} MB.`, code: 'file_too_large' }, 413) }), async c => {
     const t0 = performance.now();
     const form = await c.req.parseBody().catch(() => { throw new UploadError(400, 'invalid_upload', 'Send the file as multipart form data with a "file" field.'); });

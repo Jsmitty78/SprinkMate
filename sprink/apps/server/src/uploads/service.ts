@@ -80,6 +80,17 @@ export class UploadService {
     if (!row) throw new UploadError(404, 'not_found', 'Upload not found.');
     return JSON.parse(row.data);
   }
+  /** Public upload viewers may not bypass the library's display authorization. */
+  assertPublicDisplay(id: string): boolean | null {
+    const upload = this.get(id);
+    if (upload.purpose !== 'reference') return null;
+    const doc = upload.docId ? this.sources.document(upload.docId) : undefined;
+    if (upload.docId && !doc) throw new SourceError(404, 'source_unavailable', 'The indexed source is not available.');
+    const authorization = doc?.authorization ?? upload.metadata?.authorization;
+    if (!authorization || authorization.storeAndIndex !== true || authorization.useWithAi !== true || authorization.display !== 'full'
+      || upload.metadata?.authorization?.display !== 'full') throw new SourceError(403, 'display_limited', 'This reference does not permit full display. Use the authorized source viewer.');
+    return doc?.demonstration ?? upload.metadata?.demonstration === true;
+  }
   private save(u: UploadRecord) {
     u.updatedAt = new Date().toISOString();
     this.db.prepare('INSERT INTO uploads(id,created,data) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(u.id, u.createdAt, JSON.stringify(u));
@@ -232,14 +243,15 @@ export class UploadService {
       };
       if (!SOURCE_TYPES.includes(input.type)) throw new SourceError(400, 'invalid_type', `Document type must be one of: ${SOURCE_TYPES.join(', ')}.`);
       // The library keeps one revision of an upload: the previous one is replaced.
-      const prior = this.sources.document(docId);
-      if (prior) this.sources.remove(docId);
-      let doc;
-      try { doc = this.sources.import(input); }
-      catch (e) { if (prior) { /* restore is not attempted: the previous revision can be indexed again */ } throw e; }
-      this.sources.setRegions(docId, regionsFor(this.sources.sections(docId), ex));
-      // Ready only once the document is actually found by search.
-      if (!this.sources.searchable(docId)) { this.sources.remove(docId); throw new UploadError(500, 'not_searchable', 'The document sections were not fully stored, so the incomplete import was removed. Retry indexing.'); }
+      const doc = this.db.transaction(() => {
+        const prior = this.sources.document(docId);
+        if (prior?.demonstration && !input.demonstration) throw new SourceError(400, 'demonstration_required', 'Demonstration content must remain marked as demonstration.');
+        if (prior) this.sources.remove(docId);
+        const imported = this.sources.import(input);
+        this.sources.setRegions(docId, regionsFor(this.sources.sections(docId), ex));
+        if (!this.sources.searchable(docId)) throw new UploadError(500, 'not_searchable', 'The document sections were not fully stored. Retry indexing.');
+        return imported;
+      })();
       return this.save({ ...this.get(id), status: 'ready', docId: doc.id, indexedRevision: rev.rev, timings: { ...u.timings, indexMs: Math.round(performance.now() - t0) } });
     } catch (e) {
       const status = e instanceof SourceError || e instanceof UploadError ? e.status : 500;

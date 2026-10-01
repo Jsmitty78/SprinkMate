@@ -3,7 +3,7 @@ import { type SourceSearch } from './semantic.js';
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { WorkPackageSnapshot } from '@sprink/core';
-import { ask, searchRules, isSharedReference, AskInputError, type AskRequest, type AttachmentInput } from './ask.js';
+import { ask, searchRules, isSharedReference, AskInputError, validateAskRequest, type AskRequest, type AttachmentInput } from './ask.js';
 import type { UploadService } from '../uploads/service.js';
 import { UploadError } from '../uploads/formats.js';
 import { SourceError, type SourceStore } from './store.js';
@@ -27,6 +27,7 @@ export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => W
   });
   app.get('/sources/:docId/pages/:page', async c => {
     const bytes = await sourcePdfPage(store, dataDir, c.req.param('docId'), c.req.param('page'));
+    c.header('X-Sprink-Demonstration', String(store.document(c.req.param('docId'))!.demonstration));
     c.header('Content-Type', 'image/png');
     c.header('Cache-Control', 'private, no-cache');
     return c.body(new Uint8Array(bytes));
@@ -45,7 +46,7 @@ export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => W
     // The passage in place: its section, its exceptions and notes, and the neighbouring sections.
     const i = all.findIndex(s => s.key === top.key);
     const around = all.filter((s, j) => s.parentKey === top.key || s.key === top.key || (s.parentKey === null && Math.abs(j - i) <= 3));
-    return c.json({ document: publicDocument(doc), target: section.key, sections: around.map(s => ({ ...view(doc.authorization, s), notes: store.notes(s.key).map(n => ({ text: n.text, author: n.author })) })) });
+    return c.json({ document: publicDocument(doc), target: section.key, sections: around.map(s => ({ ...view(doc.authorization, s), notes: doc.authorization.display === 'full' ? store.notes(s.key).map(n => ({ text: n.text, author: n.author })) : [] })) });
   });
   app.get('/sources/:docId/file', c => {
     const doc = store.document(c.req.param('docId'));
@@ -53,11 +54,14 @@ export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => W
     if (doc.authorization.display !== 'full') throw new SourceError(403, 'display_limited', 'This source limits display. Use the original link.');
     c.header('Content-Type', 'text/plain; charset=utf-8');
     c.header('Content-Security-Policy', "default-src 'none'; sandbox");
-    return c.body(store.content(doc.id)!);
+    const content = store.content(doc.id);
+    if (content === undefined) throw new SourceError(404, 'source_unavailable', 'Source text is not available.');
+    c.header('X-Sprink-Demonstration', String(doc.demonstration));
+    return c.body(doc.demonstration ? `DEMONSTRATION: invented test data, not an actual code, manufacturer requirement, or jurisdiction amendment.\n\n${content}` : content);
   });
   app.post('/ask', async c => {
     const body = await c.req.json() as AskRequest;
-    if (!body || typeof body !== 'object') throw new AskInputError('Send a question.');
+    validateAskRequest(body);
     let snapshot: WorkPackageSnapshot | null = null;
     if (body.packageId) {
       if (!loadPackage) throw new AskInputError('Work packages are not available on this server.');
@@ -78,6 +82,7 @@ export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => W
 }
 
 function view(a: import('./types.js').SourceAuthorization, s: import('./types.js').SourceSection) {
+  if (a.display !== 'full') s = { ...s, pdfExcerpt: undefined, regions: undefined };
   if (a.display === 'reference_only') return { ...s, text: '', table: null, limited: 'reference_only' };
   if (a.display === 'excerpt' && s.text.length > a.maxQuoteChars!) return { ...s, text: `${s.text.slice(0, a.maxQuoteChars)}…`, table: null, limited: 'excerpt' };
   return { ...s, limited: null };
