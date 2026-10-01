@@ -10,7 +10,7 @@ The integrated [Pi + Astra + JEV workflow](packages/workflow/README.md) connects
 
 ## Run locally
 
-Requires **Node.js 22.19+**, **pnpm 10.17.1**, an OpenAI API key with access to the configured `gpt-6-astra` model, and a JEV/TypeSafe API key. Model access is required; the app does not automatically switch to another model. Agent runs and reference retrieval call external services.
+Requires **Node.js 22.19+** and **pnpm 10.17.1**. Ask Sprink requires a JEV/TypeSafe API key and authorized source material; it does not require OpenAI. Other workflow features require an OpenAI API key with access to the configured `gpt-6-astra` model. The app does not automatically switch to another model. See [Ask pilot readiness](../ASK_PILOT_READINESS.md) for private deployment, storage, source authorization, and verification requirements.
 
 ```sh
 git clone https://github.com/my-name-is-yu/InnovationCup.git
@@ -146,7 +146,7 @@ pnpm replay
 
 `.data/field.sqlite` が業務状態の正本で、画像は `.data/assets/` です。仕事、操作の応答、イベント、画像参照を保存します。既存の業務データは保持します。
 
-設定: `SPRINK_DATA_DIR`、`SPRINK_TOKEN`、`SPRINK_HOST`、`PORT`。PiのモデルはGPT-6 Astra固定です。`sprink/.env.local` の `OPENAI_API_KEY` と `TYPESAFE_API_KEY` が継承環境変数より優先されます。秘密値をGitへ保存しないでください。
+設定: `SPRINK_DATA_DIR`、`SPRINK_TOKEN`、`SPRINK_HOST`、`PORT`。PiのモデルはGPT-6 Astra固定です。開発時は `sprink/.env.local` の `OPENAI_API_KEY` と `TYPESAFE_API_KEY` が継承環境変数より優先されます。本番 (`NODE_ENV=production`) は環境変数のみを読みます。秘密値をGitへ保存しないでください。
 
 旧カメラ用実行キューは再開しません。ワークパッケージはPi標準Agentを使い、Astraがツールを選び、JEVが検証ルールを選択します。旧DB内の実行履歴や観測の取得元は保持します。
 
