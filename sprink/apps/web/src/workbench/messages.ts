@@ -1,4 +1,6 @@
 // UI copy only. User input, generated answers and source passages keep their original language.
+import { askMessages } from "./ask/askMessages.js";
+
 export const messages: ReadonlyArray<readonly [string, string]> = [
   ["Show context", "前後も見る"],
   ["Focus on match", "該当箇所に戻る"],
@@ -850,4 +852,5 @@ export const messages: ReadonlyArray<readonly [string, string]> = [
   ["Page containing the material requirement or notes. The nominal-size label remains linked to the traced drawing page.", "材料の要求や注記があるページです。呼び径のラベルはトレースした図面ページに紐づきます。"],
   ["Usable for testing", "テスト用に使用可能"],
   ["Entered measurement (unverified)", "入力した実測値（未検証）"],
+  ...askMessages,
 ];

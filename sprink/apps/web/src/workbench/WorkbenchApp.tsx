@@ -47,7 +47,7 @@ export function WorkbenchApp() {
   const inspections = () => go("/inspections");
   const rules = () => go("/codes");
   if (!token) return <Connect onConnect={t => { session.setToken(t); setToken(t); }} />;
-  if (path === "/codes") return <div className="fa-app"><TopBar onHome={home} onInspections={inspections} onRules={rules} rules right={<Button variant="quiet" onClick={signOut}>{tr("Disconnect")}</Button>} /><main className="wf-codes fa-rules-page"><AskPanel embedded onClose={home} /></main></div>;
+  if (path === "/codes") return <div className="fa-app"><TopBar onHome={home} onInspections={inspections} onRules={rules} rules right={<Button variant="quiet" onClick={signOut}>{tr("Disconnect")}</Button>} /><main className="wf-codes fa-rules-page"><AskPanel embedded onClose={home} onAuthFailure={signOut} /></main></div>;
   if (path === "/inspections") return <div className="fa-app"><TopBar onHome={home} onInspections={inspections} onRules={rules} inspections right={<Button variant="quiet" onClick={signOut}>{tr("Disconnect")}</Button>} />
     <Inspections token={token} onAuthFailure={signOut} />
   </div>;

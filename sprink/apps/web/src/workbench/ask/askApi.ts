@@ -74,7 +74,7 @@ export async function authedBlobUrl(href: string): Promise<string> {
 }
 
 export const askApi = {
-  search: (question: string) => call<AskAnswer>("/api/rules/search", { method: "POST", body: JSON.stringify({ question }) }),
+  search: (question: string, signal?: AbortSignal) => call<AskAnswer>("/api/rules/search", { method: "POST", body: JSON.stringify({ question }), signal }),
   documents: () => call<{ documents: SourceDocument[] }>("/api/sources"),
   passage: (link: string) => call<{ document: SourceDocument; target: string; sections: SectionView[] }>(link),
   async original(href: string): Promise<string> {
