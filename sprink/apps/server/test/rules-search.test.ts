@@ -34,7 +34,7 @@ describe('operator-maintained shared rule search', () => {
     let seen: Passage[] = [];
     const { app, sources } = setup(async (_, passages) => { seen = passages; return passages.map(p => p.section.key); });
     sources.import(manual());
-    sources.import(manual({ id: 'demo', demonstration: true }));
+    sources.import(manual({ id: 'demo', demonstration: true, content: '## 2.1 Joining\nDEMONSTRATION: invented joining fixture.' }));
     sources.import(manual({ id: 'private', scope: { productIds: ['fixture-product'], projectId: 'private' } }));
     sources.import(manual({ id: 'project', type: 'project_document', scope: { projectId: 'private' } }));
     const response = await app.request('/api/rules/search', post({ question: 'Joining instructions', packageId: 'nonexistent' }));

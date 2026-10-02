@@ -3,7 +3,7 @@ import { JevSourceSearch, type SourceSearch } from './semantic.js';
 import { randomUUID } from 'node:crypto';
 import { resolveSfNfpa13Edition, type Evidence, type Fact, type SfProjectFacts, type WorkPackageSnapshot } from '@sprink/core';
 import { conflicts as findConflicts, expand, type Conflict, type Retrieved, type Role } from './retrieve.js';
-import type { SourceStore } from './store.js';
+import { SourceError, type SourceStore } from './store.js';
 type Origin = 'project' | 'sample' | 'you' | 'derived';
 interface Point { x: number; y: number; z: number }
 interface Box { min: Point; max: Point }
@@ -42,6 +42,7 @@ export interface ContextFact { name: string; label: string; value: string | numb
 export interface FollowUp { id: string; question: string; kind: 'choice' | 'measurement'; field: string; options?: Array<{ value: string; label: string }>; unit?: string }
 export interface Citation {
   key: string; docId: string; docTitle: string; publisher: string; type: SourceDocument['type']; typeLabel: string; edition: string;
+  scope: SourceDocument['scope'];
   sectionId: string; heading: string; kind: string; label: string; role: Role; via?: string;
   pageStart: number | null; pageEnd: number | null; demonstration: boolean;
   flags: Array<{ flag: string; label: string }>;
@@ -55,7 +56,7 @@ export interface Citation {
   regions: Array<{ page: number; x: number; y: number; w: number; h: number }>;
 }
 /** note: a reviewed plain-language note. quote: the source's own wording. pointer: go read the passage. */
-export interface Claim { id: string; text: string; citations: string[]; kind: 'note' | 'pointer' | 'quote'; status: 'supported' | 'unresolved'; reason?: string }
+export interface Claim { demonstration: boolean; id: string; text: string; citations: string[]; kind: 'note' | 'pointer' | 'quote'; status: 'supported' | 'unresolved'; reason?: string }
 export interface ConditionCheck { question: string; name: string; value: number | null; unit: string; origin: ContextFact['origin'] | null; detail: string | null; op: string; limit: number; result: 'met' | 'not_met' | 'unknown' }
 export interface ExceptionStatus { key: string; sectionId: string; parentSectionId: string; status: 'applies' | 'does_not_apply' | 'unknown'; checks: ConditionCheck[]; note: string }
 export interface AskAnswer {
@@ -68,6 +69,8 @@ export interface AskAnswer {
     facts: ContextFact[];
   };
   status: 'answered' | 'needs_input' | 'no_source';
+  code: 'supported_sources' | 'context_required' | 'empty_library' | 'no_supporting_source';
+  demonstration: boolean;
   summary: string;
   explanation: Claim[];
   unresolved: Claim[];
@@ -76,7 +79,7 @@ export interface AskAnswer {
   followUps: FollowUp[];
   sources: Citation[];
   conflicts: Array<Conflict & { items: Array<{ key: string; position: string; label: string }> }>;
-  excluded: Array<{ docId: string; title: string; edition: string; reason: string }>;
+  excluded: Array<{ docId: string; title: string; edition: string; reason: string; demonstration: boolean }>;
   attachments: AttachmentView[];
   /** JEV selects evidence; answers quote stored source wording. */
   timings: { retrievalMs: number; compositionMs: number; modelMs: number; totalMs: number };
@@ -85,7 +88,7 @@ export interface AskAnswer {
 /** Quotes are retrieved verbatim; no keyword-based sentence selection. */
 const sourceClaims = (items: Retrieved[]): Claim[] => items
   .map((r, i): Claim => {
-    const base = { id: `c${i + 1}`, status: 'supported' as const };
+    const base = { id: `c${i + 1}`, status: 'supported' as const, demonstration: r.doc.demonstration };
     const a = r.doc.authorization;
     if (a.display === 'reference_only' || r.section.table || r.section.flags.includes('embedded_instructions'))
       return { ...base, text: `${r.section.sectionId}: ${r.section.heading}. Read the source wording.`, citations: [r.section.key], kind: 'pointer' };
@@ -191,12 +194,12 @@ function buildContext(req: AskRequest, snapshot: WorkPackageSnapshot | null): Co
     }
   }
   for (const m of req.measurements ?? []) {
-    const spec = MEASUREMENTS[m.name];
+    const spec = Object.hasOwn(MEASUREMENTS, m.name) ? MEASUREMENTS[m.name] : undefined;
     if (!spec) throw new AskInputError(`Unknown measurement "${m.name}".`);
     if (typeof m.value !== 'number' || !Number.isFinite(m.value)) throw new AskInputError(`${spec.label} must be a number.`);
     if (spec.kind === 'length' && !LENGTH_UNITS.has(m.unit)) throw new AskInputError(`${spec.label} needs a length unit (mm, m, in or ft).`);
-    if (spec.kind === 'count' && (m.unit !== 'count' || !Number.isInteger(m.value) || m.value < 0)) throw new AskInputError(`${spec.label} must be a whole number.`);
-    if (spec.kind === 'length' && m.value <= 0) throw new AskInputError(`${spec.label} must be greater than 0.`);
+    if (spec.kind === 'count' && (m.unit !== 'count' || !Number.isSafeInteger(m.value) || m.value < 0)) throw new AskInputError(`${spec.label} must be a whole number.`);
+    if (spec.kind === 'length' && (m.value <= 0 || !Number.isFinite(toMm(m.value, m.unit)))) throw new AskInputError(`${spec.label} must be greater than 0.`);
     put({ name: m.name, label: spec.label, value: m.value, unit: m.unit, origin: 'you', detail: 'Entered by you in Ask Sprink' });
   }
   return { snapshot, facts, values, standard, edition, jurisdiction, productIds, selected, duct };
@@ -232,6 +235,7 @@ function applicability(doc: SourceDocument, ctx: Context): { ok: boolean; reason
       if (doc.edition !== ctx.edition.value) return { ok: false, reason: `Edition ${doc.edition} is not the project's edition (${ctx.edition.value}). It was not substituted.` };
       return { ok: true, reason: '' };
     case 'local_amendment':
+      if (ctx.standard && doc.scope.standard !== ctx.standard) return { ok: false, reason: 'This amendment covers a different standard.' };
       if (!ctx.jurisdiction) return { ok: false, reason: 'The jurisdiction is not confirmed.', blockedBy: 'jurisdiction' };
       if (doc.scope.jurisdiction !== ctx.jurisdiction) return { ok: false, reason: `This amendment is for ${doc.scope.jurisdiction}, not ${ctx.jurisdiction}.` };
       if (!ctx.edition.value) return { ok: false, reason: 'The applicable edition is not confirmed.', blockedBy: 'edition' };
@@ -271,10 +275,11 @@ function citation(r: Retrieved): Citation {
     : r.section.kind === 'requirement' ? 'Requirement text' : 'Source text';
   return {
     key: r.section.key, docId: r.doc.id, docTitle: r.doc.title, publisher: r.doc.publisher, type: r.doc.type, typeLabel: SOURCE_TYPE_LABEL[r.doc.type], edition: r.doc.edition,
+    scope: r.doc.scope,
     sectionId: r.section.sectionId, heading: r.section.heading, kind: r.section.kind, label, role: r.role, via: r.via,
     pageStart: r.section.pageStart, pageEnd: r.section.pageEnd, demonstration: r.doc.demonstration,
     flags: r.section.flags.map(f => ({ flag: f, label: QUALITY_LABEL[f] })),
-    quote, quoteNote, table, notes: r.notes.map(n => ({ text: n.text, author: n.author })),
+    quote, quoteNote, table, notes: a.display === 'full' ? r.notes.map(n => ({ text: n.text, author: n.author })) : [],
     excerpt: a.display === 'full' ? r.section.pdfExcerpt : undefined,
     link: `/api/sources/${encodeURIComponent(r.doc.id)}/sections/${encodeURIComponent(r.section.pdfExcerpt?.sectionKey ?? r.section.key)}`,
     original: r.doc.url ?? (a.display === 'full' ? (up ? `/api/uploads/${up.uploadId}/original` : `/api/sources/${encodeURIComponent(r.doc.id)}/file`) : null),
@@ -326,8 +331,7 @@ function attachmentContext(inputs: AttachmentInput[], req: AskRequest, ctx: Cont
 
 export async function ask(store: SourceStore, req: AskRequest, snapshot: WorkPackageSnapshot | null, attachmentInputs: AttachmentInput[] = [], search: SourceSearch = new JevSourceSearch()): Promise<AskAnswer> {
   const t0 = performance.now();
-  if (typeof req.question !== 'string' || !req.question.trim()) throw new AskInputError('Type a question.');
-  if (req.question.length > 1000) throw new AskInputError('Keep the question under 1000 characters.');
+  validateAskRequest(req);
   const question = req.question.trim();
   const ctx = buildContext(req, snapshot);
   let modelMs = 0;
@@ -338,6 +342,7 @@ export async function ask(store: SourceStore, req: AskRequest, snapshot: WorkPac
   // ---------------- retrieval
   const r0 = performance.now();
   let items: Retrieved[] = [];
+  let libraryEmpty = true;
   const mainKeys = new Set<string>();
   {
     const docs = store.documents();
@@ -345,18 +350,20 @@ export async function ask(store: SourceStore, req: AskRequest, snapshot: WorkPac
     const verdicts = new Map(docs.map(d => [d.id, applicability(d, ctx)]));
     const blocked = new Set<string>();
     const eligible = docs.filter(d => d.authorization.useWithAi && (!d.scope.projectId || d.scope.projectId === snapshot?.projectId));
+    libraryEmpty = eligible.length === 0;
     const passages = eligible.flatMap(doc => store.sections(doc.id).map(section => ({ doc, section })));
     const started = performance.now();
     // Keep other editions from contributing to an applicable batch's existence verdict.
-    const keys = new Set((await Promise.all([true, false].map(ok =>
-      search.select(question, passages.filter(p => verdicts.get(p.doc.id)!.ok === ok))))).flat());
+    const groups = [true, false].flatMap(ok => [true, false].map(demo => passages.filter(p => verdicts.get(p.doc.id)!.ok === ok && p.doc.demonstration === demo))).filter(p => p.length);
+    const keys = new Set((await Promise.all(groups.map(rows => search.select(question, rows)))).flat());
+    assertUnchanged(store, eligible);
     modelMs += performance.now() - started;
     const mains: Retrieved[] = [];
     for (const { doc, section } of passages.filter(p => keys.has(p.section.key))) {
       const verdict = verdicts.get(doc.id)!;
       if (!verdict.ok) {
         if (verdict.blockedBy) blocked.add(verdict.blockedBy);
-        if (!excluded.some(e => e.docId === doc.id)) excluded.push({ docId: doc.id, title: doc.title, edition: doc.edition, reason: verdict.reason });
+        if (!excluded.some(e => e.docId === doc.id)) excluded.push({ docId: doc.id, title: doc.title, edition: doc.edition, reason: verdict.reason, demonstration: doc.demonstration });
         continue;
       }
       mains.push({ section, doc, role: section.kind === 'definition' || section.kind === 'commentary' ? section.kind : 'main', score: 0, notes: store.notes(section.key) });
@@ -386,7 +393,7 @@ export async function ask(store: SourceStore, req: AskRequest, snapshot: WorkPac
   // ---------------- exceptions: evaluate the stated conditions with known facts, ask for the rest
   const exceptions: ExceptionStatus[] = [];
   for (const r of items.filter(i => i.role === 'exception')) {
-    const conds: ExplanationCondition[] = r.notes.flatMap(n => n.conditions ?? []);
+    const conds: ExplanationCondition[] = (r.doc.authorization.display === 'full' ? r.notes : []).flatMap(n => n.conditions ?? []);
     if (!conds.length) {
       exceptions.push({ key: r.section.key, sectionId: r.section.sectionId, parentSectionId: r.via ?? '', status: 'unknown', checks: [], note: 'Read the exception wording to decide whether it applies.' });
       continue;
@@ -429,7 +436,7 @@ export async function ask(store: SourceStore, req: AskRequest, snapshot: WorkPac
   } else {
     status = followUps.length ? 'needs_input' : 'answered';
     const editionGap = missing.find(m => m.startsWith('No ') && m.includes('text is in the project library'));
-    const docs = new Set(items.filter(i => i.role === 'main').map(i => i.doc.id)).size;
+    const docs = new Set(items.map(i => i.doc.id)).size;
     const applied = exceptions.filter(e => e.status === 'applies');
     const quoted = supported.filter(c => c.kind === 'quote').length;
     const open = exceptions.filter(e => e.status === 'unknown');
@@ -441,6 +448,7 @@ export async function ask(store: SourceStore, req: AskRequest, snapshot: WorkPac
       + (conflicts.length ? ` ${conflicts.length} disagreement${conflicts.length === 1 ? '' : 's'} between sources need${conflicts.length === 1 ? 's' : ''} resolving.` : '');
   }
 
+  const demonstration = sources.some(s => s.demonstration) || excluded.some(d => d.demonstration);
   const totalMs = performance.now() - t0;
   return {
     id: randomUUID(), question, askedAt: new Date().toISOString(),
@@ -450,7 +458,8 @@ export async function ask(store: SourceStore, req: AskRequest, snapshot: WorkPac
       siteCondition: snapshot?.changeRequest ? { id: snapshot.changeRequest.id, description: snapshot.changeRequest.description } : null,
       facts: ctx.facts,
     },
-    status, summary, explanation: supported, unresolved, exceptions, missing, followUps, sources, conflicts, excluded, attachments,
+    status, code: status === 'answered' ? 'supported_sources' : status === 'needs_input' ? 'context_required' : libraryEmpty ? 'empty_library' : 'no_supporting_source',
+    demonstration, summary: demonstration ? `Demonstration content: invented test data, not actual code or manufacturer requirements. ${summary}` : summary, explanation: supported, unresolved, exceptions, missing, followUps, sources, conflicts, excluded, attachments,
     timings: { retrievalMs: round(retrievalMs), compositionMs: round(compositionMs), modelMs: round(modelMs), totalMs: round(totalMs) },
   };
 }
@@ -464,30 +473,61 @@ export const isSharedReference = (doc: SourceDocument): boolean =>
 /** Reference lookup does not decide which edition or product governs a project. */
 export async function searchRules(store: SourceStore, question: string, search: SourceSearch = new JevSourceSearch()): Promise<AskAnswer> {
   const t0 = performance.now();
-  if (typeof question !== 'string' || !question.trim()) throw new AskInputError('Type a question.');
-  if (question.length > 1000) throw new AskInputError('Keep the question under 1000 characters.');
+  validateQuestion(question);
   question = question.trim();
   const docs = store.documents().filter(isSharedReference);
   const passages = docs.flatMap(doc => {
     const sections = store.sections(doc.id);
     return [...sections, ...excerptSections(doc, sections)].map(section => ({ doc, section }));
   });
-  const keys = new Set(await search.select(question, passages));
+  const keys = new Set(passages.length ? await search.select(question, passages) : []);
+  assertUnchanged(store, docs);
   const mains: Retrieved[] = passages.filter(p => keys.has(p.section.key)).map(p => ({ ...p, role: 'main', score: 0, notes: store.notes(p.section.key) }));
   // Expand inside each document only: a shared catalog can hold unrelated jurisdictions and editions.
   const items = docs.flatMap(doc => expand(store, mains.filter(m => m.doc.id === doc.id), [doc]));
   const sources = items.map(citation);
   const retrievalMs = performance.now() - t0;
   const documentCount = new Set(sources.map(s => s.docId)).size;
+  const conflicts = findConflicts(items).map(c => ({ ...c, items: c.items.map(i => ({ ...i, label: `${sources.find(s => s.key === i.key)!.sectionId} (${sources.find(s => s.key === i.key)!.edition})` })) }));
   return {
     id: randomUUID(), question, askedAt: new Date().toISOString(),
     context: { projectId: null, packageTitle: null, standard: null, edition: { value: null, status: 'unknown', reason: 'Reference search does not determine the edition adopted for a project.' }, jurisdiction: null, selectedElementId: null, siteCondition: null, facts: [] },
     status: sources.length ? 'answered' : 'no_source',
+    code: sources.length ? 'supported_sources' : docs.length ? 'no_supporting_source' : 'empty_library', demonstration: false,
     summary: sources.length
-      ? `${sources.length} matching passage${sources.length === 1 ? '' : 's'} from ${documentCount} document${documentCount === 1 ? '' : 's'} in the shared library. Check each source’s edition and scope for your situation.`
+      ? `${sources.length} matching passage${sources.length === 1 ? '' : 's'} from ${documentCount} document${documentCount === 1 ? '' : 's'} in the shared library. Check each source’s edition and scope for your situation.${conflicts.length ? ' These sources disagree; confirm which authority governs before applying them.' : ''}`
       : "No supporting passage was found in the shared library. The requested rule or edition may not be included.",
     explanation: sourceClaims(items), sources,
-    unresolved: [], exceptions: [], missing: [], followUps: [], conflicts: [], excluded: [], attachments: [],
+    unresolved: [], exceptions: items.filter(r => r.role === 'exception').map(r => ({ key: r.section.key, sectionId: r.section.sectionId, parentSectionId: r.via ?? '', status: 'unknown', checks: [], note: 'Read the exception wording; reference search does not determine project applicability.' })),
+    missing: sources.length ? ['Project jurisdiction, adopted edition, and product applicability are not determined by reference search.'] : [], followUps: [], conflicts, excluded: [], attachments: [],
     timings: { retrievalMs: round(retrievalMs), compositionMs: 0, modelMs: round(retrievalMs), totalMs: round(performance.now() - t0) },
   };
+}
+
+// Validate before package/upload lookups as well as at the direct function boundary.
+export function validateQuestion(question: unknown): asserts question is string {
+  if (typeof question !== 'string' || !question.trim()) throw new AskInputError('Type a question.');
+  if (question.length > 1000) throw new AskInputError('Keep the question under 1000 characters.');
+}
+const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+export function validateAskRequest(value: unknown): asserts value is AskRequest {
+  if (!record(value)) throw new AskInputError('Send a question.');
+  validateQuestion(value.question);
+  for (const field of ['packageId', 'selectedElementId'] as const)
+    if (value[field] !== undefined && (typeof value[field] !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,119}$/.test(value[field]))) throw new AskInputError('Invalid context identifier.');
+  if (value.attachments !== undefined && (!Array.isArray(value.attachments) || value.attachments.length > 6 || value.attachments.some(id => typeof id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,119}$/.test(id)))) throw new AskInputError('Attach at most 6 valid upload ids.');
+  if (value.measurements !== undefined && (!Array.isArray(value.measurements) || value.measurements.length > 10 || value.measurements.some(m => !record(m) || typeof m.name !== 'string' || typeof m.value !== 'number' || !Number.isFinite(m.value) || typeof m.unit !== 'string'))) throw new AskInputError('Invalid measurements.');
+  if (value.answers !== undefined) {
+    if (!record(value.answers)) throw new AskInputError('Invalid follow-up answers.');
+    for (const field of ['nfpa13Edition', 'jurisdiction']) {
+      const answer = value.answers[field];
+      if (answer !== undefined && (typeof answer !== 'string' || !answer.trim() || answer.length > 60)) throw new AskInputError('Invalid follow-up answers.');
+    }
+    const observations = value.answers.observations;
+    if (observations !== undefined && (!record(observations) || Object.keys(observations).length > 100 || Object.entries(observations).some(([key, v]) => key.length > 120 || !['yes', 'no'].includes(v as string)))) throw new AskInputError('Invalid observation answers.');
+  }
+}
+function assertUnchanged(store: SourceStore, docs: SourceDocument[]) {
+  if (docs.some(doc => JSON.stringify(store.document(doc.id)) !== JSON.stringify(doc)))
+    throw new SourceError(503, 'source_unavailable', 'The source library changed during search. Please try again.');
 }

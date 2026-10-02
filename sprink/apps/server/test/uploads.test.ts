@@ -148,7 +148,7 @@ describe('reference documents: extract, review, index, answer', () => {
     let u = await uploadAndSettle('native-text-manual.pdf', 'reference');
     expect(u.status).toBe('review');
     expect(u.pages.map(p => p.method)).toEqual(['text', 'text']);
-    const review = await (await app.request(`/api/uploads/${u.id}/review`, { headers: auth })).json();
+    const review = await uploads.review(u.id);
     expect(review.revision.text).toContain('## S-5.2 Solvent cement cure before pressure testing');
     expect(review.revision.text).toContain('| NPS 1 | 1.7 m |');
     const tables = review.items.filter((i: { kind: string }) => i.kind === 'table_structure');
@@ -202,7 +202,7 @@ describe('reference documents: extract, review, index, answer', () => {
     const u = await uploadAndSettle('scanned-spec.pdf', 'reference');
     expect(u.status).toBe('review');
     expect(u.pages.map(p => p.method)).toEqual(['ocr', 'ocr']);
-    const review = await (await app.request(`/api/uploads/${u.id}/review`, { headers: auth })).json();
+    const review = await uploads.review(u.id);
     expect(review.revision.text).toMatch(/PS-2\.4\.1 CPVC piping and fittings shall not be painted\./);
     await operatorResult(() => uploads.saveCorrection(u.id, { acknowledged: review.items.map((i: { id: string }) => i.id) }));
     const res = await operatorResult(() => uploads.index(u.id, meta({ title: 'DEMONSTRATION Project Specification 21 13 13', type: 'project_document', edition: 'Issued for construction', scope: { projectId: 'demo-project' } })));
@@ -217,14 +217,14 @@ describe('reference documents: extract, review, index, answer', () => {
   it('reads the scanned part of a mixed PDF page', async () => {
     const u = await uploadAndSettle('mixed-procedure.pdf', 'reference');
     expect(u.pages[0].method).toBe('mixed');
-    const review = await (await app.request(`/api/uploads/${u.id}/review`, { headers: auth })).json();
+    const review = await uploads.review(u.id);
     expect(review.revision.text).toContain('## FP-9.1 Photo records for site changes');
     expect(review.revision.text).toMatch(/FP-9\.2\.1 The foreman signs changes that add no more than two fittings\./);
   }, 120_000);
 
   it('holds unclear OCR for review, keeps the extracted revision, and cites the corrected one', async () => {
     const u = await uploadAndSettle('unclear-scan.png', 'reference');
-    const review = await (await app.request(`/api/uploads/${u.id}/review`, { headers: auth })).json();
+    const review = await uploads.review(u.id);
     const blocking = review.items.filter((i: { blocking: boolean }) => i.blocking);
     expect(blocking.some((i: { kind: string }) => i.kind === 'uncertain_number')).toBe(true);
     const m = meta({ title: 'DEMONSTRATION unclear clearance note', type: 'company_procedure', scope: {} });
@@ -232,7 +232,7 @@ describe('reference documents: extract, review, index, answer', () => {
     const corrected = '<!-- page: 1 -->\n## UC-1.1 Clearance to ductwork\n\nUC-1.1.1 Keep 1 1/2 in clear to ductwork, or 38 mm where metric is used.\n';
     const saved = await (await operatorResult(() => uploads.saveCorrection(u.id, { text: corrected, acknowledged: review.items.map((i: { id: string }) => i.id) }))).json();
     expect(saved.revision).toBe(2);
-    const revs = (await (await app.request(`/api/uploads/${u.id}/review`, { headers: auth })).json()).revisions;
+    const revs = (await uploads.review(u.id)).revisions;
     expect(revs.map((r: { basis: string }) => r.basis)).toEqual(['extracted', 'corrected']);
     const res = await operatorResult(() => uploads.index(u.id, m));
     expect(res.status).toBe(200);
@@ -247,7 +247,7 @@ describe('reference documents: extract, review, index, answer', () => {
     // The same bytes are indexed again under different metadata, so the earlier copy goes first.
     for (const x of uploads.list({ purpose: 'reference' }).filter(x => x.filename === 'native-text-manual.pdf')) await uploads.remove(x.id);
     const u = await uploadAndSettle('native-text-manual.pdf', 'reference', 'manual-as-code.pdf');
-    const review = await (await app.request(`/api/uploads/${u.id}/review`, { headers: auth })).json();
+    const review = await uploads.review(u.id);
     await operatorResult(() => uploads.saveCorrection(u.id, { acknowledged: review.items.map((i: { id: string }) => i.id) }));
     const res = await operatorResult(() => uploads.index(u.id, meta({ title: 'DEMONSTRATION code stand-in 2019', type: 'published_code', edition: '2019', scope: { standard: 'nfpa13' } })));
     expect(res.status).toBe(200);
@@ -320,7 +320,7 @@ describe('recovery', () => {
 
   it('keeps an upload in review when index metadata is invalid, then indexes after it is fixed', async () => {
     const u = await uploadAndSettle('label.png', 'reference', 'label-for-index.png');
-    const review = await (await app.request(`/api/uploads/${u.id}/review`, { headers: auth })).json();
+    const review = await uploads.review(u.id);
     await operatorResult(() => uploads.saveCorrection(u.id, { acknowledged: review.items.map((i: { id: string }) => i.id) }));
     const bad = await operatorResult(() => uploads.index(u.id, meta({ authorization: { basis: 'x', storeAndIndex: true, useWithAi: false, display: 'full' } })));
     expect(bad.status).toBe(403);

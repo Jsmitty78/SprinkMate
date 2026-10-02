@@ -35,9 +35,13 @@ export function createApp(service:FieldService,options:{token:string;webDir?:str
   app.use('*',async(c,next)=>{await next();c.header('X-Content-Type-Options','nosniff');c.header('Referrer-Policy','no-referrer');});
   app.use('/api/*',async(c,next)=>{
     const actual=Buffer.from(c.req.header('Authorization')??''),expected=Buffer.from(`Bearer ${options.token}`);
-    if(actual.length!==expected.length||!timingSafeEqual(actual,expected))return c.json({error:'接続トークンが必要です'},401);
+    if(actual.length!==expected.length||!timingSafeEqual(actual,expected))return c.json({error:'A valid access token is required.',code:'authentication_required'},401);
     c.header('Cache-Control','no-store');await next();
   });
+  app.get('/health',c=>{c.header('Cache-Control','no-store');return c.json({ok:true});});
+  const questionLimit=bodyLimit({maxSize:32*1024,onError:c=>c.json({error:'The question request is too large.',code:'invalid_question'},413)});
+  app.use('/api/ask',questionLimit);
+  app.use('/api/rules/search',questionLimit);
   // File uploads carry their own, larger limit (uploads/router.ts).
   const apiLimit=bodyLimit({maxSize:21*1024*1024,onError:c=>c.json({error:'送信データが大きすぎます'},413)});
   app.use('/api/*',(c,next)=>c.req.method==='POST'&&c.req.path==='/api/uploads'?next():apiLimit(c,next));

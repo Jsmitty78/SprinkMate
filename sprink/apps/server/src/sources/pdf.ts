@@ -28,9 +28,12 @@ export async function attachSourcePdf(store: SourceStore, dataDir: string, docId
 
 export async function sourcePdfPage(store: SourceStore, dataDir: string | undefined, docId: string, page: string) {
   const doc = store.document(docId);
-  if (!doc || !dataDir || !doc.pdf || !/^[a-f0-9]{64}$/.test(doc.pdf.sha256)) throw new SourceError(404, 'not_found', 'Original PDF is not available.');
+  if (!doc || !dataDir || !doc.pdf || !/^[a-f0-9]{64}$/.test(doc.pdf.sha256)) throw new SourceError(404, 'source_unavailable', 'Original PDF is not available.');
   if (doc.authorization.display !== 'full') throw new SourceError(403, 'display_limited', 'This source limits display. Use the original link.');
   if (!/^[1-9]\d*$/.test(page) || Number(page) > doc.pdf.pageCount) throw new SourceError(404, 'not_found', 'Page not found.');
-  try { return await readFile(join(dataDir, 'source-pdfs', doc.pdf.sha256, `${page}.png`)); }
-  catch { throw new SourceError(404, 'not_found', 'Page image is not available. Open the original PDF.'); }
+  let bytes: Buffer;
+  try { bytes = await readFile(join(dataDir, 'source-pdfs', doc.pdf.sha256, `${page}.png`)); }
+  catch { throw new SourceError(404, 'source_unavailable', 'Page image is not available. Ask the library operator to restore it.'); }
+  if (JSON.stringify(store.document(docId)) !== JSON.stringify(doc)) throw new SourceError(503, 'source_unavailable', 'The source changed while opening its page. Please try again.');
+  return bytes;
 }
