@@ -27,7 +27,9 @@
     "e2e:catalog": "node scripts/e2e-catalog-preparation.mjs",
     "e2e:ask-empty": "node scripts/e2e-ask-empty.mjs",
     "e2e:site:frame": "node scripts/e2e-site-frame.mjs",
-    "e2e:site:jev-failure": "node scripts/e2e-site-jev-failure.mjs"
+    "e2e:site:jev-failure": "node scripts/e2e-site-jev-failure.mjs",
+    "e2e:references:server": "node --import tsx scripts/reference-e2e-server.ts",
+    "e2e:references": "node scripts/e2e-reference-library.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

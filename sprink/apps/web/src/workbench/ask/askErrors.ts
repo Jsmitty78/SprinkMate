@@ -19,6 +19,14 @@ export function describeAskError(error: unknown): AskProblem {
   if (error instanceof AskTimeoutError || (error instanceof ApiError && (error.status === 504 || error.status === 408)))
     return { kind: "timeout", title: "The search took too long", detail: "Sprink stopped waiting for the reference search. Your question is still here. Try again, or shorten the question.", retry: true };
   if (error instanceof ApiError) {
+    if (error.code === "source_search_not_configured")
+      return { kind: "unavailable", title: "Search unavailable", detail: "Search is not connected yet. The library administrator needs to configure the search service. You can still read available references below.", retry: false };
+    if (error.code === "source_search_capacity")
+      return { kind: "unavailable", title: "Search unavailable", detail: "This library exceeds the search service’s capacity. Ask the library administrator to review it.", retry: false };
+    if (error.code === "source_section_too_large")
+      return { kind: "unavailable", title: "Search unavailable", detail: "A source passage is too large to search. Ask the library administrator to review its section boundaries.", retry: false };
+    if (error.code === "source_search_http_401" || error.code === "source_search_http_403")
+      return { kind: "unavailable", title: "Search unavailable", detail: "The search service’s credentials were not accepted. Ask the library administrator to reconnect it.", retry: false };
     if (error.status === 401 || error.status === 403)
       return { kind: "auth", title: "Your access was not accepted", detail: "Sprink could not confirm your access token. Reconnect with a valid token, then ask again. Your question is kept on this screen.", retry: false };
     if (error.status === 400 || error.status === 413 || error.status === 422)

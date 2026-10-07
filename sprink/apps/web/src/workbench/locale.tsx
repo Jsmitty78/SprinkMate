@@ -10,8 +10,8 @@ for (const pair of messages) {
   if (!catalog.has(pair[1])) catalog.set(pair[1], pair);
 }
 function readLocale(): Locale {
-  try { return localStorage.getItem(STORAGE_KEY) === "en" ? "en" : "ja"; }
-  catch { return "ja"; }
+  try { return localStorage.getItem(STORAGE_KEY) === "ja" ? "ja" : "en"; }
+  catch { return "en"; }
 }
 let locale: Locale = readLocale();
 export const getLocale = () => locale;
@@ -22,7 +22,7 @@ export function setLocale(next: Locale) {
   for (const listener of listeners) listener();
 }
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
-export function useLocale() { return useSyncExternalStore(subscribe, getLocale, () => "ja" as Locale); }
+export function useLocale() { return useSyncExternalStore(subscribe, getLocale, () => "en" as Locale); }
 /** Only call at UI-copy boundaries, never on source documents or user-provided text. */
 export function tr(text: string, params?: Record<string, string | number>): string {
   const translated = catalog.get(text)?.[locale === "en" ? 0 : 1] ?? text;

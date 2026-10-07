@@ -471,11 +471,20 @@ export const isSharedReference = (doc: SourceDocument): boolean =>
   !doc.demonstration && !doc.scope.projectId && doc.type !== 'project_document' && doc.authorization.useWithAi;
 
 /** Reference lookup does not decide which edition or product governs a project. */
-export async function searchRules(store: SourceStore, question: string, search: SourceSearch = new JevSourceSearch()): Promise<AskAnswer> {
+export async function searchRules(store: SourceStore, question: string, search: SourceSearch = new JevSourceSearch(), documentIds?: unknown): Promise<AskAnswer> {
   const t0 = performance.now();
   validateQuestion(question);
   question = question.trim();
-  const docs = store.documents().filter(isSharedReference);
+  let docs = store.documents().filter(isSharedReference);
+  if (documentIds !== undefined) {
+    if (!Array.isArray(documentIds) || !documentIds.length || documentIds.length > 30) throw new AskInputError('Select between 1 and 30 available references.');
+    const selected = new Set<string>();
+    for (const id of documentIds) {
+      if (typeof id !== 'string' || !docs.some(doc => doc.id === id)) throw new AskInputError('A selected reference is unavailable. Refresh the library and select it again.');
+      selected.add(id);
+    }
+    docs = docs.filter(doc => selected.has(doc.id));
+  }
   const passages = docs.flatMap(doc => {
     const sections = store.sections(doc.id);
     return [...sections, ...excerptSections(doc, sections)].map(section => ({ doc, section }));

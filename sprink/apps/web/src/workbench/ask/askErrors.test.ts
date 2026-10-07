@@ -35,4 +35,12 @@ describe("Ask error wording", () => {
     expect(describeAskError(new ApiError(401, "401", "x")).retry).toBe(false);
     expect(describeAskError(new ApiError(400, "invalid_question", "Type a question.")).retry).toBe(false);
   });
+  it("directs configuration failures to library repair instead of retrying the same question", () => {
+    for (const code of ['source_search_not_configured', 'source_search_capacity', 'source_section_too_large', 'source_search_http_401', 'source_search_http_403']) {
+      expect(describeAskError(new ApiError(code === 'source_section_too_large' ? 422 : 503, code, 'internal')))
+        .toMatchObject({ kind: 'unavailable', retry: false });
+    }
+    expect(describeAskError(new ApiError(503, 'source_search_not_configured', 'internal')).detail).toContain('read available references');
+  });
+
 });

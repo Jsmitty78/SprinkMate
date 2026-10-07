@@ -78,4 +78,23 @@ describe('operator-maintained shared rule search', () => {
     expect((await blocked.json()).code).toBe('managed_library');
     expect(sources.documents()).toEqual([]);
   });
+  it('limits retrieval and expansion to explicitly selected references', async () => {
+    let seen: string[] = [];
+    const { app, sources } = setup(async (_, passages) => {
+      seen = passages.map(p => p.doc.id);
+      return passages.map(p => p.section.key);
+    });
+    sources.import(manual({ id: 'nfpa13-older', type: 'published_code', edition: 'older', scope: { standard: 'nfpa13' } }));
+    sources.import(manual({ id: 'nfpa13r-other', type: 'published_code', edition: 'other', scope: { standard: 'nfpa13r' } }));
+    const response = await app.request('/api/rules/search', post({ question: 'Joining', documentIds: ['nfpa13-older'] }));
+    expect(response.status).toBe(200);
+    const answer = await response.json();
+    expect(seen).toEqual(['nfpa13-older']);
+    expect(answer.sources.map((s: { docId: string }) => s.docId)).toEqual(['nfpa13-older']);
+    expect(answer.context.edition.status).toBe('unknown');
+    for (const documentIds of [[], ['missing'], 'nfpa13-older', [12]]) {
+      expect((await app.request('/api/rules/search', post({ question: 'Joining', documentIds }))).status).toBe(400);
+    }
+  });
+
 });

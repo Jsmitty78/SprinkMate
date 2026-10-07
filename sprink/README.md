@@ -1,4 +1,4 @@
-# Sprink — 開発・API資料
+# SprinkMate — 開発・API資料
 
 製品概要・機能デモは [Sprink README](../README.md) を参照してください。この文書の観測・限定ルールAPIは、現場検査機能の詳細です。
 
@@ -10,16 +10,16 @@ The integrated [Pi + Astra + JEV workflow](packages/workflow/README.md) connects
 
 ## Run locally
 
-Requires **Node.js 22.19+** and **pnpm 10.17.1**. Ask Sprink requires a JEV/TypeSafe API key and authorized source material; it does not require OpenAI. Other workflow features require an OpenAI API key with access to the configured `gpt-6-astra` model. The app does not automatically switch to another model. See [Ask pilot readiness](../ASK_PILOT_READINESS.md) for private deployment, storage, source authorization, and verification requirements.
+Use **Node.js 22.19.0** (see `.node-version`) and **pnpm 10.17.1**. Ask Sprink requires a JEV/TypeSafe API key and authorized source material; it does not require OpenAI. Other workflow features require an OpenAI API key with access to the configured `gpt-6-astra` model. The app does not automatically switch to another model. See [Ask pilot readiness](../ASK_PILOT_READINESS.md) for private deployment, storage, source authorization, and verification requirements.
 
 ```sh
-git clone https://github.com/my-name-is-yu/InnovationCup.git
-cd InnovationCup/sprink
+git clone https://github.com/Jsmitty78/SprinkMate.git
+cd SprinkMate/sprink
 pnpm install --frozen-lockfile
 cp .env.example .env.local
 ```
 
-Fill in the two keys in `.env.local`, then:
+For reference search, set `TYPESAFE_API_KEY` in `.env.local`. `OPENAI_API_KEY` is needed only for the agent work-package features. See [Boston source setup](docs/boston-setup.md). Then:
 
 ```sh
 pnpm build

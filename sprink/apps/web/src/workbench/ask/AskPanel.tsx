@@ -5,16 +5,14 @@ import { askApi, type AskAnswer, type Citation, type SourceDocument } from "./as
 import { AskTimeoutError, describeAskError, type AskProblem } from "./askErrors.js";
 import { isActive, speechLang, useDictation, type DictationStatus } from "./speech.js";
 import { useAuthedUrl } from "./uploads.js";
+import { SourceLibrary } from "./SourceLibrary.js";
+import { BostonCoverage } from "./BostonCoverage.js";
 import "./rule-search.css";
 
-const SUGGESTED = [
-  "What does Spears FlameGuard require for deburring a solvent-cement pipe joint?",
-  "What installation instructions are available for TYCO TY-FRB sprinklers?",
-];
 /** Matches the server limit in apps/server/src/sources/ask.ts. */
 export const MAX_QUESTION = 1000;
-/** The server allows its search service 30 s; give up a little after that. */
-export const ASK_TIMEOUT_MS = 45_000;
+/** The server's complete search budget is 45 seconds; allow time for transport. */
+export const ASK_TIMEOUT_MS = 55_000;
 const DRAFT_KEY = "sprink.ask.draft";
 
 /** Voice text is added after what is already typed, never in place of it. */
@@ -37,12 +35,16 @@ export function AskPanel({ onClose, embedded = false, onAuthFailure }: { embedde
   const locale = useLocale();
   const [question, setQuestion] = useState(readDraft);
   const [asked, setAsked] = useState("");
+  const [referenceId, setReferenceId] = useState("");
+  const [askedReferenceId, setAskedReferenceId] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [answer, setAnswer] = useState<AskAnswer | null>(null);
   const [problem, setProblem] = useState<AskProblem | null>(null);
   const [viewing, setViewing] = useState<Citation | null>(null);
   const [docs, setDocs] = useState<SourceDocument[] | null>(null);
   const [libraryError, setLibraryError] = useState(false);
+  const [libraryVersion, setLibraryVersion] = useState(0);
+  const [libraryLoading, setLibraryLoading] = useState(true);
   const [undo, setUndo] = useState<Undo | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -62,10 +64,16 @@ export function AskPanel({ onClose, embedded = false, onAuthFailure }: { embedde
 
   useEffect(() => { writeDraft(question); }, [question]);
   useEffect(() => {
-    let live = true;
-    askApi.documents().then(r => { if (live) setDocs(r.documents); }).catch(() => { if (live) setLibraryError(true); });
+    const controller = new AbortController();
+    setLibraryLoading(true); setLibraryError(false);
+    askApi.documents(controller.signal)
+      .then(r => { if (!controller.signal.aborted) setDocs(r.documents); })
+      .catch(() => { if (!controller.signal.aborted) setLibraryError(true); })
+      .finally(() => { if (!controller.signal.aborted) setLibraryLoading(false); });
+    return () => controller.abort();
+  }, [libraryVersion]);
+  useEffect(() => {
     if (!coarsePointer()) input.current?.focus();
-    return () => { live = false; };
   }, []);
   useEffect(() => () => { seq.current++; inflight.current?.controller.abort(); }, []);
   // Grow with the question instead of scrolling inside a two-line box.
@@ -93,16 +101,16 @@ export function AskPanel({ onClose, embedded = false, onAuthFailure }: { embedde
     return () => window.removeEventListener("keydown", k);
   }, [onClose, embedded, listening, cancelVoice]);
 
-  const run = useCallback(async (text: string) => {
+  const run = useCallback(async (text: string, sourceId = referenceId) => {
     const q = text.trim();
     if (!q || q.length > MAX_QUESTION || inflight.current) return;
     const id = ++seq.current, controller = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, ASK_TIMEOUT_MS);
     inflight.current = { id, controller };
-    setAsked(q); setPhase("loading"); setProblem(null); setAnswer(null); setViewing(null); setUndo(null); resetVoice(); setVoiceHelp(false);
+    setAsked(q); setAskedReferenceId(sourceId); setPhase("loading"); setProblem(null); setAnswer(null); setViewing(null); setUndo(null); resetVoice(); setVoiceHelp(false);
     try {
-      const result = await askApi.search(q, controller.signal);
+      const result = await askApi.search(q, controller.signal, sourceId ? [sourceId] : undefined);
       if (id !== seq.current) return;
       setAnswer(result); setPhase("done");
     } catch (e) {
@@ -112,7 +120,7 @@ export function AskPanel({ onClose, embedded = false, onAuthFailure }: { embedde
       clearTimeout(timer);
       if (inflight.current?.id === id) inflight.current = null;
     }
-  }, [resetVoice]);
+  }, [resetVoice, referenceId]);
   const cancelRequest = () => {
     seq.current++;
     inflight.current?.controller.abort();
@@ -142,11 +150,18 @@ export function AskPanel({ onClose, embedded = false, onAuthFailure }: { embedde
       {!embedded && <button type="button" className="sk-close fa-icon-btn" onClick={onClose} aria-label={tr("Close Ask Sprink")}><Icon name="x" /></button>}
       <div className="sk-compose">
         <header className="sk-intro">
-          <span className="sk-eyebrow">{tr("SPRINK REFERENCE LIBRARY")}</span>
+          <span className="sk-eyebrow">SprinkMate · Boston, MA</span>
           <h1>{tr("Ask a sprinkler code question")}</h1>
-          <p>{tr("Answers come only from the references in Sprink's library, with the page they came from.")}</p>
+          <p>{tr("Find source passages with their edition, section and page. Confirm the code basis for your job before applying a rule.")}</p>
         </header>
         <form className="sk-form" role="search" aria-label={tr("Ask Sprink")} onSubmit={e => { e.preventDefault(); if (canAsk) void run(question); }}>
+          {docs && docs.length > 0 && <label className="sk-reference-filter">{tr("Search within")}
+            <select value={referenceId} onChange={e => setReferenceId(e.target.value)} disabled={busy}>
+              <option value="">{tr("All available references — compare editions and scope")}</option>
+              {docs.map(doc => <option key={doc.id} value={doc.id}>{doc.title} · {doc.edition}</option>)}
+            </select>
+            {referenceId && <small>{tr("Only this reference will be searched. Related amendments and other standards may be outside this selection.")}</small>}
+          </label>}
           <label className="sk-label" htmlFor="ask-q">{tr("Your question")}</label>
           <div className="sk-field">
             <textarea id="ask-q" ref={input} rows={3} maxLength={MAX_QUESTION} value={question} enterKeyHint="search" autoCapitalize="sentences" spellCheck
@@ -182,26 +197,28 @@ export function AskPanel({ onClose, embedded = false, onAuthFailure }: { embedde
         {phase !== "idle" && <div className="sk-asked"><span>{tr("Results for")}</span><p>{asked}</p></div>}
         {phase === "loading" && <div className="sk-loading" role="status">
           <span className="fa-spinner" aria-hidden="true" />
-          <div><strong>{tr("Searching the reference library…")}</strong><small>{tr("This can take up to 30 seconds.")}</small></div>
+          <div><strong>{tr("Searching the reference library…")}</strong><small>{tr("This can take up to 45 seconds.")}</small></div>
           <button type="button" onClick={cancelRequest}>{tr("Cancel")}</button>
         </div>}
         {phase === "error" && problem && <Callout tone="red" title={tr(problem.title)}
-          action={problem.kind === "auth" ? onAuthFailure && <Button onClick={onAuthFailure}>{tr("Reconnect")}</Button> : problem.retry ? <Button onClick={() => void run(asked)}>{tr("Try again")}</Button> : <Button onClick={() => input.current?.focus()}>{tr("Edit question")}</Button>}>
+          action={problem.kind === "auth" ? onAuthFailure && <Button onClick={onAuthFailure}>{tr("Reconnect")}</Button> : problem.retry ? <Button onClick={() => void run(asked, askedReferenceId)}>{tr("Try again")}</Button> : problem.kind === "invalid" ? <Button onClick={() => input.current?.focus()}>{tr("Edit question")}</Button> : undefined}>
           {tr(problem.detail)}
         </Callout>}
         {phase === "done" && answer && <Answer a={answer} viewing={viewing} onView={setViewing} onEdit={() => input.current?.focus()} />}
         {phase === "done" && answer && <div className="sk-next"><Button onClick={askAnother}>{tr("Ask another question")}</Button></div>}
 
-        {phase === "idle" && <>
+        {phase === "idle" && docs && docs.length > 0 && <>
           <div className="sk-suggest"><span className="sk-eyebrow">{tr("TRY A QUESTION")}</span>
-            {SUGGESTED.map(q => <button key={q} type="button" disabled={listening} onClick={() => { setQuestion(q); void run(q); }}>{tr(q)}</button>)}
+            {docs.slice(0, 2).map(d => {
+              const q = tr("Find instructions in {title}", { title: d.title });
+              return <button key={d.id} type="button" disabled={listening} onClick={() => { setQuestion(q); setReferenceId(d.id); void run(q, d.id); }}>{q}</button>;
+            })}
           </div>
-          {libraryError && <Callout tone="neutral" title={tr("Could not load the list of references")}>{tr("You can still ask. The list is only for reference.")}</Callout>}
-          {docs && <details className="sk-library"><summary>{tr("References in the library")} ({docs.length})</summary>
-            {docs.length ? <ul>{docs.map(d => <li key={d.id}><strong>{d.title}</strong><small>{[d.publisher, d.edition].filter(Boolean).join(" · ")}</small></li>)}</ul>
-              : <p>{tr("No references are available yet. The library administrator must add sources.")}</p>}
-          </details>}
         </>}
+        {libraryError && <Callout tone="neutral" title={tr("Could not load the list of references")} action={<Button onClick={() => setLibraryVersion(n => n + 1)}>{tr("Retry")}</Button>}>{tr("You can still ask. The list is only for reference.")}</Callout>}
+        {libraryLoading && !docs && <Spinner label={tr("Loading references…")} />}
+        {docs && <SourceLibrary documents={docs} onRefresh={() => setLibraryVersion(n => n + 1)} loading={libraryLoading} />}
+        <BostonCoverage documents={docs} />
       </div>
     </div>
   </div>;
@@ -255,10 +272,16 @@ function VoiceStatus({ status, heard, explainUnsupported, onCancel }: { status: 
   </div>;
 }
 
-/** One entry per original page, even when several indexed passages matched it. */
+/** Distinct clauses on one page may have different conditions; keep each reachable. */
 export function sourceHits(a: AskAnswer): Citation[] {
-  const candidates = a.sources.filter(s => s.excerpt || !a.sources.some(x => x.excerpt && x.docId === s.docId && x.pageStart === s.pageStart));
-  return candidates.filter((s, i, all) => all.findIndex(x => s.excerpt ? x.key === s.key : x.docId === s.docId && (s.pageStart !== null ? x.pageStart === s.pageStart : x.key === s.key)) === i).sort((a, b) => Number(!!b.excerpt) - Number(!!a.excerpt));
+  const hits: Citation[] = [];
+  const seen = new Set<string>();
+  for (const source of a.sources) {
+    if (seen.has(source.key)) continue;
+    seen.add(source.key);
+    hits.push(source);
+  }
+  return hits;
 }
 const pages = (c: Citation) => c.pageStart === null ? null : c.pageEnd !== null && c.pageEnd !== c.pageStart ? tr("pp. {from}–{to}", { from: c.pageStart, to: c.pageEnd }) : tr("p. {page}", { page: c.pageStart });
 
@@ -282,6 +305,10 @@ export function Answer({ a, viewing, onView, onEdit }: { a: AskAnswer; viewing: 
       </div>}
       {a.unresolved.length > 0 && <div className="sk-unresolved"><strong>{tr("Not supported by a source")}</strong><ul>{a.unresolved.map(u => <li key={u.id}>{u.text}{u.reason && <small> — {u.reason}</small>}</li>)}</ul></div>}
       {a.missing.length > 0 && <div className="sk-unresolved"><strong>{tr("Information needed")}</strong><ul>{a.missing.map(m => <li key={m}>{m}</li>)}</ul></div>}
+      {a.exceptions.length > 0 && <div className="sk-unresolved"><strong>{tr("Exceptions to read")}</strong><ul>{a.exceptions.map(exception => {
+        const source = hits.find(hit => hit.key === exception.key);
+        return <li key={exception.key}>{source ? <button type="button" className="fa-source-link" onClick={() => view(source)}>{exception.sectionId}</button> : exception.sectionId} — {exception.note}</li>;
+      })}</ul></div>}
     </div>
     <h2 className="sk-sources-title">{tr("Supporting sources")} <span>{hits.length}</span></h2>
     <ol className="sk-sources" ref={list}>
@@ -304,6 +331,7 @@ function SourceCard({ c, selected, onView }: { c: Citation; selected: boolean; o
     <dl className="sk-facts">
       {c.publisher && <div><dt>{tr("Publisher")}</dt><dd>{c.publisher}</dd></div>}
       {c.edition && <div><dt>{tr("Edition")}</dt><dd>{c.edition}</dd></div>}
+      {typeof c.scope?.jurisdiction === "string" && <div><dt>{tr("Jurisdiction")}</dt><dd>{c.scope.jurisdiction}</dd></div>}
       {section && <div className="is-wide"><dt>{tr("Section")}</dt><dd>{section}</dd></div>}
       {p && <div><dt>{tr("Page")}</dt><dd>{p}</dd></div>}
     </dl>
@@ -316,6 +344,10 @@ function SourceCard({ c, selected, onView }: { c: Citation; selected: boolean; o
 }
 
 function NoSource({ a, onEdit }: { a: AskAnswer; onEdit?: () => void }) {
+  if (a.code === "empty_library") return <section className="sk-empty" aria-label={tr("Your reference library is empty")}>
+    <h2>{tr("Your reference library is empty")}</h2>
+    <p>{tr("Add reviewed source documents before searching. Sample documents are not part of this library.")}</p>
+  </section>;
   return <section className="sk-empty" aria-label={tr("No supporting source found")}>
     <h2>{tr("No supporting source found")}</h2>
     <p>{tr("Sprink searched the reference library but could not find enough supporting material to answer reliably. Sprink does not guess without a source.")}</p>
@@ -331,12 +363,14 @@ function NoSource({ a, onEdit }: { a: AskAnswer; onEdit?: () => void }) {
 
 function OriginalPage({ citation: c, onBack }: { citation: Citation; onBack: () => void }) {
   const image = useAuthedUrl(c.page?.image);
+  const localOriginal = c.original && /^\/api\/(sources\/[^/]+\/file|uploads\/[^/]+\/original)$/.test(c.original) ? c.original : null;
+  const file = useAuthedUrl(localOriginal);
   const [context, setContext] = useState(false);
   const [full, setFull] = useState(false);
   const [zoom, setZoom] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { if (full) dialog.current?.showModal?.(); else dialog.current?.close?.(); }, [full]);
-  const original = c.original && /^https?:/.test(c.original) ? `${c.original.split("#")[0]}${c.pageStart ? `#page=${c.pageStart}` : ""}` : null;
+  const original = c.original && /^https?:\/\//.test(c.original) ? `${c.original.split("#")[0]}${c.pageStart ? `#page=${c.pageStart}` : ""}` : file.url;
   const crop = c.excerpt && (context ? c.excerpt.contextBox : c.excerpt.box);
   const ratio = crop && c.excerpt ? (crop.w * c.excerpt.pageWidth) / (crop.h * c.excerpt.pageHeight) : 1;
   const displayWidth = crop && c.excerpt ? Math.max((crop.w * c.excerpt.pageWidth) / (c.excerpt.box.h * c.excerpt.pageHeight) * 340, Math.min(620, crop.w * c.excerpt.pageWidth)) : 0;
@@ -364,6 +398,7 @@ function OriginalPage({ citation: c, onBack }: { citation: Citation; onBack: () 
       <span>{c.page && !image.error ? c.excerpt ? tr("Cropped from the original · wording and diagrams unchanged") : tr("Full page shown · no reviewed excerpt available") : c.typeLabel}</span>
       {original && <a href={original} target="_blank" rel="noreferrer">{tr("Open original")} <Icon name="external" size={14} /></a>}
     </footer>
+    {file.error && <p className="sk-original-msg">{tr("Could not load the original source.")}</p>}
     <details className="sk-text" open={!c.page || image.error || undefined}>
       <summary>{tr("Indexed text")}</summary>
       {c.flags.map(f => <p className="sk-flag" key={f.flag}><Icon name="alert" size={14} />{f.label}</p>)}

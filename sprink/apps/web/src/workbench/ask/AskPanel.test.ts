@@ -3,7 +3,7 @@ import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../locale.js";
-import { AskPanel, appendTranscript } from "./AskPanel.js";
+import { AskPanel, appendTranscript, sourceHits } from "./AskPanel.js";
 import type { AskAnswer, Citation } from "./askApi.js";
 import type { RecognitionLike } from "./speech.js";
 
@@ -267,5 +267,17 @@ describe("transcript insertion", () => {
     expect(appendTranscript("", "riser")).toBe("riser");
     expect(appendTranscript("What about  ", " the riser ")).toBe("What about the riser");
     expect(appendTranscript("Keep me", "   ")).toBe("Keep me");
+  });
+});
+
+
+describe("distinct source clauses", () => {
+  it("keeps exceptions on the same page and text-only clauses while removing repeated keys", () => {
+    const main = citation();
+    const exception = citation({ key: 'exception', sectionId: 'Exception', role: 'exception' });
+    const text = citation({ key: 'text', pageStart: null, pageEnd: null });
+    const secondText = citation({ key: 'text2', pageStart: null, pageEnd: null });
+    expect(sourceHits(answer({ sources: [main, exception, text, secondText, main] })).map(s => s.key))
+      .toEqual(['k1', 'exception', 'text', 'text2']);
   });
 });

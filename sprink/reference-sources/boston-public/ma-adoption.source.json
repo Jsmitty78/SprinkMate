@@ -1,0 +1,26 @@
+{
+  "file": "ma-adoption.md",
+  "document": {
+    "id": "ma-527-adoption-2023",
+    "title": "Massachusetts fire-code adoption clause only \u2014 not the full code",
+    "publisher": "Massachusetts Board of Fire Prevention Regulations",
+    "type": "local_amendment",
+    "edition": "2021 amendments effective 2023-05-12",
+    "scope": {
+      "standard": "nfpa1",
+      "jurisdiction": "massachusetts",
+      "amendsEdition": "2021"
+    },
+    "url": "https://www.mass.gov/doc/massachusetts-527-cmr-100-2021-edition-effective-may-12-2023/download",
+    "demonstration": false,
+    "authorization": {
+      "basis": "Publicly promulgated Massachusetts regulation, 527 CMR 1.04. This package contains only the state adoption clause, not incorporated NFPA copyrighted text. Source checked 2026-10-07.",
+      "storeAndIndex": true,
+      "useWithAi": true,
+      "display": "full"
+    },
+    "extraction": {
+      "method": "text"
+    }
+  }
+}

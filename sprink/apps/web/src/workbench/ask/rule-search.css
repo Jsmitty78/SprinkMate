@@ -195,3 +195,40 @@
   .sk-dialog-body { padding: 4px; }
   .sk-dialog-body img { max-height: calc(100dvh - 90px); }
 }
+
+.fa-result-summary h3 { margin: 0 0 8px; font-size: 17px; overflow-wrap: anywhere; }
+.fa-result-summary p { margin: 0; color: #526257; font-size: 13px; line-height: 1.6; }
+.fa-source-link { border: 0; padding: 0; background: transparent; color: #315d40; text-decoration: underline; cursor: pointer; text-align: left; font: inherit; }
+.fa-source-flag { margin: 12px 16px; font-size: 13px; }
+.fa-source-library { border-top: 1px solid #d7ded5; padding-top: 20px; }
+.fa-source-library > header { display: flex; gap: 12px; justify-content: space-between; align-items: center; }
+.fa-source-library h3 { margin: 0; font-size: 15px; }
+.fa-source-library h3 span { color: #68786d; font-weight: 400; }
+.fa-source-library .fa-field { margin: 16px 0; }
+.fa-library-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.fa-library-list > li { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; background: white; border: 1px solid #e0e6df; border-radius: 10px; padding: 16px; }
+.fa-library-list > li > div { min-width: 0; overflow-wrap: anywhere; }
+.fa-library-list strong { font-size: 14px; }
+.fa-library-list p, .fa-reference-reader header p { font-size: 12px; margin: 6px 0; color: #526257; }
+.fa-library-list small { display: block; margin-top: 7px; color: #64756b; font-size: 11px; }
+.fa-library-list .fa-btn { flex-shrink: 0; }
+.fa-library-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.fa-reference-reader { margin-top: 16px; padding: 20px; background: white; border: 1px solid #ccd8cd; border-radius: 10px; }
+.fa-reference-reader header { margin-bottom: 16px; }
+.fa-reference-reader a { color: #315d40; font-size: 13px; }
+.fa-reference-section { border-top: 1px solid #e0e6df; padding: 12px 0; }
+.fa-reference-section summary { cursor: pointer; font-size: 13px; line-height: 1.6; }
+.fa-reference-section blockquote, .fa-pdf-text blockquote { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .fa-library-list > li { flex-direction: column; gap: 10px; }
+  .fa-reference-reader { padding: 14px; }
+}
+
+.sk-boston-coverage { margin-top: 28px; padding: 18px; border: 1px solid var(--sk-line, #d7ded5); border-radius: 12px; font-size: 13px; line-height: 1.6; }
+.sk-boston-coverage summary { cursor: pointer; font-weight: 600; }
+.sk-boston-coverage ul { list-style: none; padding: 0; display: grid; gap: 18px; }
+.sk-boston-coverage li { display: grid; gap: 3px; }
+.sk-boston-coverage a { color: #315d40; }
+.sk-boston-coverage small { color: #526257; }
+.sk-reference-filter { display: grid; gap: 8px; margin: 16px 0; font-size: 13px; }
+.sk-reference-filter select { width: 100%; min-width: 0; padding: 12px; background: white; border: 1px solid #d7ded5; border-radius: 8px; font: inherit; }

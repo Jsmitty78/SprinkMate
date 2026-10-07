@@ -1,10 +1,14 @@
-# Sprink
+# SprinkMate
 
 **Turn drawings and site changes into actionable work packages.**
 
 Sprink helps fire sprinkler fitters move from a field question or drawing to a reviewable next step: find the original reference, prepare materials and assembly information, or compare options when site conditions change.
 
-Built for Innovation Cup 2026.
+Continues the [Innovation Cup 2026 Sprink project](https://github.com/my-name-is-yu/InnovationCup), preserving its app and Git history.
+
+**Boston pilot:** searchable source passages, reference reading, mobile voice entry and a commercial/residential source register. Full NFPA books are not bundled. The included public source is only the Massachusetts fire-code adoption clause; it contains no sprinkler installation requirements. Search needs a JEV key and reviewed, authorized source packages. No measured field-accuracy or complete-code coverage claim is made.
+
+[Start SprinkMate](sprink/docs/boston-setup.md) · [Boston source register](sprink/reference-catalog/boston-ma.json) · [Local development](sprink/README.md)
 
 **[Watch the demo video](https://drive.google.com/file/d/19NsJLkqckJ90Wz9RkVEdC_G9nGbWRCAZ/view?usp=sharing)**
 

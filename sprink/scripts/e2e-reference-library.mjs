@@ -1,0 +1,47 @@
+/** Deterministic UI check against reference-e2e-server.ts; no real code claims. */
+import { chromium, expect } from '@playwright/test';
+import { mkdir } from 'node:fs/promises';
+const browser = await chromium.launch(process.env.E2E_CHROME_PATH ? { executablePath: process.env.E2E_CHROME_PATH } : {});
+const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+const errors = [];
+page.on('pageerror', error => errors.push(error.message));
+try {
+  await page.goto('http://127.0.0.1:4337/codes');
+  const password = page.locator('input[type=password]');
+  await password.fill('sprinkmate-browser-test-only');
+  await password.press('Enter');
+  const english = page.getByRole('button', { name: 'English', exact: true });
+  if (await english.count()) await english.click();
+  await expect(page.getByRole('heading', { name: 'Ask a sprinkler code question' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Read reference', exact: true })).toHaveCount(2);
+  await page.getByRole('button', { name: 'Read reference', exact: true }).first().click();
+  await page.locator('.fa-reference-section summary').first().click();
+  await expect(page.locator('.fa-reference-reader blockquote').first()).toBeVisible();
+  await page.getByLabel('Find a reference').fill('edition B');
+  await expect(page.locator('.fa-library-list > li')).toHaveCount(1);
+  await page.getByLabel('Find a reference').fill('');
+  await page.getByLabel('Search within').selectOption('fixture-a');
+  await page.getByLabel('Your question', { exact: true }).fill('fixture clause');
+  const result = page.waitForResponse(r => r.url().endsWith('/api/rules/search'));
+  await page.locator('button[type=submit]').click();
+  const answer = await (await result).json();
+  if (answer.sources.some(s => s.docId !== 'fixture-a')) throw Error('Selected reference leaked');
+  await expect(page.locator('.sk-sources > li')).toHaveCount(2);
+  await expect(page.getByRole('link', { name: 'Open original', exact: true })).toHaveAttribute('href', /^blob:/);
+  await expect(page.getByRole('heading', { name: 'Available references (2)' })).toBeVisible();
+  await page.getByLabel('Your question', { exact: true }).fill('unconfigured');
+  await page.locator('button[type=submit]').click();
+  await expect(page.getByText('Search is not connected yet.', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again', exact: true })).toHaveCount(0);
+  await expect(page.locator('.fa-reference-reader')).toBeVisible();
+  await page.getByLabel('Your question', { exact: true }).fill('absent');
+  await page.locator('button[type=submit]').click();
+  await expect(page.getByRole('heading', { name: 'No supporting source found' })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByText('Boston source coverage · commercial & residential', { exact: true }).click();
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw Error('Mobile layout overflows');
+  await mkdir('e2e-out/reference-library', { recursive: true });
+  await page.screenshot({ path: 'e2e-out/reference-library/mobile.png', fullPage: true });
+  if (errors.length) throw Error(errors.join('\n'));
+  console.log('PASS: reference reader, filtering, edition selection, same-page clauses, authenticated original, search failure, no-source result, mobile layout. Test fixtures and stub retrieval only.');
+} finally { await browser.close(); }

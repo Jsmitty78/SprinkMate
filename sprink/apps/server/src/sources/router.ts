@@ -23,7 +23,7 @@ export function sourceRouter(store: SourceStore, loadPackage?: (id: string) => W
   app.get('/sources', c => c.json({ documents: store.documents().filter(isSharedReference).map(publicDocument) }));
   app.post('/rules/search', async c => {
     const body = await c.req.json();
-    return c.json(await searchRules(store, body?.question, search));
+    return c.json(await searchRules(store, body?.question, search, body?.documentIds));
   });
   app.get('/sources/:docId/pages/:page', async c => {
     const bytes = await sourcePdfPage(store, dataDir, c.req.param('docId'), c.req.param('page'));

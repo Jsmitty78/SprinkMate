@@ -6,6 +6,7 @@ export interface ContextFact { name: string; label: string; value: string | numb
 export interface FollowUp { id: string; question: string; kind: "choice" | "measurement"; field: string; options?: Array<{ value: string; label: string }>; unit?: string }
 export interface Citation {
   key: string; docId: string; docTitle: string; publisher: string; type: string; typeLabel: string; edition: string;
+  scope?: Record<string, unknown>;
   sectionId: string; heading: string; kind: string; label: string; role: string; via?: string;
   pageStart: number | null; pageEnd: number | null; demonstration: boolean;
   flags: Array<{ flag: string; label: string }>;
@@ -37,6 +38,8 @@ export interface AskAnswer {
   };
   status: "answered" | "needs_input" | "no_source";
   summary: string;
+  code?: "supported_sources" | "no_supporting_source" | "empty_library";
+  demonstration?: boolean;
   explanation: Claim[]; unresolved: Claim[]; exceptions: ExceptionStatus[];
   missing: string[]; followUps: FollowUp[]; sources: Citation[];
   conflicts: Array<{ topic: string; resolution: string; items: Array<{ key: string; position: string; label: string }> }>;
@@ -74,8 +77,9 @@ export async function authedBlobUrl(href: string): Promise<string> {
 }
 
 export const askApi = {
-  search: (question: string, signal?: AbortSignal) => call<AskAnswer>("/api/rules/search", { method: "POST", body: JSON.stringify({ question }), signal }),
-  documents: () => call<{ documents: SourceDocument[] }>("/api/sources"),
+  search: (question: string, signal?: AbortSignal, documentIds?: string[]) => call<AskAnswer>("/api/rules/search", { method: "POST", body: JSON.stringify({ question, documentIds }), signal }),
+  documents: (signal?: AbortSignal) => call<{ documents: SourceDocument[] }>("/api/sources", { signal }),
+  document: (id: string, signal?: AbortSignal) => call<{ document: SourceDocument; sections: SectionView[] }>(`/api/sources/${encodeURIComponent(id)}`, { signal }),
   passage: (link: string) => call<{ document: SourceDocument; target: string; sections: SectionView[] }>(link),
   async original(href: string): Promise<string> {
     const res = await fetch(href, { headers: { Authorization: `Bearer ${session.token()}` } });

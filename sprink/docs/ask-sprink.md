@@ -47,7 +47,7 @@ SPRINK_DATA_DIR=/absolute/path/to/persistent-data pnpm sources:import /absolute/
 
 Do not set `scope.projectId` for common references. Use `published_code` plus `scope.standard` for licensed codes; use `local_amendment` with jurisdiction, standard and amendsEdition for adopted amendments. Keep versions distinct. Display permissions and OCR/table flags are retained by citation views.
 
-The current local catalog has Spears FlameGuard FG-3-1223 and TYCO TFP171 (August 2026), retained with their original PDFs and provenance in the operator data directory. These are manufacturer instructions, not a full NFPA code collection. NFPA text must be obtained and imported separately before those queries can be answered. The repository does not distribute those local source files or populate a new database automatically.
+The Innovation Cup recording used Spears FlameGuard FG-3-1223 and TYCO TFP171 (August 2026), with their original PDFs and provenance retained in that demo operator’s data directory. Those documents are not present in a fresh SprinkMate checkout. These are manufacturer instructions, not a full NFPA code collection. NFPA text must be obtained and imported separately before those queries can be answered. The repository does not distribute those local source files or populate a new database automatically.
 
 ## Verification
 

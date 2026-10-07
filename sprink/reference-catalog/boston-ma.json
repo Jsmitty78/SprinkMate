@@ -1,0 +1,69 @@
+{
+  "jurisdiction": "boston-ma",
+  "title": "Boston, Massachusetts",
+  "checkedOn": "2026-10-07",
+  "purpose": "Source acquisition register. Metadata only, not a rules database or an applicability decision.",
+  "sources": [
+    {
+      "id": "nfpa13",
+      "title": "NFPA 13",
+      "category": "Commercial and other NFPA 13 systems",
+      "standard": "nfpa13",
+      "edition": null,
+      "status": "Confirm adopted edition; licensed text needed",
+      "url": "https://www.nfpa.org/codes-and-standards/nfpa-13-standard-development/13",
+      "note": "Do not substitute the newest published edition for the edition on the approved plans."
+    },
+    {
+      "id": "nfpa13r",
+      "title": "NFPA 13R",
+      "category": "Eligible residential occupancies",
+      "standard": "nfpa13r",
+      "edition": null,
+      "status": "Confirm applicability and adopted edition; licensed text needed",
+      "url": "https://www.nfpa.org/codes-and-standards/nfpa-13r-standard-development/13r",
+      "note": "Residential occupancy alone does not establish eligibility for NFPA 13R."
+    },
+    {
+      "id": "nfpa13d",
+      "title": "NFPA 13D",
+      "category": "Eligible one- and two-family dwellings and manufactured homes",
+      "standard": "nfpa13d",
+      "edition": null,
+      "status": "Confirm applicability and adopted edition; licensed text needed",
+      "url": "https://www.nfpa.org/codes-and-standards/nfpa-13d-standard-development/13d",
+      "note": "Keep Massachusetts residential amendments and the approved design basis alongside this standard."
+    },
+    {
+      "id": "ma780",
+      "title": "780 CMR \u2014 Massachusetts building code",
+      "category": "Base and residential volumes, with Massachusetts amendments",
+      "standard": "780cmr",
+      "edition": "10th",
+      "status": "Adoption verified; full-text coverage must be checked",
+      "url": "https://www.mass.gov/massachusetts-state-building-code-780-cmr",
+      "note": "The ninth/tenth edition concurrency period ended June 30, 2025. Existing permits and buildings need their own code-basis review.",
+      "evidence": "https://www.mass.gov/news/concurrency-period-for-9th-and-10th-edition-of-the-state-building-code-extended-until-june-30-2025"
+    },
+    {
+      "id": "ma527",
+      "title": "527 CMR 1.00 \u2014 Massachusetts fire code",
+      "category": "NFPA 1 (2021) with Massachusetts amendments",
+      "standard": "nfpa1",
+      "edition": "2021",
+      "status": "Adoption verified; base-code and amendment coverage must be checked",
+      "url": "https://www.mass.gov/info-details/massachusetts-fire-code",
+      "note": "The state page identifies amendments effective May 12, 2023. Verify later changes before each release."
+    },
+    {
+      "id": "boston",
+      "title": "Boston Fire Department requirements",
+      "category": "Local permits, review requirements and current guidance",
+      "standard": "boston-bfd",
+      "edition": null,
+      "status": "Current project requirements need review",
+      "url": "https://www.boston.gov/boston-permitting/install-or-replace/install-sprinkler-heads",
+      "note": "Track the specific current BFD document and revision; project drawings are not citywide rules."
+    }
+  ]
+}
