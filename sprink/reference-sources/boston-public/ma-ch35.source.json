@@ -1,0 +1,26 @@
+{
+  "file": "ma-ch35.md",
+  "document": {
+    "id": "ma-780-ch35-10th",
+    "title": "Massachusetts 10th edition: Chapter 35 amendments only",
+    "publisher": "Massachusetts Board of Building Regulations and Standards",
+    "type": "local_amendment",
+    "edition": "10th (2021 base code)",
+    "scope": {
+      "standard": "ibc",
+      "jurisdiction": "massachusetts",
+      "amendsEdition": "2021"
+    },
+    "url": "https://www.mass.gov/doc/10th-edition-chapter-35-referenced-standards/download",
+    "demonstration": false,
+    "authorization": {
+      "basis": "Publicly promulgated Massachusetts regulation, 780 CMR. State amendment text only; no full incorporated ICC or NFPA book. Mass.gov labels its PDF an unofficial copy; official copies are obtained from the Secretary of the Commonwealth. Selected pages visually checked 2026-10-07. Extraction and coverage notes are in docs/boston-source-findings.md.",
+      "storeAndIndex": true,
+      "useWithAi": true,
+      "display": "full"
+    },
+    "extraction": {
+      "method": "text"
+    }
+  }
+}

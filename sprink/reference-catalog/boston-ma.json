@@ -9,45 +9,61 @@
       "title": "NFPA 13",
       "category": "Commercial and other NFPA 13 systems",
       "standard": "nfpa13",
-      "edition": null,
-      "status": "Confirm adopted edition; licensed text needed",
-      "url": "https://www.nfpa.org/codes-and-standards/nfpa-13-standard-development/13",
-      "note": "Do not substitute the newest published edition for the edition on the approved plans."
+      "edition": "2019",
+      "status": "2019 listed by BFD; full standard text not loaded",
+      "url": "https://shop.iccsafe.org/nfpa-13-2019-standard-for-the-installation-of-sprinkler-systems-2019-edition.html",
+      "note": "BFD guide updated October 5, 2026 lists the 2019 edition. Confirm the job’s approved code basis and system eligibility. Do not substitute the newest published edition for the edition on the approved plans.",
+      "evidence": "https://docs.google.com/document/d/1zVLi3IfuHXyXI_22nHx2AbZAKab2ZmNKs3gRcqm8nXE/edit",
+      "corroboration": "https://shop.iccsafe.org/media/wysiwyg/material/3000S21-Sample.pdf"
     },
     {
       "id": "nfpa13r",
       "title": "NFPA 13R",
       "category": "Eligible residential occupancies",
       "standard": "nfpa13r",
-      "edition": null,
-      "status": "Confirm applicability and adopted edition; licensed text needed",
-      "url": "https://www.nfpa.org/codes-and-standards/nfpa-13r-standard-development/13r",
-      "note": "Residential occupancy alone does not establish eligibility for NFPA 13R."
+      "edition": "2019",
+      "status": "2019 listed by BFD; full standard text not loaded",
+      "url": "https://shop.iccsafe.org/nfpa-13r-standard-for-the-installation-of-sprinkler-systems-in-low-rise-residential-occupancies-2019-edition.html",
+      "note": "BFD guide updated October 5, 2026 lists the 2019 edition. Confirm the job’s approved code basis and system eligibility. Residential occupancy alone does not establish eligibility for NFPA 13R.",
+      "evidence": "https://docs.google.com/document/d/1zVLi3IfuHXyXI_22nHx2AbZAKab2ZmNKs3gRcqm8nXE/edit",
+      "corroboration": "https://shop.iccsafe.org/media/wysiwyg/material/3000S21-Sample.pdf"
     },
     {
       "id": "nfpa13d",
       "title": "NFPA 13D",
       "category": "Eligible one- and two-family dwellings and manufactured homes",
       "standard": "nfpa13d",
-      "edition": null,
-      "status": "Confirm applicability and adopted edition; licensed text needed",
-      "url": "https://www.nfpa.org/codes-and-standards/nfpa-13d-standard-development/13d",
-      "note": "Keep Massachusetts residential amendments and the approved design basis alongside this standard."
+      "edition": "2019",
+      "status": "2019 listed by BFD; full standard text not loaded",
+      "url": "https://shop.iccsafe.org/nfpa-13d-2019-standard-for-the-installation-of-sprinkler-systems-in-one-and-two-family-dwellings-and-manufactured-homes-2019-edition.html",
+      "note": "BFD guide updated October 5, 2026 lists the 2019 edition. Confirm the job’s approved code basis and system eligibility. Keep Massachusetts residential amendments and the approved design basis alongside this standard.",
+      "evidence": "https://docs.google.com/document/d/1zVLi3IfuHXyXI_22nHx2AbZAKab2ZmNKs3gRcqm8nXE/edit",
+      "corroboration": "https://shop.iccsafe.org/media/wysiwyg/material/3000S21-Sample.pdf"
     },
     {
       "id": "ma780",
-      "title": "780 CMR \u2014 Massachusetts building code",
+      "title": "780 CMR — Massachusetts building code",
       "category": "Base and residential volumes, with Massachusetts amendments",
-      "standard": "780cmr",
+      "standard": "ibc",
       "edition": "10th",
-      "status": "Adoption verified; full-text coverage must be checked",
+      "status": "Chapter 35 amendment text packaged; remaining base-code coverage incomplete",
       "url": "https://www.mass.gov/massachusetts-state-building-code-780-cmr",
       "note": "The ninth/tenth edition concurrency period ended June 30, 2025. Existing permits and buildings need their own code-basis review.",
       "evidence": "https://www.mass.gov/news/concurrency-period-for-9th-and-10th-edition-of-the-state-building-code-extended-until-june-30-2025"
     },
     {
+      "id": "ma780-residential",
+      "title": "Massachusetts residential sprinkler amendments",
+      "category": "780 CMR 51.00, Chapter 3: R313.1, R313.2 and printed 313.2.1",
+      "standard": "irc",
+      "edition": "10th",
+      "status": "Selected R313 clauses and exceptions packaged; full residential code not loaded",
+      "url": "https://www.mass.gov/doc/10th-edition-residential-chapter-3-building-planning/download",
+      "note": "Original pages 20–21. Chapter 44 states no Massachusetts amendments to its referenced-standard table."
+    },
+    {
       "id": "ma527",
-      "title": "527 CMR 1.00 \u2014 Massachusetts fire code",
+      "title": "527 CMR 1.00 — Massachusetts fire code",
       "category": "NFPA 1 (2021) with Massachusetts amendments",
       "standard": "nfpa1",
       "edition": "2021",
@@ -57,13 +73,109 @@
     },
     {
       "id": "boston",
-      "title": "Boston Fire Department requirements",
+      "title": "Boston Fire Department consolidated permit guide",
       "category": "Local permits, review requirements and current guidance",
       "standard": "boston-bfd",
-      "edition": null,
-      "status": "Current project requirements need review",
-      "url": "https://www.boston.gov/boston-permitting/install-or-replace/install-sprinkler-heads",
-      "note": "Track the specific current BFD document and revision; project drawings are not citywide rules."
+      "edition": "Updated 2026-10-05",
+      "status": "Current online guide located; reference link only in app",
+      "url": "https://docs.google.com/document/d/1zVLi3IfuHXyXI_22nHx2AbZAKab2ZmNKs3gRcqm8nXE/edit",
+      "note": "Covers adopted editions, suppression permits, impairments, standpipes and repairs. Recheck the live controlled document; downloaded copies can become outdated.",
+      "evidence": "https://content.boston.gov/departments/fire-prevention/fire-alarm-system-permitting"
+    },
+    {
+      "id": "nfpa14",
+      "title": "NFPA 14 (2019)",
+      "category": "Standpipes and hose systems",
+      "standard": "nfpa14",
+      "edition": "2019",
+      "status": "Edition listed by BFD; full standard text not loaded",
+      "url": "https://docs.google.com/document/d/1zVLi3IfuHXyXI_22nHx2AbZAKab2ZmNKs3gRcqm8nXE/edit",
+      "evidence": "https://docs.google.com/document/d/1zVLi3IfuHXyXI_22nHx2AbZAKab2ZmNKs3gRcqm8nXE/edit",
+      "note": "Edition evidence is in BFD’s October 5, 2026 guide. Confirm project applicability before using a requirement."
+    },
+    {
+      "id": "nfpa20",
+      "title": "NFPA 20 (2019)",
+      "category": "Fire pumps",
+      "standard": "nfpa20",
+      "edition": "2019",
+      "status": "Edition listed by BFD; full standard text not loaded",
+      "url": "https://docs.google.com/document/d/1zVLi3IfuHXyXI_22nHx2AbZAKab2ZmNKs3gRcqm8nXE/edit",
+      "evidence": "https://docs.google.com/document/d/1zVLi3IfuHXyXI_22nHx2AbZAKab2ZmNKs3gRcqm8nXE/edit",
+      "note": "Edition evidence is in BFD’s October 5, 2026 guide. Confirm project applicability before using a requirement."
+    },
+    {
+      "id": "nfpa24",
+      "title": "NFPA 24 (2019)",
+      "category": "Private fire service mains and appurtenances",
+      "standard": "nfpa24",
+      "edition": "2019",
+      "status": "Edition listed by BFD; full standard text not loaded",
+      "url": "https://docs.google.com/document/d/1zVLi3IfuHXyXI_22nHx2AbZAKab2ZmNKs3gRcqm8nXE/edit",
+      "evidence": "https://docs.google.com/document/d/1zVLi3IfuHXyXI_22nHx2AbZAKab2ZmNKs3gRcqm8nXE/edit",
+      "note": "Edition evidence is in BFD’s October 5, 2026 guide. Confirm project applicability before using a requirement."
+    },
+    {
+      "id": "nfpa25",
+      "title": "NFPA 25 (2020)",
+      "category": "Inspection, testing and maintenance",
+      "standard": "nfpa25",
+      "edition": "2020",
+      "status": "Edition listed by BFD; full standard text not loaded",
+      "url": "https://docs.google.com/document/d/1zVLi3IfuHXyXI_22nHx2AbZAKab2ZmNKs3gRcqm8nXE/edit",
+      "evidence": "https://docs.google.com/document/d/1zVLi3IfuHXyXI_22nHx2AbZAKab2ZmNKs3gRcqm8nXE/edit",
+      "note": "Edition evidence is in BFD’s October 5, 2026 guide. Confirm project applicability before using a requirement."
+    },
+    {
+      "id": "nfpa241",
+      "title": "NFPA 241 (2022)",
+      "category": "Construction, alteration and demolition fire protection",
+      "standard": "nfpa241",
+      "edition": "2022",
+      "status": "Edition listed by BFD; full standard text not loaded",
+      "url": "https://docs.google.com/document/d/1zVLi3IfuHXyXI_22nHx2AbZAKab2ZmNKs3gRcqm8nXE/edit",
+      "evidence": "https://docs.google.com/document/d/1zVLi3IfuHXyXI_22nHx2AbZAKab2ZmNKs3gRcqm8nXE/edit",
+      "note": "Edition evidence is in BFD’s October 5, 2026 guide. Confirm project applicability before using a requirement."
+    },
+    {
+      "id": "boston-preaction",
+      "title": "BFD preaction sprinkler permit checklist",
+      "category": "Boston source document",
+      "standard": "boston-preaction",
+      "edition": "2021 web posting; no printed revision date",
+      "status": "Original PDF located; link only in app",
+      "url": "https://www.boston.gov/sites/default/files/file/2021/07/Preaction%20Sprinkler%20Guidelines_tcm3-4038_new_2_tcm3-4038_edited_7_12_21_0.pdf",
+      "note": "Posted July 2021; no printed revision date. One-page permit checklist. Check the current consolidated BFD guide for later changes."
+    },
+    {
+      "id": "boston-service-repairs",
+      "title": "BFD fire protection service repairs",
+      "category": "Boston source document",
+      "standard": "boston-service-repairs",
+      "edition": "Undated; posted in 2025 URL",
+      "status": "Original PDF located; link only in app",
+      "url": "https://content.boston.gov/sites/default/files/file/2025/02/Boston%20Fire%20Department%20Fire%20Protection%20Service%20Repairs%20Guideline.pdf",
+      "note": "Scanned one-page guidance. Upload-path date is not a verified revision date. Full text is not indexed."
+    },
+    {
+      "id": "boston-impairments",
+      "title": "BFD alteration and impairment requirements",
+      "category": "Boston source document",
+      "standard": "boston-impairments",
+      "edition": "Revised 01/2015",
+      "status": "Original PDF located; link only in app",
+      "url": "https://documents.boston.gov/images_documents/BFD%20Fire%20Safety%20Requirements%20for%20Alteration%20and%20Impairment%20to%20Water%20Based%20Suppression%20Systems_tcm3-49400.pdf",
+      "note": "Revised January 2015. Legacy handout still linked by Boston. Old standard references require review against current requirements; not indexed."
+    },
+    {
+      "id": "boston-standpipes",
+      "title": "BFD air-pressurized standpipe requirements",
+      "category": "Boston source document",
+      "standard": "boston-standpipes",
+      "edition": "Version 08/2015",
+      "status": "Original PDF located; link only in app",
+      "url": "https://documents.boston.gov/images_documents/Requirements%20for%20Air%20Pressurized%20Standpipes_tcm3-51725.pdf",
+      "note": "Version August 2015. Legacy four-page handout references older code editions. Not indexed as current requirements."
     }
   ]
 }

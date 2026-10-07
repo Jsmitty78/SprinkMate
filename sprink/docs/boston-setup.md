@@ -1,6 +1,6 @@
 # SprinkMate: Boston pilot setup
 
-SprinkMate preserves the Innovation Cup drawing, materials, site-change and export workflows, and adds a Boston reference-library foundation. The public starter package contains only 527 CMR 1.04, the Massachusetts fire-code adoption clause. **The NFPA installation books and full state/local amendments are not loaded.**
+SprinkMate preserves the Innovation Cup drawing, materials, site-change and export workflows, and adds a Boston reference-library foundation. The public starter packages contain 527 CMR 1.04, the Massachusetts fire-code adoption clause; 10th-edition Chapter 35 amendments; and selected residential R313 sprinkler amendments. See the [online-source findings and coverage record](boston-source-findings.md). **The NFPA installation books and full state/local amendments are not loaded.**
 
 ## Start locally
 
@@ -25,7 +25,7 @@ The [source acquisition register](../reference-catalog/boston-ma.json) is separa
 
 - [Massachusetts building code, 780 CMR](https://www.mass.gov/massachusetts-state-building-code-780-cmr): base and residential volumes. The [state transition notice](https://www.mass.gov/news/concurrency-period-for-9th-and-10th-edition-of-the-state-building-code-extended-until-june-30-2025) says ninth-edition permit applications had to be filed by June 30, 2025. Review older permits separately.
 - [Massachusetts fire code, 527 CMR 1.00](https://www.mass.gov/info-details/massachusetts-fire-code): NFPA 1 (2021) with state amendments. The official page lists amendments effective May 12, 2023.
-- NFPA 13, NFPA 13R and NFPA 13D need **individually confirmed adopted editions and licensed text**. Do not pick the newest edition automatically. Verify the referenced-standard tables, approved plans and local authority's requirements. Residential work is not automatically eligible for 13R or 13D.
+- Boston’s consolidated BFD guide, updated October 5, 2026, lists **NFPA 13, NFPA 13R and NFPA 13D: 2019**. Their full licensed text is still needed. Do not pick the newest edition automatically. Verify the referenced-standard tables, approved plans and local authority's requirements. Residential work is not automatically eligible for 13R or 13D.
 - [Boston sprinkler permit guidance](https://www.boston.gov/boston-permitting/install-or-replace/install-sprinkler-heads), current BFD requirements, approved project documents and exact manufacturer model instructions need their own source records. An individual project's public drawings are not a citywide rule.
 
 Record the permit/application date, occupancy, new/existing work, adopted standard and edition, amendment revisions, and the approved design basis before using results on a job. Lookup shows evidence; it does not determine project applicability.

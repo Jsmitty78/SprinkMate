@@ -6,9 +6,9 @@ Sprink helps fire sprinkler fitters move from a field question or drawing to a r
 
 Continues the [Innovation Cup 2026 Sprink project](https://github.com/my-name-is-yu/InnovationCup), preserving its app and Git history.
 
-**Boston pilot:** searchable source passages, reference reading, mobile voice entry and a commercial/residential source register. Full NFPA books are not bundled. The included public source is only the Massachusetts fire-code adoption clause; it contains no sprinkler installation requirements. Search needs a JEV key and reviewed, authorized source packages. No measured field-accuracy or complete-code coverage claim is made.
+**Boston pilot:** searchable source passages, reference reading, mobile voice entry and a commercial/residential source register. Full NFPA books are not bundled. The public packages contain the Massachusetts fire-code adoption clause, 10th-edition Chapter 35 amendments and selected residential R313 sprinkler amendments. The source register also links current Boston guidance and specific NFPA editions; these packages are not complete code coverage. Search needs a JEV key and reviewed, authorized source packages. No measured field-accuracy or complete-code coverage claim is made.
 
-[Start SprinkMate](sprink/docs/boston-setup.md) · [Boston source register](sprink/reference-catalog/boston-ma.json) · [Local development](sprink/README.md)
+[Start SprinkMate](sprink/docs/boston-setup.md) · [Sources found online](sprink/docs/boston-source-findings.md) · [Boston source register](sprink/reference-catalog/boston-ma.json) · [Local development](sprink/README.md)
 
 **[Watch the demo video](https://drive.google.com/file/d/19NsJLkqckJ90Wz9RkVEdC_G9nGbWRCAZ/view?usp=sharing)**
 
