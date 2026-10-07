@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="960" viewBox="0 0 1200 960">
+<rect width="1200" height="960" fill="white"/>
+<g font-family="Arial" fill="black" font-size="26">
+<text x="40" y="45">SYNTHETIC SITE SKETCH — NOT FIELD MEASUREMENTS</text>
+<text x="40" y="90">All coordinates in mm. Origin: start of target pipe.</text>
+<text x="40" y="130">X along pipe; Y left; Z up from pipe centerline.</text>
+<rect x="90" y="190" width="1000" height="270" fill="none" stroke="black" stroke-width="2"/>
+<path d="M140 325H1040" fill="none" stroke="red" stroke-width="8"/>
+<rect x="460" y="260" width="180" height="120" fill="#aaa" stroke="black" stroke-width="2"/>
+<text x="475" y="305">DUCT</text><text x="130" y="430">Start</text><text x="970" y="430">End</text>
+<text x="40" y="510">duct.min.x = 1200 mm; duct.max.x = 1800 mm</text>
+<text x="40" y="560">duct.min.y = -250 mm; duct.max.y = 250 mm</text>
+<text x="40" y="610">duct.min.z = -300 mm; duct.max.z = 300 mm</text>
+<text x="40" y="660">workEnvelope.min.x = -150 mm; workEnvelope.max.x = 3200 mm</text>
+<text x="40" y="710">workEnvelope.min.y = -1400 mm; workEnvelope.max.y = 1200 mm</text>
+<text x="40" y="760">workEnvelope.min.z = -200 mm; workEnvelope.max.z = 200 mm</text>
+<text x="40" y="810">requiredPipeClearance = 100 mm</text>
+<text x="40" y="860">fittingEnvelopeRadius = 100 mm (test envelope)</text>
+<text x="40" y="910">assemblyEnvelopeRadius = 150 mm (test envelope)</text>
+</g></svg>
