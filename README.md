@@ -1,14 +1,30 @@
 # SprinkMate
 
-**Turn drawings and site changes into actionable work packages.**
+**Sprinkler reference search and field-work tools for Boston.**
 
-Sprink helps fire sprinkler fitters move from a field question or drawing to a reviewable next step: find the original reference, prepare materials and assembly information, or compare options when site conditions change.
+SprinkMate is a working prototype for fire sprinkler fitters: read the original reference, check its edition and page, prepare work from drawings, and review changes found on site. Development is focused on commercial and residential work in Boston, Massachusetts.
 
-Continues the [Innovation Cup 2026 Sprink project](https://github.com/my-name-is-yu/InnovationCup), preserving its app and Git history.
+Built on the [Innovation Cup 2026 Sprink project](https://github.com/my-name-is-yu/InnovationCup), with its app and Git history preserved. The Boston work adds a reference-library interface, document-specific search, reviewed state source packages and a source register.
 
-**Boston pilot:** searchable source passages, reference reading, mobile voice entry and a commercial/residential source register. Full NFPA books are not bundled. The public packages contain the Massachusetts fire-code adoption clause, 10th-edition Chapter 35 amendments and selected residential R313 sprinkler amendments. The source register also links current Boston guidance and specific NFPA editions; these packages are not complete code coverage. Search needs a JEV key and reviewed, authorized source packages. No measured field-accuracy or complete-code coverage claim is made.
+[**Project progress and evidence**](PROGRESS.md) · [Run locally](sprink/docs/boston-setup.md) · [Source research](sprink/docs/boston-source-findings.md) · [Development setup](sprink/README.md)
 
-[Start SprinkMate](sprink/docs/boston-setup.md) · [Sources found online](sprink/docs/boston-source-findings.md) · [Boston source register](sprink/reference-catalog/boston-ma.json) · [Local development](sprink/README.md)
+## Progress at a glance
+
+Progress report updated **November 13, 2026**. Implementation and source-research milestones below were committed on October 7; source dates remain explicit in the register.
+
+| Area | Delivered | Evidence |
+| --- | --- | --- |
+| Reference library | Browse and filter sources; read clauses, exceptions, editions and page references; restrict a search to selected documents. | [Boston library commit](https://github.com/Jsmitty78/SprinkMate/commit/a32ded748227c2cba7aa10d762abdf878560f4fa) |
+| Reviewed source packages | **3 packages, 8 indexed sections**: the fire-code adoption clause, Chapter 35 amendments and residential R313 sprinkler amendments. | [Importable packages](sprink/reference-sources/boston-public) |
+| Boston research | **16 reference entries**; **9 government PDFs totaling 243 pages** acquired locally, plus a BFD guide snapshot. | [Source register](sprink/reference-catalog/boston-ma.json) · [Download manifest](sprink/reference-catalog/boston-downloads-2026-10-07.json) |
+| Import reliability | Folder imports, validation before import, immutable document IDs and rollback of an invalid batch. | [Importer](sprink/scripts/import-sources.ts) · [Import tests](sprink/apps/server/test/source-import-cli.test.ts) |
+| Software verification | Foundation report records **340 passing tests**; typecheck, tests and build also passed for the source-expansion commit. | [Verification record](sprink/docs/sprinkmate-verification.md) · [CI run](https://github.com/Jsmitty78/SprinkMate/actions/runs/37578338118) |
+
+The reference library works locally without an AI key. Natural-language retrieval needs a JEV key and authorized source content. Full NFPA books are not loaded, source coverage is partial, and field accuracy has not yet been established. Downloaded pages and registered links are counted separately from imported text.
+
+## See the workflows
+
+The demo and recordings below show the inherited Innovation Cup workflows; the [progress report](PROGRESS.md) identifies the Boston additions and their commits.
 
 **[Watch the demo video](https://drive.google.com/file/d/19NsJLkqckJ90Wz9RkVEdC_G9nGbWRCAZ/view?usp=sharing)**
 

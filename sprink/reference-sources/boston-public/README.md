@@ -1,8 +1,14 @@
-# Public Boston-area starter source
+# Public Boston-area starter sources
 
-One exact state adoption clause from page 1 of the [Massachusetts amendments effective May 12, 2023](https://www.mass.gov/doc/massachusetts-527-cmr-100-2021-edition-effective-may-12-2023/download), checked against the [current state fire-code page](https://www.mass.gov/info-details/massachusetts-fire-code) on 2026-10-07.
+This folder contains **three reviewed Massachusetts state-text packages**, yielding **eight indexed sections**. It does not contain the full Massachusetts codes or the incorporated NFPA/ICC books.
 
-This is **one clause**, not the full amendments, NFPA 1, NFPA 13, 13R or 13D. It establishes the fire-code reference and cannot answer installation questions. No model code text has been copied. The state's online PDF identifies itself as an unofficial copy. Keep that provenance when using it.
+| Package | Included text | Original PDF pages | Indexed sections |
+| --- | --- | --- | ---: |
+| [Fire-code adoption](ma-adoption.source.json) | 527 CMR 1.04 adoption clause only. | 1 | 1 |
+| [Referenced-standard amendments](ma-ch35.source.json) | Massachusetts 10th-edition Chapter 35 amendment sheet. | 1 | 1 |
+| [Residential sprinkler amendments](ma-residential-r313.source.json) | R313.1, R313.2 and the source's printed 313.2.1, with three exceptions and the occupancy note. | 20–21 | 6 |
+
+Source review was performed on October 7, 2026; [review and extraction notes](../../docs/boston-source-findings.md) record the exact coverage and provenance. The state PDFs identify themselves as unofficial copies and direct readers to the Secretary of the Commonwealth for official copies. No full incorporated model-code or NFPA book is bundled.
 
 From `sprink`:
 
@@ -11,4 +17,6 @@ pnpm sources:import reference-sources/boston-public --check
 pnpm sources:import reference-sources/boston-public
 ```
 
-The source ID is immutable: use a new ID for a revised edition. Do not re-label older text as a newer edition.
+The first command validates all packages in temporary storage. The second imports the batch into the configured library. Source IDs are immutable: use a new ID for a revised edition, and never re-label older text as a newer edition.
+
+On November 13, 2026, validation-only import passed for all three packages. This checks package structure and import behavior, not complete coverage, current legal applicability or retrieval accuracy.
