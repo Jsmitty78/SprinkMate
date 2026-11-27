@@ -1,5 +1,19 @@
 # SprinkMate
 
+### 🏆 2nd Place · $10,000 team Special Prize
+
+**Recruit Holdings / Indeed Innovation Cup · San Francisco · September 25–27, 2026**
+
+**Jake Smith & Yu Yoshimuta — Team KumoPath**
+
+Yu and I built Sprink during a 48-hour sprint and won a **$10,000 Special Prize as a team**. We continued working on the product after the competition, building on what we learned from the fitters, our first paying crew and the feedback we received at the event.
+
+<img src="docs/media/story/team-special-prize-san-francisco.jpg" alt="Jake Smith and Yu Yoshimuta with the judges at the Innovation Cup award presentation, holding the $10,000 Special Award" width="800">
+
+*Yu and me at the award presentation in San Francisco, after our 48-hour build.*
+
+---
+
 **Sprinkler reference search and field-work tools for Boston.**
 
 SprinkMate is a working prototype for fire sprinkler fitters: read the original reference, check its edition and page, prepare work from drawings, and review changes found on site. Development is focused on commercial and residential work in Boston, Massachusetts.

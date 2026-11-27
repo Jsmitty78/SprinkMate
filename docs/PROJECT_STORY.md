@@ -1,5 +1,19 @@
 # Building Sprink: the people behind the project
 
+### 🏆 2nd Place · $10,000 team Special Prize
+
+**Recruit Holdings / Indeed Innovation Cup · San Francisco · September 25–27, 2026**
+
+**Jake Smith & Yu Yoshimuta — Team KumoPath**
+
+Yu and I built Sprink during a 48-hour sprint and won a **$10,000 Special Prize as a team**. We continued working on the product after the competition, building on what we learned from the fitters, our first paying crew and the feedback we received at the event.
+
+<img src="media/story/team-special-prize-san-francisco.jpg" alt="Jake Smith and Yu Yoshimuta with the judges at the Innovation Cup award presentation, holding the $10,000 Special Award" width="800">
+
+*Yu and me at the award presentation in San Francisco, after our 48-hour build.*
+
+---
+
 I worked with Yu Yoshimuta on Sprink for the **Recruit Holdings Innovation Cup 2026**, under our team name **KumoPath**. I was a second-year student at Ritsumeikan University in Osaka, and Yu was a second-year student at Keio University in Tokyo. We were a team from Japan working on a tool for the people installing fire-sprinkler systems.
 
 The idea was to help fitters spend less time searching for information and more time getting their work done. To understand what that should look like, we started by talking to people doing the work.
