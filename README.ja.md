@@ -51,7 +51,7 @@ SprinkMateでは、その開発をボストンの仕事に向けて続けてい�
 
 | 項目 | 成果 | 根拠 |
 |---|---|---|
-| 参照ライブラリ | 閲覧・絞り込み、条文・例外・版・ページの確認、選択文書内の検索。 | [ライブラリのコミット](https://github.com/Jsmitty78/SprinkMate/commit/a32ded748227c2cba7aa10d762abdf878560f4fa) |
+| 参照ライブラリ | 閲覧・絞り込み、条文・例外・版・ページの確認、選択文書内の検索。 | [ライブラリのコミット](https://github.com/Jsmitty78/SprinkMate/commit/9d442e1833e45ffa59af464dfdaf4c824102df7b) |
 | 確認済み資料 | **3パッケージ・8節**。消防規定の採用条項、第35章の修正、住宅R313のスプリンクラー修正。 | [取り込み用資料](sprink/reference-sources/boston-public) |
 | ボストンの調査 | **参照先16件、政府PDF9件・合計243ページ**をローカルに収集。BFDガイドの記録も保存。 | [資料台帳](sprink/reference-catalog/boston-ma.json) · [取得記録](sprink/reference-catalog/boston-downloads-2026-10-07.json) |
 | 取り込みの信頼性 | フォルダー入力、事前検証、変更しない文書ID、不正な一括入力のロールバック。 | [取り込み処理](sprink/scripts/import-sources.ts) · [テスト](sprink/apps/server/test/source-import-cli.test.ts) |

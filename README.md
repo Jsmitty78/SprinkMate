@@ -53,7 +53,7 @@ Progress report updated **November 13, 2026**. Implementation and source-researc
 
 | Area | Delivered | Evidence |
 | --- | --- | --- |
-| Reference library | Browse and filter sources; read clauses, exceptions, editions and page references; restrict a search to selected documents. | [Boston library commit](https://github.com/Jsmitty78/SprinkMate/commit/a32ded748227c2cba7aa10d762abdf878560f4fa) |
+| Reference library | Browse and filter sources; read clauses, exceptions, editions and page references; restrict a search to selected documents. | [Boston library commit](https://github.com/Jsmitty78/SprinkMate/commit/9d442e1833e45ffa59af464dfdaf4c824102df7b) |
 | Reviewed source packages | **3 packages, 8 indexed sections**: the fire-code adoption clause, Chapter 35 amendments and residential R313 sprinkler amendments. | [Importable packages](sprink/reference-sources/boston-public) |
 | Boston research | **16 reference entries**; **9 government PDFs totaling 243 pages** acquired locally, plus a BFD guide snapshot. | [Source register](sprink/reference-catalog/boston-ma.json) · [Download manifest](sprink/reference-catalog/boston-downloads-2026-10-07.json) |
 | Import reliability | Folder imports, validation before import, immutable document IDs and rollback of an invalid batch. | [Importer](sprink/scripts/import-sources.ts) · [Import tests](sprink/apps/server/test/source-import-cli.test.ts) |
