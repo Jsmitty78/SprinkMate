@@ -25,7 +25,7 @@ I built Sprink with **Yu Yoshimuta** for the **Recruit Holdings Innovation Cup 2
 
 Those conversations shaped three parts of the product: find the original source, prepare the work from a confirmed drawing, and review a change when something on site gets in the way. We wanted the fitter to be able to see the source, understand the checks and decide what to do next.
 
-Our competition deck also recorded the **first paying crew: one customer purchasing three $20 monthly subscriptions, for $60 in the first month**. After a Sunday-morning Zoom test, the team received feedback that the tool had helped during a job later that day. It was an encouraging first result, with repeat use and time savings still to measure. These are results from the competition pitch, not a claim about current subscriptions.
+During the competition, we reached our **first paying crew: one customer purchasing three $20 monthly subscriptions, for $60 in the first month**. We tested Sprink together over Zoom on a Sunday morning. Later that day, we heard back that it had helped him during a job. That gave us an encouraging first result to follow up on, with repeat use and time savings still to measure. These were our results when we gave the pitch, rather than an update on current subscriptions.
 
 SprinkMate continues that work with a focus on Boston. The original workflows are preserved below, alongside the reference-library and source-research work added afterwards.
 

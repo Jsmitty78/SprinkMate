@@ -70,13 +70,13 @@ We wanted someone reviewing the result to be able to see what was checked and wh
 
 ## Our first paying crew
 
-One of the milestones in our competition pitch was a Sunday-morning Zoom product test with an experienced Boston sprinkler fitter. The deck records more than 27 years of trade experience and a purchase of **three monthly subscriptions at $20 each: $60 for the first month**, covering him and two members of his crew.
+We tested Sprink over Zoom on a Sunday morning with a Boston sprinkler fitter who had more than 27 years of experience in the trade. He bought **three monthly subscriptions at $20 each: $60 for the first month**, for himself and two members of his crew. That became our first paying crew, and we included it in our competition pitch.
 
-Later that Sunday, the team received feedback that Sprink had helped him several times on a job. That gave us a concrete first example of someone paying for the product and trying it during their work. It was **one customer buying three user subscriptions**, rather than three separate customers.
+Later that Sunday, we heard back that Sprink had helped him several times on a job. We now had someone who had paid for the product and was trying it during his work, which gave us something concrete to follow up on. It was **one customer buying three user subscriptions**, rather than three separate customers.
 
-That is the early result recorded in the pitch deck. It is not a current subscriber count or a measured time-saving result. We still needed to understand how often the crew returned to it, which questions it handled well and where it needed improvement.
+Those were our early results when we gave the pitch, rather than an update on how many subscribers we have now. We had not measured time savings yet. We still needed to understand how often the crew returned to it, which questions it handled well and where it needed improvement.
 
-The deck also recorded an invitation to demonstrate the product at the next Local 550 union meeting in Boston. That was a planned next step at the time of the pitch; this story does not imply the demonstration later took place.
+We also received an invitation to demonstrate Sprink at the next Local 550 union meeting in Boston. When we gave the competition pitch, that was one of the next steps we were planning. I am keeping it here as an invitation, rather than listing it as a demonstration we had already completed.
 
 ## What we still needed to learn
 
@@ -84,7 +84,7 @@ The pitch included a payback example to explain the subscription price. Using a 
 
 Those were calculations to test, not savings we had measured. The model counts one worker’s time and excludes onboarding and training costs. Positive feedback from a Sunday job could not tell us whether the same results would hold across different crews and tasks.
 
-Our next steps in the deck were to measure field use, improve stock lists and material exports, and explore shared crew jobs and team billing. Company plans, approval history and a possible electrician pilot came after validation. The larger market figures in the appendix were planning estimates and targets, not customers we already had.
+At that point, we wanted to measure field use, improve stock lists and material exports, and explore shared crew jobs and team billing. Company plans, approval history and a possible electrician pilot came after validation. The larger market figures in the appendix were planning estimates and targets, not customers we already had.
 
 ## Continuing the work as SprinkMate
 
@@ -98,4 +98,4 @@ For me, the story starts with the people in these photos. Their questions helped
 
 ---
 
-The project story draws on the original 15-slide Sprink pitch deck and the repository’s development records. The two interview photographs were extracted directly from slide 3. See [media sources](media/README.md) for the asset details.
+I have kept the two interview photos from slide 3 of our original 15-slide pitch deck alongside this account of the project. The competition details come from that deck, and the later Boston work is documented in the repository. The [media sources](media/README.md) list where each image came from.
