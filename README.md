@@ -1,3 +1,5 @@
+<p align="right"><strong>English</strong> | <a href="README.ja.md">日本語</a></p>
+
 # SprinkMate
 
 ### 🏆 2nd Place · $10,000 team Special Prize

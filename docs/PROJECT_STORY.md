@@ -1,3 +1,5 @@
+<p align="right"><strong>English</strong> | <a href="PROJECT_STORY.ja.md">日本語</a></p>
+
 # Building Sprink: the people behind the project
 
 ### 🏆 2nd Place · $10,000 team Special Prize
