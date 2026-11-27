@@ -8,6 +8,29 @@ Built on the [Innovation Cup 2026 Sprink project](https://github.com/my-name-is-
 
 [**Project progress and evidence**](PROGRESS.md) · [Run locally](sprink/docs/boston-setup.md) · [Source research](sprink/docs/boston-source-findings.md) · [Development setup](sprink/README.md)
 
+## The story behind Sprink
+
+I built Sprink with **Yu Yoshimuta** for the **Recruit Holdings Innovation Cup 2026**, as team **KumoPath**. I was studying at Ritsumeikan University in Osaka, and Yu was at Keio University in Tokyo. We started by speaking to people doing sprinkler installation and building maintenance, then built the prototype around the work they described.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/media/story/san-francisco-fitter-interviews.jpg" alt="Jake with sprinkler fitters Jack and Jose during field interviews in the San Francisco area"></td>
+<td width="50%"><img src="docs/media/story/hotel-maintenance-interview.jpg" alt="Jake meeting Kareem, chief maintenance engineer at the Hyatt Regency Hotel"></td>
+</tr>
+<tr>
+<td><sub><b>With Jack and Jose.</b> Talking with sprinkler fitters in the San Francisco area about finding the right requirements and handling changes on site.</sub></td>
+<td><sub><b>Meeting Kareem.</b> Learning about the practical needs of hotel maintenance from the Hyatt Regency chief maintenance engineer.</sub></td>
+</tr>
+</table>
+
+Those conversations shaped three parts of the product: find the original source, prepare the work from a confirmed drawing, and review a change when something on site gets in the way. We wanted the fitter to be able to see the source, understand the checks and decide what to do next.
+
+Our competition deck also recorded the **first paying crew: one customer purchasing three $20 monthly subscriptions, for $60 in the first month**. After a Sunday-morning Zoom test, the team received feedback that the tool had helped during a job later that day. It was an encouraging first result, with repeat use and time savings still to measure. These are results from the competition pitch, not a claim about current subscriptions.
+
+SprinkMate continues that work with a focus on Boston. The original workflows are preserved below, alongside the reference-library and source-research work added afterwards.
+
+**[Read the full project story →](docs/PROJECT_STORY.md)**
+
 ## Progress at a glance
 
 Progress report updated **November 13, 2026**. Implementation and source-research milestones below were committed on October 7; source dates remain explicit in the register.
